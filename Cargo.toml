@@ -1,0 +1,23 @@
+[package]
+name = "dar"
+description = "Dadyarri's Archiver"
+version = "0.2.0"
+authors = ["dadyarri <me@dadyarri.ru>"]
+autobins = false
+license = "MIT"
+edition = "2015"
+
+[[bin]]
+name = "dar"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.54", features = ["cargo"] }
+term = "0.5"
+zeekstd = "0.6.2"
+brotli = "8.0.2"
+clap_complete = "4.5.65"
+
+[build-dependencies]
+clap = "4.5.54"
+clap_complete = "4.5.65"
