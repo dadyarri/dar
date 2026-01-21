@@ -5,7 +5,7 @@ use term;
 // Some examples on how to use the term crate
 
 pub fn error(message: &str) {
-    if let Some(mut t) = term::stderr() {
+    match term::stderr() { Some(mut t) => {
         match t.fg(term::color::BRIGHT_RED) {
             Ok(_) => {
                 write!(t, "{}", message).unwrap();
@@ -13,14 +13,14 @@ pub fn error(message: &str) {
             },
             Err(_) => writeln!(t, "{}", message).unwrap()
         };
-    } else {
+    } _ => {
         eprint!("{}", message);
-    }
+    }}
 }
 
 
 pub fn success(message: &str) {
-    if let Some(mut t) = term::stdout() {
+    match term::stdout() { Some(mut t) => {
         match t.fg(term::color::GREEN) {
             Ok(_) => {
                 write!(t, "{}", message).unwrap();
@@ -28,8 +28,8 @@ pub fn success(message: &str) {
             },
             Err(_) => writeln!(t, "{}", message).unwrap()
         };
-    } else {
+    } _ => {
         eprint!("{}", message);
-    }
+    }}
 }
 

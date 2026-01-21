@@ -5,7 +5,7 @@ version = "0.2.0"
 authors = ["dadyarri <me@dadyarri.ru>"]
 autobins = false
 license = "MIT"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "dar"
