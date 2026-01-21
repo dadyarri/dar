@@ -4,6 +4,7 @@ extern crate term;
 
 mod cli;
 mod commands;
+mod models;
 mod terminal;
 
 fn main() -> eyre::Result<()> {

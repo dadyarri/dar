@@ -1,6 +1,18 @@
-struct ArchiveHeader {
-    version_prefix: String = "DAR",
-    version_number: u8 = 2,
+use std::io::Write;
+
+use eyre::Result;
+
+pub struct ArchiveHeader {}
+
+impl ArchiveHeader {
+    pub const VERSION_PREFIX: &[u8; 3] = b"DAR";
+    pub const VERSION_NUMBER: &[u8; 4] = b"0002";
+
+    pub fn write_to(buf: &mut Vec<u8>) -> Result<()> {
+        buf.write_all(Self::VERSION_PREFIX)?;
+        buf.write_all(Self::VERSION_NUMBER)?;
+        Ok(())
+    }
 }
 
 struct ArchiveEntry {
