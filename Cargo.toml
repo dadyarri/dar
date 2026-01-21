@@ -5,7 +5,7 @@ version = "0.2.0"
 authors = ["dadyarri <me@dadyarri.ru>"]
 autobins = false
 license = "MIT"
-edition = "2018"
+edition = "2021"
 
 [[bin]]
 name = "dar"
@@ -19,5 +19,5 @@ brotli = "8.0.2"
 clap_complete = "4.5.65"
 
 [build-dependencies]
-clap = "4.5.54"
+clap = { version = "4.5.54", features = ["cargo"] }
 clap_complete = "4.5.65"

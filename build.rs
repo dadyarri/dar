@@ -1,6 +1,4 @@
-#[macro_use]
-extern crate clap;
-extern crate clap_complete;
+use clap::{crate_authors, crate_description, crate_version};
 
 use clap::ValueEnum;
 use clap_complete::{generate_to, Shell};
