@@ -1,4 +1,4 @@
-use clap::{arg, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command, arg};
 
 pub fn build_cli() -> Command {
     Command::new("dar")
@@ -18,6 +18,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the resulting archive"),
                     Arg::new("verbose")
                         .short('v')
@@ -46,6 +47,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the archive to extract"),
                     Arg::new("out")
                         .short('C')
@@ -81,6 +83,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the archive to list"),
                     Arg::new("help")
                         .short('h')
@@ -97,6 +100,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the archive to list"),
                     Arg::new("help")
                         .short('h')
@@ -114,6 +118,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the archive to defragment"),
                     Arg::new("help")
                         .short('h')
@@ -130,6 +135,7 @@ pub fn build_cli() -> Command {
                         .long("file")
                         .action(ArgAction::Set)
                         .num_args(1)
+                        .required(true)
                         .help("Name of the archive to validate"),
                     Arg::new("help")
                         .short('h')
