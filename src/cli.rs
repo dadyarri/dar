@@ -1,4 +1,4 @@
-use clap::{Arg, ArgAction, Command};
+use clap::{arg, Arg, ArgAction, Command};
 
 pub fn build_cli() -> Command {
     Command::new("dar")
@@ -103,7 +103,7 @@ pub fn build_cli() -> Command {
                         .long("help")
                         .action(ArgAction::Help)
                         .help("Shows help of the command"),
-                    // specify path to data to add
+                    arg!(<ENTRY> "Entry (file or folder) to append"),
                 ]),
             Command::new("defragment")
                 .short_flag('d')
