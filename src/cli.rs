@@ -32,6 +32,11 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                         .conflicts_with("verbose")
                         .help("Enables progress bar"),
+                    Arg::new("content")
+                        .num_args(1..)
+                        .required(true)
+                        .action(ArgAction::Append)
+                        .help("Files/folders to add to archive"),
                     Arg::new("help")
                         .short('h')
                         .long("help")
@@ -156,7 +161,7 @@ pub fn build_cli() -> Command {
         ])
 }
 
-// Create: -cf <FILE> v (verbose) p (progress) h (help) --exclude <PATTERN> --exclude-from <FILE>
+// Create: -cf <FILE> v (verbose) p (progress) h (help) --exclude <PATTERN> --exclude-from <FILE> <CONTENT>
 // Extract: -xf <FILE> v (verbose) p (progress) h (help) -C <output dir>
 // List: -tf <FILE> h (help)
 // Append (new files to existing archive): -rf <FILE> <DIRECTORY/FILE> -v (verbose)
