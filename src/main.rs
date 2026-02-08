@@ -29,7 +29,7 @@ fn main() -> eyre::Result<()> {
             commands::defragment::call(&sub_matches);
         }
         Some(("validate", sub_matches)) => {
-            commands::validate::call(&sub_matches)?;
+            commands::validate::call(&sub_matches);
         }
         _ => unreachable!(),
     };

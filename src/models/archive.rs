@@ -1,37 +1,74 @@
 use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use eyre::Result;
 
-const COLUMNS_DELIMITER: [u8; 3] = [0u8; 3];
-const SECTION_DELIMITER: [u8; 512] = [0u8; 512];
-
-pub struct ArchiveHeader {}
+/// Archive header: 512 bytes fixed size
+/// Contains metadata for locating and validating archive sections
+pub struct ArchiveHeader {
+    pub data_section_start: u64,
+    pub index_section_start: u64,
+    pub total_files: u32,
+    pub created_timestamp: u64,
+    pub archive_checksum: [u8; 32], // BLAKE3 hash (computed last)
+}
 
 impl ArchiveHeader {
-    pub const VERSION_PREFIX: &'static [u8] = b"DAR";
-    pub const VERSION_NUMBER: &'static [u8] = b"0002";
+    pub const MAGIC: &'static [u8] = b"DAR\0";
+    pub const VERSION: &'static [u8] = b"0003";
+    pub const SIZE: usize = 512;
 
-    pub fn write_to(buf: &mut Vec<u8>) -> Result<()> {
-        buf.write_all(Self::VERSION_PREFIX)?;
-        buf.write_all(Self::VERSION_NUMBER)?;
-        Ok(())
-    }
-}
+    pub fn new(data_section_start: u64, index_section_start: u64, total_files: u32) -> Self {
+        let created_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
-pub struct ArchiveEntry {
-    data: Vec<u8>,
-}
-
-impl ArchiveEntry {
-    pub fn new(data: Vec<u8>) -> Self {
-        Self { data }
+        Self {
+            data_section_start,
+            index_section_start,
+            total_files,
+            created_timestamp,
+            archive_checksum: [0u8; 32],
+        }
     }
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
-        buf.write_all(&self.data)?;
-        buf.write_all(&SECTION_DELIMITER)?;
+        buf.write_all(Self::MAGIC)?;
+        buf.write_all(Self::VERSION)?;
+        buf.write_all(&self.data_section_start.to_be_bytes())?;
+        buf.write_all(&self.index_section_start.to_be_bytes())?;
+        buf.write_all(&self.total_files.to_be_bytes())?;
+        buf.write_all(&self.created_timestamp.to_be_bytes())?;
+        buf.write_all(&self.archive_checksum)?;
+        buf.push(0u8); // flags (reserved)
+
+        // Pad to 512 bytes
+        let current_size = buf.len() % Self::SIZE;
+        let padding = if current_size > 0 {
+            Self::SIZE - current_size
+        } else {
+            0
+        };
+        buf.write_all(&vec![0u8; padding])?;
+
         Ok(())
     }
+}
+
+/// Archive index entry: file metadata for later retrieval
+/// Each entry is prefixed with its length for safe parsing
+pub struct ArchiveIndexEntry {
+    pub path: String,
+    pub data_offset: u64,
+    pub uncompressed_size: u64,
+    pub compressed_size: u64,
+    pub compression_algorithm: CompressionAlgorithm,
+    pub modification_time: u64,
+    pub uid: u8,
+    pub gid: u8,
+    pub permissions: u16,
+    pub checksum: [u8; 32], // BLAKE3 of uncompressed data
 }
 
 #[repr(u8)]
@@ -43,110 +80,104 @@ pub enum CompressionAlgorithm {
 }
 
 impl CompressionAlgorithm {
-    pub fn write_to(&self, buf: &mut Vec<u8>) {
-        let byte: u8 = match self {
+    pub fn as_byte(&self) -> u8 {
+        match self {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Brotli => 1,
             CompressionAlgorithm::Zstandard => 2,
-        };
-        buf.push(byte);
+        }
     }
-}
-
-pub struct ArchiveIndexEntry {
-    pub offset: u64,
-    pub compression_algorithm: CompressionAlgorithm,
-    pub timestamp: u64,
-    pub uid: u8,
-    pub gid: u8,
-    pub perm: u16,
-    pub uncompressed_size: u64,
-    pub compressed_size: u64,
-    pub checksum: String,
-    pub path_length: u32,
-    pub path: String,
-    pub extra_length: u64,
-    pub extra: String,
 }
 
 impl ArchiveIndexEntry {
     pub fn new(
-        offset: u64,
         path: String,
+        data_offset: u64,
         uncompressed_size: u64,
     ) -> Self {
-        let path_length = path.len() as u32;
         Self {
-            offset,
+            path,
+            data_offset,
+            uncompressed_size,
+            compressed_size: 0,
             compression_algorithm: CompressionAlgorithm::None,
-            timestamp: 0,
+            modification_time: 0,
             uid: 0,
             gid: 0,
-            perm: 0o644,
-            uncompressed_size,
-            compressed_size: uncompressed_size,
-            checksum: String::new(),
-            path_length,
-            path,
-            extra_length: 0,
-            extra: String::new(),
+            permissions: 0o644,
+            checksum: [0u8; 32],
         }
     }
 
+    /// Write entry to buffer in binary format
+    /// Format: [entry_length: u32][path_length: u32][path: utf8][data_offset: u64][uncompressed_size: u64]
+    ///         [compressed_size: u64][compression_algo: u8][mod_time: u64][uid: u8][gid: u8][perm: u16][checksum: 32bytes]
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
-        buf.write_all(&self.offset.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        self.compression_algorithm.write_to(buf);
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.timestamp.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.uid.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.gid.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.perm.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
+        let start_len = buf.len();
+        
+        // Write placeholder for entry length (will be updated later)
+        buf.write_all(&0u32.to_be_bytes())?;
+        
+        // Write path
+        let path_bytes = self.path.as_bytes();
+        buf.write_all(&(path_bytes.len() as u32).to_be_bytes())?;
+        buf.write_all(path_bytes)?;
+        
+        // Write metadata
+        buf.write_all(&self.data_offset.to_be_bytes())?;
         buf.write_all(&self.uncompressed_size.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
         buf.write_all(&self.compressed_size.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.checksum.as_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.path_length.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.path.as_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.extra_length.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.extra.as_bytes())?;
-        buf.write_all(&SECTION_DELIMITER)?;
-
+        buf.write_all(&self.compression_algorithm.as_byte().to_be_bytes())?;
+        buf.write_all(&self.modification_time.to_be_bytes())?;
+        buf.write_all(&self.uid.to_be_bytes())?;
+        buf.write_all(&self.gid.to_be_bytes())?;
+        buf.write_all(&self.permissions.to_be_bytes())?;
+        buf.write_all(&self.checksum)?;
+        
+        // Calculate and update entry length (excluding the 4-byte length field itself)
+        let entry_len = (buf.len() - start_len - 4) as u32;
+        buf[start_len..start_len + 4].copy_from_slice(&entry_len.to_be_bytes());
+        
         Ok(())
     }
 }
 
+/// Archive end record: 64 bytes fixed size
+/// Located at the end of the archive for quick validation and index location
 pub struct ArchiveEndRecord {
     pub index_offset: u64,
     pub index_length: u64,
-    pub archive_checksum: String,
+    pub archive_checksum: [u8; 32], // BLAKE3 of entire archive
 }
 
 impl ArchiveEndRecord {
+    pub const MAGIC: &'static [u8] = b"DEND";
+    pub const SIZE: usize = 64;
+
     pub fn new(index_offset: u64, index_length: u64) -> Self {
         Self {
             index_offset,
             index_length,
-            archive_checksum: String::new(),
+            archive_checksum: [0u8; 32],
         }
     }
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
+        buf.write_all(Self::MAGIC)?;
         buf.write_all(&self.index_offset.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
         buf.write_all(&self.index_length.to_be_bytes())?;
-        buf.write_all(&COLUMNS_DELIMITER)?;
-        buf.write_all(&self.archive_checksum.as_bytes())?;
-        buf.write_all(&SECTION_DELIMITER)?;
+        buf.write_all(&self.archive_checksum)?;
+        buf.push(0u8); // flags (reserved)
+        
+        // Pad to 64 bytes
+        let current_size = buf.len() % Self::SIZE;
+        let padding = if current_size > 0 {
+            Self::SIZE - current_size
+        } else {
+            0
+        };
+        buf.write_all(&vec![0u8; padding])?;
+        
         Ok(())
     }
 }

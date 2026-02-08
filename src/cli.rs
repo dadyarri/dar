@@ -169,19 +169,54 @@ pub fn build_cli() -> Command {
 // Validate (check if existing archive is valid): -Vf <FILE> -v (verbose) -s (slow, validating CRC of all files)
 //
 //
-// ARCHIVE FORMAT
-// ==============
+// ARCHIVE FORMAT (v0003)
+// ======================
+// Designed for efficient random access parsing, validation, and listing.
 //
-// DAR[4_PADDED_VERSION]
-// [512_BYTES_OF_ZERO]
-// [DATA]
-// [512_BYTES_OF_ZERO]
-// [DATA]
-// [512_BYTES_OF_ZERO]
-// ...
-// [512_BYTES_OF_ZERO]
-// [512_BYTES_OF_ZERO]
-// [OFFSET][COMPRESSION_ALGO][TIMESTAMP][UID][GID][PERM][UNCOMPRESSED_SIZE][COMPRESSED_SIZE][BLAKE3_CHECKSUM][PATH_LENGTH][PATH][EXTRA_FIELDS_LENGTH][EXTRA_FIELDS]
-// [512_BYTES_OF_ZERO]
-// [512_BYTES_OF_ZERO]
-// [INDX_OFFSET][INDX_LENGTH][BLAKE3_CHECKSUM_OF_ENTIRE_ARCHIVE]
+// STRUCTURE:
+// [HEADER: 512 bytes fixed size]
+//   Magic (4 bytes):                "DAR\0"
+//   Version (4 bytes):              0003 (padded)
+//   Data Section Start (8 bytes):   u64 big-endian offset
+//   Index Section Start (8 bytes):  u64 big-endian offset
+//   Total Files (4 bytes):          u32 big-endian count
+//   Created Timestamp (8 bytes):    u64 big-endian UNIX time
+//   Archive Checksum (32 bytes):    BLAKE3 of entire archive (computed last)
+//   Flags (1 byte):                 reserved bits
+//   [Padding: remaining to 512 bytes]
+//
+// [DATA SECTION]
+//   For each file entry:
+//     Entry Length (8 bytes):       u64 big-endian (excludes this 8-byte field)
+//     Compressed Data:              [entry_length bytes]
+//
+// [INDEX SECTION]
+//   Entry Count (4 bytes):          u32 big-endian count (matches header total_files)
+//   For each index entry:
+//     Entry Length (4 bytes):       u32 big-endian (excludes this 4-byte field)
+//     Path Length (4 bytes):        u32 big-endian
+//     Path:                         [path_length UTF-8 bytes]
+//     Data Offset (8 bytes):        u64 big-endian offset into data section
+//     Uncompressed Size (8 bytes):  u64 big-endian
+//     Compressed Size (8 bytes):    u64 big-endian
+//     Compression Algo (1 byte):    0=None, 1=Brotli, 2=Zstandard
+//     Modification Time (8 bytes):  u64 big-endian UNIX timestamp
+//     UID (1 byte):                 user ID (Unix only)
+//     GID (1 byte):                 group ID (Unix only)
+//     Permissions (2 bytes):        u16 big-endian mode bits
+//     Checksum (32 bytes):          BLAKE3 of uncompressed data
+//
+// [END RECORD: 64 bytes fixed size]
+//   Magic (4 bytes):                "DEND"
+//   Index Offset (8 bytes):         u64 big-endian
+//   Index Length (8 bytes):         u64 big-endian
+//   Archive Checksum (32 bytes):    BLAKE3 of entire archive
+//   Flags (1 byte):                 reserved
+//   [Padding: 11 bytes]
+//
+// ADVANTAGES:
+// - Fixed header/end records enable quick seeks
+// - Length-prefixed entries allow safe skipping
+// - Index completely separate from data for parallel access
+// - End record checksum enables integrity verification
+// - Structured format makes validation straightforward

@@ -12,6 +12,8 @@ use crate::terminal::success;
 
 const CHUNK_SIZE: usize = 512 * 1024; // 512KB
 
+/// File metadata collected during archiving
+/// Used to build the index entries in the final archive
 struct FileMetadata {
     path: String,
     offset: u64,
@@ -22,7 +24,7 @@ struct FileMetadata {
     uid: u8,
     gid: u8,
     perm: u16,
-    checksum: String,
+    checksum: [u8; 32],
 }
 
 pub fn call(matches: &ArgMatches) -> Result<()> {
@@ -40,10 +42,16 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
     println!("Creating new archive {}...", file);
 
+    // Reserve space for header (512 bytes)
     let mut archive_bytes: Vec<u8> = Vec::new();
-    ArchiveHeader::write_to(&mut archive_bytes)?;
+    let header_offset = archive_bytes.len();
+    let dummy_header = ArchiveHeader::new(0, 0, 0);
+    dummy_header.write_to(&mut archive_bytes)?;
 
+    // Data section starts after header
+    let data_section_start = archive_bytes.len() as u64;
     let mut index_entries: Vec<FileMetadata> = Vec::new();
+    let mut file_count = 0u32;
 
     for item in content {
         let relative_path = Path::new(item);
@@ -59,7 +67,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
                 let entry = entry?;
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     let file_path = entry.path();
-                    let current_offset = archive_bytes.len() as u64;
+                    let current_offset = (archive_bytes.len() - data_section_start as usize) as u64;
                     let file_size = metadata(file_path)?.len();
                     let algorithm = get_compression_algorithm(file_path);
                     
@@ -85,10 +93,11 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
                         perm: file_meta.perm,
                         checksum: file_meta.checksum,
                     });
+                    file_count += 1;
                 }
             }
         } else if absolute_path.is_file() {
-            let current_offset = archive_bytes.len() as u64;
+            let current_offset = (archive_bytes.len() - data_section_start as usize) as u64;
             let file_size = metadata(&absolute_path)?.len();
             let algorithm = get_compression_algorithm(&absolute_path);
             
@@ -117,36 +126,59 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
                 perm: file_meta.perm,
                 checksum: file_meta.checksum,
             });
+            file_count += 1;
         } else {
             println!("Skipping (not file/dir): {:?}", absolute_path);
         }
     }
 
-    // Write index
-    let index_offset = archive_bytes.len() as u64;
+    // Index section starts after data
+    let index_section_start = archive_bytes.len() as u64;
     let index_start_len = archive_bytes.len();
 
+    // Write index entry count
+    archive_bytes.write_all(&file_count.to_be_bytes())?;
+
+    // Write each index entry
     for entry in index_entries {
         let mut index_entry = ArchiveIndexEntry::new(
-            entry.offset,
             entry.path,
+            entry.offset,
             entry.uncompressed_size,
         );
         index_entry.compression_algorithm = entry.algorithm;
         index_entry.compressed_size = entry.compressed_size;
-        index_entry.timestamp = entry.timestamp;
+        index_entry.modification_time = entry.timestamp;
         index_entry.uid = entry.uid;
         index_entry.gid = entry.gid;
-        index_entry.perm = entry.perm;
+        index_entry.permissions = entry.perm;
         index_entry.checksum = entry.checksum;
         index_entry.write_to(&mut archive_bytes)?;
     }
 
     let index_length = (archive_bytes.len() - index_start_len) as u64;
 
-    // Write end record
-    let end_record = ArchiveEndRecord::new(index_offset, index_length);
+    // End record section starts after index
+    let end_record_offset = archive_bytes.len() as u64;
+
+    // Write end record with placeholder checksum
+    let end_record = ArchiveEndRecord::new(index_section_start, index_length);
     end_record.write_to(&mut archive_bytes)?;
+
+    // Calculate and update header with offsets and file count
+    let mut header = ArchiveHeader::new(data_section_start, index_section_start, file_count);
+    
+    // Calculate archive checksum (everything except the checksum field itself in header)
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&archive_bytes[0..header_offset + 24]); // up to archive_checksum field in header
+    hasher.update(&[0u8; 32]); // skip checksum field
+    hasher.update(&archive_bytes[header_offset + 56..]); // rest of archive
+    let archive_hash = hasher.finalize();
+    header.archive_checksum.copy_from_slice(archive_hash.as_bytes());
+    
+    // Update both header and end record with the same checksum
+    archive_bytes[header_offset + 24..header_offset + 56].copy_from_slice(archive_hash.as_bytes());
+    archive_bytes[end_record_offset as usize + 20..end_record_offset as usize + 52].copy_from_slice(archive_hash.as_bytes());
 
     let mut archive_file = File::create(file)?;
     archive_file.write_all(&archive_bytes)?;
@@ -268,7 +300,9 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
             eprintln!(); // newline after progress
         }
 
-        let checksum = blake3::hash(&all_data).to_hex().to_string();
+        let hash = blake3::hash(&all_data);
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(hash.as_bytes());
         
         let compressed_data = match algorithm {
             CompressionAlgorithm::None => all_data.clone(),
@@ -277,8 +311,11 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
         };
 
         let compressed_size = compressed_data.len() as u64;
+        
+        // Write entry length prefix
+        archive_bytes.write_all(&(compressed_data.len() as u64).to_be_bytes())?;
+        // Write compressed data
         archive_bytes.write_all(&compressed_data)?;
-        archive_bytes.write_all(&SECTION_DELIMITER)?;
 
         Ok(FileMetadata {
             path: path.display().to_string(),
@@ -296,7 +333,9 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
         // Small file: read all at once
         let data = std::fs::read(path)?;
         
-        let checksum = blake3::hash(&data).to_hex().to_string();
+        let hash = blake3::hash(&data);
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(hash.as_bytes());
         
         let compressed_data = match algorithm {
             CompressionAlgorithm::None => data.clone(),
@@ -305,8 +344,11 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
         };
 
         let compressed_size = compressed_data.len() as u64;
+        
+        // Write entry length prefix
+        archive_bytes.write_all(&(compressed_data.len() as u64).to_be_bytes())?;
+        // Write compressed data
         archive_bytes.write_all(&compressed_data)?;
-        archive_bytes.write_all(&SECTION_DELIMITER)?;
 
         Ok(FileMetadata {
             path: path.display().to_string(),
@@ -338,5 +380,3 @@ fn compress_zstandard(data: &[u8]) -> Result<Vec<u8>> {
     zstd::encode_all(std::io::Cursor::new(data), 3)
         .map_err(|e| eyre!("Zstandard compression error: {}", e))
 }
-
-const SECTION_DELIMITER: [u8; 512] = [0u8; 512];
