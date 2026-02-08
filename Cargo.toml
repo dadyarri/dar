@@ -19,6 +19,9 @@ brotli = "8.0.2"
 clap_complete = "4.5.65"
 eyre = "0.6.12"
 color-eyre = "0.6.5"
+ignore = "0.4"
+zstd = "0.13"
+blake3 = "1.5"
 
 [build-dependencies]
 clap = { version = "4.5.54", features = ["cargo"] }
