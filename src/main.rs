@@ -20,7 +20,7 @@ fn main() -> eyre::Result<()> {
             commands::extract::call(&sub_matches);
         }
         Some(("list", sub_matches)) => {
-            commands::list::call(&sub_matches);
+            commands::list::call(&sub_matches)?;
         }
         Some(("append", sub_matches)) => {
             commands::append::call(&sub_matches);
