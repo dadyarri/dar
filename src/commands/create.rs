@@ -157,7 +157,6 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     }
 
     let index_length = (archive_bytes.len() - index_start_len) as u64;
-
     // End record section starts after index
     let end_record_offset = archive_bytes.len() as u64;
 
@@ -165,19 +164,33 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let end_record = ArchiveEndRecord::new(index_section_start, index_length);
     end_record.write_to(&mut archive_bytes)?;
 
-    // Calculate and update header with offsets and file count
-    let mut header = ArchiveHeader::new(data_section_start, index_section_start, file_count);
-    
-    // Calculate archive checksum (everything except the checksum field itself in header)
+    // Update header with correct offsets and file count (BEFORE checksum calculation)
+    // Bytes 8-15: data_section_start
+    archive_bytes[header_offset + 8..header_offset + 16].copy_from_slice(&data_section_start.to_be_bytes());
+    // Bytes 16-23: index_section_start
+    archive_bytes[header_offset + 16..header_offset + 24].copy_from_slice(&index_section_start.to_be_bytes());
+    // Bytes 24-27: total_files
+    archive_bytes[header_offset + 24..header_offset + 28].copy_from_slice(&file_count.to_be_bytes());
+
+    // NOW calculate archive checksum (everything except the checksum fields themselves)
+    // Skip bytes 36-67 in header (where archive_checksum is stored)
     let mut hasher = blake3::Hasher::new();
-    hasher.update(&archive_bytes[0..header_offset + 24]); // up to archive_checksum field in header
-    hasher.update(&[0u8; 32]); // skip checksum field
-    hasher.update(&archive_bytes[header_offset + 56..]); // rest of archive
-    let archive_hash = hasher.finalize();
-    header.archive_checksum.copy_from_slice(archive_hash.as_bytes());
+    hasher.update(&archive_bytes[0..36]); // header up to checksum field
+    hasher.update(&[0u8; 32]); // skip checksum field in header
+    hasher.update(&archive_bytes[68..end_record_offset as usize]); // rest up to end record
     
-    // Update both header and end record with the same checksum
-    archive_bytes[header_offset + 24..header_offset + 56].copy_from_slice(archive_hash.as_bytes());
+    // Also skip checksum in end record (bytes 20-51 within the 64-byte end record)
+    let end_record_start = end_record_offset as usize;
+    hasher.update(&archive_bytes[end_record_start..end_record_start + 20]); // magic + offsets
+    hasher.update(&[0u8; 32]); // skip checksum in end record
+    hasher.update(&archive_bytes[end_record_start + 52..]); // rest of end record
+    let archive_hash = hasher.finalize();
+    
+    // Update both checksums
+    // Bytes 36-68: archive_checksum in header
+    archive_bytes[header_offset + 36..header_offset + 68].copy_from_slice(archive_hash.as_bytes());
+    
+    // Checksum in end record is at offset 20-52 within the 64-byte end record
     archive_bytes[end_record_offset as usize + 20..end_record_offset as usize + 52].copy_from_slice(archive_hash.as_bytes());
 
     let mut archive_file = File::create(file)?;

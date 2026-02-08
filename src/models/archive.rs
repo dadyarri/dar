@@ -34,6 +34,8 @@ impl ArchiveHeader {
     }
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
+        let start_pos = buf.len();
+        
         buf.write_all(Self::MAGIC)?;
         buf.write_all(Self::VERSION)?;
         buf.write_all(&self.data_section_start.to_be_bytes())?;
@@ -43,10 +45,10 @@ impl ArchiveHeader {
         buf.write_all(&self.archive_checksum)?;
         buf.push(0u8); // flags (reserved)
 
-        // Pad to 512 bytes
-        let current_size = buf.len() % Self::SIZE;
-        let padding = if current_size > 0 {
-            Self::SIZE - current_size
+        // Pad to exactly 512 bytes from start position
+        let bytes_written = buf.len() - start_pos;
+        let padding = if bytes_written < Self::SIZE {
+            Self::SIZE - bytes_written
         } else {
             0
         };
@@ -163,16 +165,18 @@ impl ArchiveEndRecord {
     }
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
+        let start_pos = buf.len();
+        
         buf.write_all(Self::MAGIC)?;
         buf.write_all(&self.index_offset.to_be_bytes())?;
         buf.write_all(&self.index_length.to_be_bytes())?;
         buf.write_all(&self.archive_checksum)?;
         buf.push(0u8); // flags (reserved)
         
-        // Pad to 64 bytes
-        let current_size = buf.len() % Self::SIZE;
-        let padding = if current_size > 0 {
-            Self::SIZE - current_size
+        // Pad to exactly 64 bytes from start position
+        let bytes_written = buf.len() - start_pos;
+        let padding = if bytes_written < Self::SIZE {
+            Self::SIZE - bytes_written
         } else {
             0
         };
