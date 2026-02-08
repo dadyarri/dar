@@ -173,13 +173,12 @@ fn truncate_path(path: &str, max_width: usize) -> String {
         return path.to_string();
     }
 
-    // Target lengths for prefix and suffix
+    // Target lengths for prefix
     let prefix_len = 27;
-    let suffix_len = 30;
 
     // Find safe prefix (respect UTF-8 boundaries)
     let mut safe_prefix = 0;
-    for (i, c) in path.chars().enumerate() {
+    for (_i, c) in path.chars().enumerate() {
         if safe_prefix >= prefix_len {
             break;
         }
