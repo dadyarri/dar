@@ -18,7 +18,7 @@ fn main() -> eyre::Result<()> {
             commands::create::call(&sub_matches)?;
         }
         Some(("extract", sub_matches)) => {
-            commands::extract::call(&sub_matches);
+            commands::extract::call(&sub_matches)?;
         }
         Some(("list", sub_matches)) => {
             commands::list::call(&sub_matches)?;

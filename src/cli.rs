@@ -73,6 +73,10 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                         .conflicts_with("verbose")
                         .help("Enables progress bar"),
+                    Arg::new("entries")
+                        .num_args(0..)
+                        .action(ArgAction::Append)
+                        .help("Specific files or directories to extract (optional, extracts all if not specified)"),
                     Arg::new("help")
                         .short('h')
                         .long("help")
