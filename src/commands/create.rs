@@ -206,8 +206,8 @@ fn get_compression_algorithm(path: &Path) -> CompressionAlgorithm {
     if let Some(ext) = path.extension() {
         let ext = ext.to_string_lossy().to_lowercase();
         match ext.as_str() {
-            // Source code - use Brotli (excellent for text)
-            "rs" | "py" | "js" | "c" | "h" | "cpp" | "cc" | "cxx" | "go" | "java" | "rb" | "tsx" | "jsx" | "css" | "html" | "json" | "yaml" | "yml" | "xml" | "txt" | "md" | "toml" | "sh" | "bash" | "scala" | "kt" | "cs" | "vb" | "php" | "pl" | "lua" | "vim" | "lisp" | "clj" | "ex" | "erl" | "gradle" | "maven" | "sbt" => CompressionAlgorithm::Brotli,
+            // Source code - use LZMA (best compression for text)
+            "rs" | "py" | "js" | "c" | "h" | "cpp" | "cc" | "cxx" | "go" | "java" | "rb" | "tsx" | "jsx" | "css" | "html" | "json" | "yaml" | "yml" | "xml" | "txt" | "md" | "toml" | "sh" | "bash" | "scala" | "kt" | "cs" | "vb" | "php" | "pl" | "lua" | "vim" | "lisp" | "clj" | "ex" | "erl" | "gradle" | "maven" | "sbt" => CompressionAlgorithm::Lzma,
             
             // Images - already compressed, skip
             "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "ico" | "bmp" | "tiff" | "psd" | "heic" => CompressionAlgorithm::None,
@@ -321,6 +321,7 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
             CompressionAlgorithm::None => all_data.clone(),
             CompressionAlgorithm::Brotli => compress_brotli(&all_data)?,
             CompressionAlgorithm::Zstandard => compress_zstandard(&all_data)?,
+            CompressionAlgorithm::Lzma => compress_lzma(&all_data)?,
         };
 
         let compressed_size = compressed_data.len() as u64;
@@ -354,6 +355,7 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
             CompressionAlgorithm::None => data.clone(),
             CompressionAlgorithm::Brotli => compress_brotli(&data)?,
             CompressionAlgorithm::Zstandard => compress_zstandard(&data)?,
+            CompressionAlgorithm::Lzma => compress_lzma(&data)?,
         };
 
         let compressed_size = compressed_data.len() as u64;
@@ -380,16 +382,28 @@ fn add_file(path: &Path, archive_bytes: &mut Vec<u8>, progress: bool, algorithm:
 
 fn compress_brotli(data: &[u8]) -> Result<Vec<u8>> {
     let mut output = Vec::new();
+    let mut params = brotli::enc::BrotliEncoderParams::default();
+    params.quality = 11; // Maximum quality
+    params.lgwin = 24;   // Larger window size for better compression
     brotli::BrotliCompress(
         &mut std::io::Cursor::new(data),
         &mut output,
-        &brotli::enc::BrotliEncoderParams::default(),
+        &params,
     )
     .map_err(|e| eyre!("Brotli compression error: {}", e))?;
     Ok(output)
 }
 
 fn compress_zstandard(data: &[u8]) -> Result<Vec<u8>> {
-    zstd::encode_all(std::io::Cursor::new(data), 3)
+    zstd::encode_all(std::io::Cursor::new(data), 19) // Level 19 for better compression
         .map_err(|e| eyre!("Zstandard compression error: {}", e))
+}
+
+fn compress_lzma(data: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut output = Vec::new();
+    let mut encoder = xz2::write::XzEncoder::new(&mut output, 9); // Maximum compression
+    encoder.write_all(data)?;
+    encoder.finish()?;
+    Ok(output)
 }

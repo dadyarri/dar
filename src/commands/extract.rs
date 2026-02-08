@@ -196,6 +196,13 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
                 zstd::decode_all(std::io::Cursor::new(&compressed_data))
                     .map_err(|e| eyre!("Failed to decompress {} with Zstandard: {}", entry.path, e))?
             }
+            CompressionAlgorithm::Lzma => {
+                let mut decompressed = Vec::new();
+                xz2::read::XzDecoder::new(std::io::Cursor::new(&compressed_data))
+                    .read_to_end(&mut decompressed)
+                    .map_err(|e| eyre!("Failed to decompress {} with LZMA: {}", entry.path, e))?;
+                decompressed
+            }
         };
 
         // Verify uncompressed size matches

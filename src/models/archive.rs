@@ -15,7 +15,7 @@ pub struct ArchiveHeader {
 
 impl ArchiveHeader {
     pub const MAGIC: &'static [u8] = b"DAR\0";
-    pub const VERSION: &'static [u8] = b"0003";
+    pub const VERSION: &'static [u8] = b"0004";
     pub const SIZE: usize = 512;
 
     pub fn new(data_section_start: u64, index_section_start: u64, total_files: u32) -> Self {
@@ -79,6 +79,7 @@ pub enum CompressionAlgorithm {
     None,
     Brotli,
     Zstandard,
+    Lzma,
 }
 
 impl CompressionAlgorithm {
@@ -87,6 +88,7 @@ impl CompressionAlgorithm {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Brotli => 1,
             CompressionAlgorithm::Zstandard => 2,
+            CompressionAlgorithm::Lzma => 3,
         }
     }
 }

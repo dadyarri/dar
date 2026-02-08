@@ -1,7 +1,7 @@
 [package]
 name = "dar"
 description = "Dadyarri's Archiver"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["dadyarri <me@dadyarri.ru>"]
 autobins = false
 license = "MIT"
@@ -23,6 +23,7 @@ ignore = "0.4"
 zstd = "0.13"
 blake3 = "1.5"
 filetime = "0.2"
+xz2 = "0.1"
 
 [build-dependencies]
 clap = { version = "4.5.54", features = ["cargo"] }

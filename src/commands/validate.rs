@@ -292,7 +292,7 @@ fn read_header(file: &mut File) -> (Option<ArchiveHeader>, Result<()>) {
     match file.read_exact(&mut buf) {
         Ok(()) => {
             // Check magic and version
-            if &buf[0..3] != b"DAR" || &buf[4..8] != b"0003" {
+            if &buf[0..3] != b"DAR" || &buf[4..8] != ArchiveHeader::VERSION {
                 (None, Err(eyre!("Invalid header magic or version")))
             } else {
                 // Parse header fields (big-endian)
