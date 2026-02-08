@@ -6,6 +6,7 @@ mod cli;
 mod commands;
 mod models;
 mod terminal;
+mod pager;
 
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;

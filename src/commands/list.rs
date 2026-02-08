@@ -1,10 +1,11 @@
 use clap::ArgMatches;
 use eyre::Result;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::time::{UNIX_EPOCH, SystemTime};
 
-use crate::models::archive::{ArchiveHeader, ArchiveIndexEntry};
+use crate::models::archive::ArchiveHeader;
+use crate::pager::PagerWriter;
 
 pub fn call(matches: &ArgMatches) -> Result<()> {
     let file_path = matches.get_one::<String>("file").expect("File required");
@@ -31,7 +32,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         header_buf[20], header_buf[21], header_buf[22], header_buf[23],
     ]);
     
-    let total_files = u32::from_be_bytes([
+    let _total_files = u32::from_be_bytes([
         header_buf[24], header_buf[25], header_buf[26], header_buf[27],
     ]);
     
@@ -48,16 +49,19 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     file.read_exact(&mut entry_count_buf)?;
     let entry_count = u32::from_be_bytes(entry_count_buf);
     
+    // Create pager writer
+    let mut output = PagerWriter::new()?;
+    
     // Display archive header info
     let created_datetime = UNIX_EPOCH + std::time::Duration::from_secs(created_timestamp);
     let created_str = humanize_time(created_datetime);
     
-    println!("Archive: {}", file_path);
-    println!("Created: {}", created_str);
-    println!("Total Files: {}", entry_count);
-    println!("{:-<80}", "");
-    println!("{:<60} {:>8} {:>10}", "Path", "Size", "Compressed");
-    println!("{:-<80}", "");
+    writeln!(output, "Archive: {}", file_path)?;
+    writeln!(output, "Created: {}", created_str)?;
+    writeln!(output, "Total Files: {}", entry_count)?;
+    writeln!(output, "{:-<80}", "")?;
+    writeln!(output, "{:<60} {:>8} {:>10}", "Path", "Size", "Compressed")?;
+    writeln!(output, "{:-<80}", "")?;
     
     // Parse and display each index entry
     let mut total_uncompressed = 0u64;
@@ -82,7 +86,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         let mut offset = 4 + path_len;
         
         // Parse metadata
-        let data_offset = u64::from_be_bytes([
+        let _data_offset = u64::from_be_bytes([
             entry_buf[offset], entry_buf[offset+1], entry_buf[offset+2], entry_buf[offset+3],
             entry_buf[offset+4], entry_buf[offset+5], entry_buf[offset+6], entry_buf[offset+7],
         ]);
@@ -100,28 +104,24 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         ]);
         
         // Display entry
-        let display_path = if path.len() > 60 {
-            format!("{}...{}", &path[..27], &path[path.len()-30..])
-        } else {
-            path.clone()
-        };
+        let display_path = truncate_path(&path, 60);
         
-        println!("{:<60} {:>8} {:>10}",
+        writeln!(output, "{:<60} {:>8} {:>10}",
             display_path,
             format_size(uncompressed_size),
             format_size(compressed_size)
-        );
+        )?;
         
         total_uncompressed += uncompressed_size;
         total_compressed += compressed_size;
     }
     
-    println!("{:-<80}", "");
-    println!("{:<60} {:>8} {:>10}",
+    writeln!(output, "{:-<80}", "")?;
+    writeln!(output, "{:<60} {:>8} {:>10}",
         "TOTAL",
         format_size(total_uncompressed),
         format_size(total_compressed)
-    );
+    )?;
     
     Ok(())
 }
@@ -166,4 +166,36 @@ fn humanize_time(time: SystemTime) -> String {
         }
         Err(_) => "Unknown".to_string(),
     }
+}
+/// Safely truncate a UTF-8 string to a display width
+fn truncate_path(path: &str, max_width: usize) -> String {
+    if path.len() <= max_width {
+        return path.to_string();
+    }
+
+    // Target lengths for prefix and suffix
+    let prefix_len = 27;
+    let suffix_len = 30;
+
+    // Find safe prefix (respect UTF-8 boundaries)
+    let mut safe_prefix = 0;
+    for (i, c) in path.chars().enumerate() {
+        if safe_prefix >= prefix_len {
+            break;
+        }
+        safe_prefix += c.len_utf8();
+    }
+
+    // Find safe suffix (respect UTF-8 boundaries)
+    let mut safe_suffix_start = path.len();
+    let mut chars_counted = 0;
+    for c in path.chars().rev() {
+        if chars_counted >= 30 {
+            break;
+        }
+        safe_suffix_start -= c.len_utf8();
+        chars_counted += 1;
+    }
+
+    format!("{}...{}", &path[..safe_prefix], &path[safe_suffix_start..])
 }

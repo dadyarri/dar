@@ -1,11 +1,12 @@
 use clap::ArgMatches;
 use eyre::{Result, eyre};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::models::archive::{ArchiveHeader, ArchiveEndRecord};
 use crate::terminal::success;
+use crate::pager::PagerWriter;
 
 /// Validation levels
 #[allow(dead_code)]
@@ -26,16 +27,18 @@ struct ValidationContext {
     checks_passed: u32,
     checks_failed: u32,
     errors: Vec<String>,
+    output: Option<PagerWriter>,
 }
 
 impl ValidationContext {
-    fn new(file_size: u64, verbose: bool) -> Self {
+    fn new(file_size: u64, verbose: bool, output: PagerWriter) -> Self {
         Self {
             verbose,
             _file_size: file_size,
             checks_passed: 0,
             checks_failed: 0,
             errors: Vec::new(),
+            output: Some(output),
         }
     }
 
@@ -44,7 +47,9 @@ impl ValidationContext {
             Ok(()) => {
                 self.checks_passed += 1;
                 if self.verbose {
-                    println!("  ✓ {}", name);
+                    if let Some(ref mut out) = self.output {
+                        let _ = writeln!(out, "  ✓ {}", name);
+                    }
                 }
             }
             Err(e) => {
@@ -52,7 +57,9 @@ impl ValidationContext {
                 let msg = format!("{}: {}", name, e);
                 self.errors.push(msg.clone());
                 if self.verbose {
-                    println!("  ✗ {}", msg);
+                    if let Some(ref mut out) = self.output {
+                        let _ = writeln!(out, "  ✗ {}", msg);
+                    }
                 }
             }
         }
@@ -67,6 +74,14 @@ impl ValidationContext {
 
     fn is_valid(&self) -> bool {
         self.checks_failed == 0
+    }
+
+    fn writeln(&mut self, args: std::fmt::Arguments) -> std::io::Result<()> {
+        if let Some(ref mut out) = self.output {
+            writeln!(out, "{}", args)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -96,14 +111,15 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
 
     let file_size = std::fs::metadata(path)?.len();
     let mut file = File::open(path)?;
-    let mut ctx = ValidationContext::new(file_size, verbose);
+    let output = PagerWriter::new()?;
+    let mut ctx = ValidationContext::new(file_size, verbose, output);
 
-    println!("Validating archive: {}", path);
-    println!("File size: {} bytes", file_size);
-    println!();
+    let _ = ctx.writeln(format_args!("Validating archive: {}", path));
+    let _ = ctx.writeln(format_args!("File size: {} bytes", file_size));
+    let _ = ctx.writeln(format_args!(""));
 
     // Basic validation
-    println!("Basic Checks:");
+    let _ = ctx.writeln(format_args!("Basic Checks:"));
     ctx.check("Header present (≥512 bytes)", check_min_size(&file, 512));
     ctx.check("End record present (≥64 bytes)", check_min_size(&file, 64));
 
@@ -141,7 +157,7 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
         );
 
         // Archive checksum verification
-        println!("\nChecksum Verification:");
+        let _ = ctx.writeln(format_args!("\nChecksum Verification:"));
         match calculate_archive_checksum(&mut file, &h, file_size) {
             Ok(calculated) => {
                 ctx.check(
@@ -169,7 +185,7 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
 
     // Full validation (index parsing)
     if matches!(level, ValidationLevel::Full | ValidationLevel::Slow) {
-        println!("\nIndex Validation:");
+        let _ = ctx.writeln(format_args!("\nIndex Validation:"));
         if let Some(ref header) = header {
             match validate_index(&mut file, header) {
                 Ok((entry_count, index_entries)) => {
@@ -199,7 +215,7 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
 
     // Slow validation (entry checksums)
     if matches!(level, ValidationLevel::Slow) {
-        println!("\nEntry Checksum Verification (Slow Mode):");
+        let _ = ctx.writeln(format_args!("\nEntry Checksum Verification (Slow Mode):"));
         if let Some(ref header) = header {
             match validate_index(&mut file, header) {
                 Ok((_, index_entries)) => {
@@ -215,22 +231,23 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
                     }
                 }
                 Err(_) => {
-                    println!("  ✗ Cannot validate entries: index not readable");
+                    let _ = ctx.writeln(format_args!("  ✗ Cannot validate entries: index not readable"));
                 }
             }
         }
     }
 
     // Summary
-    println!("\n{}", "=".repeat(50));
-    println!("Validation Summary: {}", ctx.summary());
+    let _ = ctx.writeln(format_args!("\n{}", "=".repeat(50)));
+    let _ = ctx.writeln(format_args!("Validation Summary: {}", ctx.summary()));
 
     if ctx.is_valid() {
         success("Archive is valid!");
     } else {
-        println!("\nErrors found:");
-        for error in ctx.errors {
-            println!("  • {}", error);
+        let _ = ctx.writeln(format_args!("\nErrors found:"));
+        let errors = ctx.errors.clone();
+        for error in &errors {
+            let _ = ctx.writeln(format_args!("  • {}", error));
         }
         return Err(eyre!("Archive validation failed"));
     }
