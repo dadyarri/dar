@@ -2,11 +2,13 @@
 extern crate clap;
 extern crate term;
 
+mod archive;
 mod cli;
 mod commands;
 mod models;
-mod terminal;
 mod pager;
+mod terminal;
+mod validation;
 
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;

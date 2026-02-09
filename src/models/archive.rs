@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use eyre::Result;
+use eyre::{Error, Result, eyre};
 
 /// Archive header: 512 bytes fixed size
 /// Contains metadata for locating and validating archive sections
@@ -35,7 +35,7 @@ impl ArchiveHeader {
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
         let start_pos = buf.len();
-        
+
         buf.write_all(Self::MAGIC)?;
         buf.write_all(Self::VERSION)?;
         buf.write_all(&self.data_section_start.to_be_bytes())?;
@@ -82,23 +82,39 @@ pub enum CompressionAlgorithm {
     Lzma,
 }
 
-impl CompressionAlgorithm {
-    pub fn as_byte(&self) -> u8 {
-        match self {
+impl TryFrom<u8> for CompressionAlgorithm {
+    type Error = Error;
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        return match value {
+            0 => Ok(CompressionAlgorithm::None),
+            1 => Ok(CompressionAlgorithm::Brotli),
+            2 => Ok(CompressionAlgorithm::Zstandard),
+            3 => Ok(CompressionAlgorithm::Lzma),
+            _ => Err(eyre!("Invalid value for CompressionAlgorithm")),
+        };
+    }
+}
+
+impl Into<u8> for CompressionAlgorithm {
+    fn into(self: CompressionAlgorithm) -> u8 {
+        return match self {
             CompressionAlgorithm::None => 0,
             CompressionAlgorithm::Brotli => 1,
             CompressionAlgorithm::Zstandard => 2,
             CompressionAlgorithm::Lzma => 3,
-        }
+        };
+    }
+}
+
+impl CompressionAlgorithm {
+    pub fn as_byte(&self) -> u8 {
+        return *self as u8;
     }
 }
 
 impl ArchiveIndexEntry {
-    pub fn new(
-        path: String,
-        data_offset: u64,
-        uncompressed_size: u64,
-    ) -> Self {
+    pub fn new(path: String, data_offset: u64, uncompressed_size: u64) -> Self {
         Self {
             path,
             data_offset,
@@ -118,15 +134,15 @@ impl ArchiveIndexEntry {
     ///         [compressed_size: u64][compression_algo: u8][mod_time: u64][uid: u8][gid: u8][perm: u16][checksum: 32bytes]
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
         let start_len = buf.len();
-        
+
         // Write placeholder for entry length (will be updated later)
         buf.write_all(&0u32.to_be_bytes())?;
-        
+
         // Write path
         let path_bytes = self.path.as_bytes();
         buf.write_all(&(path_bytes.len() as u32).to_be_bytes())?;
         buf.write_all(path_bytes)?;
-        
+
         // Write metadata
         buf.write_all(&self.data_offset.to_be_bytes())?;
         buf.write_all(&self.uncompressed_size.to_be_bytes())?;
@@ -137,11 +153,11 @@ impl ArchiveIndexEntry {
         buf.write_all(&self.gid.to_be_bytes())?;
         buf.write_all(&self.permissions.to_be_bytes())?;
         buf.write_all(&self.checksum)?;
-        
+
         // Calculate and update entry length (excluding the 4-byte length field itself)
         let entry_len = (buf.len() - start_len - 4) as u32;
         buf[start_len..start_len + 4].copy_from_slice(&entry_len.to_be_bytes());
-        
+
         Ok(())
     }
 }
@@ -168,13 +184,13 @@ impl ArchiveEndRecord {
 
     pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
         let start_pos = buf.len();
-        
+
         buf.write_all(Self::MAGIC)?;
         buf.write_all(&self.index_offset.to_be_bytes())?;
         buf.write_all(&self.index_length.to_be_bytes())?;
         buf.write_all(&self.archive_checksum)?;
         buf.push(0u8); // flags (reserved)
-        
+
         // Pad to exactly 64 bytes from start position
         let bytes_written = buf.len() - start_pos;
         let padding = if bytes_written < Self::SIZE {
@@ -183,7 +199,7 @@ impl ArchiveEndRecord {
             0
         };
         buf.write_all(&vec![0u8; padding])?;
-        
+
         Ok(())
     }
 }
