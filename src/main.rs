@@ -8,6 +8,7 @@ mod commands;
 mod models;
 mod pager;
 mod terminal;
+mod utils;
 mod validation;
 
 fn main() -> eyre::Result<()> {

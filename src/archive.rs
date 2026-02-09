@@ -1,12 +1,16 @@
 use eyre::{Result, eyre};
 use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
+    fs::{File, metadata},
+    io::{Read, Seek, SeekFrom, Write},
+    path::Path,
+    time::SystemTime,
 };
 
 use crate::models::archive::{
     ArchiveEndRecord, ArchiveHeader, ArchiveIndexEntry, CompressionAlgorithm,
 };
+
+const CHUNK_SIZE: usize = 512 * 1024; // 512KB
 
 /// Read and parse archive header
 pub fn read_header(file: &mut File) -> (Option<ArchiveHeader>, Result<()>) {
@@ -183,6 +187,159 @@ pub fn parse_index_entry(file: &mut File) -> Result<ArchiveIndexEntry> {
         permissions,
         checksum,
     })
+}
+
+pub fn add_file(
+    path: &Path,
+    archive_bytes: &mut Vec<u8>,
+    progress: bool,
+) -> Result<ArchiveIndexEntry> {
+    let fs_meta = metadata(path)?;
+    let file_size = fs_meta.len() as usize;
+    let algorithm = get_compression_algorithm(path);
+    let mut data = Vec::new();
+    let timestamp = fs_meta
+        .modified()?
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs();
+
+    #[cfg(unix)]
+    let (uid, gid, perm) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            (fs_meta.uid() % 256) as u8,
+            (fs_meta.gid() % 256) as u8,
+            (fs_meta.mode() & 0o777) as u16,
+        )
+    };
+
+    #[cfg(not(unix))]
+    let (uid, gid, perm) = (0u8, 0u8, 0o644u16);
+
+    if file_size > CHUNK_SIZE {
+        // Large file: read in chunks, calculate checksum, compress, then write
+        let mut file = File::open(path)?;
+        let mut buffer = vec![0u8; CHUNK_SIZE];
+        let mut bytes_read_total = 0usize;
+
+        loop {
+            let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+
+            data.extend_from_slice(&buffer[..bytes_read]);
+            bytes_read_total += bytes_read;
+
+            if progress {
+                let percentage = (bytes_read_total as f64 / file_size as f64) * 100.0;
+                eprint!(
+                    "\r  {}: {:.1}% ({}/{}B)",
+                    path.display(),
+                    percentage,
+                    bytes_read_total,
+                    file_size
+                );
+            }
+        }
+
+        if progress {
+            eprintln!(); // newline after progress
+        }
+    } else {
+        // Small file: read all at once
+        data = std::fs::read(path)?;
+    }
+
+    let hash = blake3::hash(&data);
+    let mut checksum = [0u8; 32];
+    checksum.copy_from_slice(hash.as_bytes());
+
+    let compressed_data = compress_data(&data, algorithm)?;
+    let compressed_size = compressed_data.len() as u64;
+
+    archive_bytes.write_all(&compressed_size.to_be_bytes())?;
+    archive_bytes.write_all(&compressed_data)?;
+
+    Ok(ArchiveIndexEntry {
+        path: "".to_string(),
+        data_offset: 0,
+        uncompressed_size: file_size as u64,
+        compressed_size: compressed_size,
+        compression_algorithm: algorithm,
+        modification_time: timestamp,
+        uid: uid,
+        gid: gid,
+        permissions: perm,
+        checksum: checksum,
+    })
+}
+
+fn get_compression_algorithm(path: &Path) -> CompressionAlgorithm {
+    if let Some(ext) = path.extension() {
+        let ext = ext.to_string_lossy().to_lowercase();
+        match ext.as_str() {
+            // Source code - use LZMA (best compression for text)
+            "rs" | "py" | "js" | "c" | "h" | "cpp" | "cc" | "cxx" | "go" | "java" | "rb"
+            | "tsx" | "jsx" | "css" | "html" | "json" | "yaml" | "yml" | "xml" | "txt" | "md"
+            | "toml" | "sh" | "bash" | "scala" | "kt" | "cs" | "vb" | "php" | "pl" | "lua"
+            | "vim" | "lisp" | "clj" | "ex" | "erl" | "gradle" | "maven" | "sbt" => {
+                CompressionAlgorithm::Lzma
+            }
+
+            // Images - already compressed, skip
+            "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "ico" | "bmp" | "tiff" | "psd"
+            | "heic" => CompressionAlgorithm::None,
+
+            // Videos - already compressed, skip
+            "mp4" | "mkv" | "avi" | "mov" | "webm" | "flv" | "m4v" | "wmv" | "3gp" | "m2ts"
+            | "mts" | "ts" => CompressionAlgorithm::None,
+
+            // Audio - already compressed, skip
+            "mp3" | "aac" | "flac" | "wav" | "m4a" | "opus" => CompressionAlgorithm::None,
+
+            // Archives - already compressed
+            "zip" | "tar" | "gz" | "bz2" | "7z" | "rar" | "xz" => CompressionAlgorithm::None,
+
+            // Everything else - use Zstandard as safe default
+            _ => CompressionAlgorithm::Zstandard,
+        }
+    } else {
+        CompressionAlgorithm::Zstandard
+    }
+}
+
+pub fn compress_data(data: &Vec<u8>, algorithm: CompressionAlgorithm) -> Result<Vec<u8>> {
+    return match algorithm {
+        CompressionAlgorithm::None => Ok(data.clone()),
+        CompressionAlgorithm::Brotli => Ok(compress_brotli(data)?),
+        CompressionAlgorithm::Zstandard => Ok(compress_zstandard(data)?),
+        CompressionAlgorithm::Lzma => Ok(compress_lzma(data)?),
+    };
+}
+
+fn compress_brotli(data: &[u8]) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut params = brotli::enc::BrotliEncoderParams::default();
+    params.quality = 11; // Maximum quality
+    params.lgwin = 24; // Larger window size for better compression
+    brotli::BrotliCompress(&mut std::io::Cursor::new(data), &mut output, &params)
+        .map_err(|e| eyre!("Brotli compression error: {}", e))?;
+    Ok(output)
+}
+
+fn compress_zstandard(data: &[u8]) -> Result<Vec<u8>> {
+    zstd::encode_all(std::io::Cursor::new(data), 19) // Level 19 for better compression
+        .map_err(|e| eyre!("Zstandard compression error: {}", e))
+}
+
+fn compress_lzma(data: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut output = Vec::new();
+    let mut encoder = xz2::write::XzEncoder::new(&mut output, 9); // Maximum compression
+    encoder.write_all(data)?;
+    encoder.finish()?;
+    Ok(output)
 }
 
 pub fn decompress_data(compressed_data: Vec<u8>, entry: &ArchiveIndexEntry) -> Result<Vec<u8>> {
