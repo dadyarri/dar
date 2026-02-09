@@ -7,7 +7,7 @@ CLI utility to compress files and folders respecting .gitignore and automaticall
 - [x] List: -tf <FILE> h (help)
 - [ ] Append (new files to existing archive): -rf <FILE> <DIRECTORY/FILE> -v (verbose)
 - [ ] Defragment (remove old indexes): -df <FILE>
-- [x] Validate (check if existing archive is valid): -Vf <FILE> -v (verbose) -s (slow, validating CRC of all files)
+- [x] Validate (check if existing archive is valid): -vf <FILE> -v (verbose) -s (slow, validating CRC of all files)
 
 
 ARCHIVE FORMAT (v0004)
