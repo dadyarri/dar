@@ -9,16 +9,19 @@ use crate::terminal::success;
 
 pub fn call(matches: &ArgMatches) -> Result<()> {
     let file_path = matches.get_one::<String>("file").expect("File required");
-    let out_dir = matches.get_one::<String>("out").expect("Output directory required");
+    let out_dir = matches
+        .get_one::<String>("out")
+        .expect("Output directory required");
     let verbose = matches.get_flag("verbose");
     let _progress = matches.get_flag("progress");
 
-    let mut archive_file = File::open(file_path)
-        .map_err(|e| eyre!("Failed to open archive {}: {}", file_path, e))?;
+    let mut archive_file =
+        File::open(file_path).map_err(|e| eyre!("Failed to open archive {}: {}", file_path, e))?;
 
     // Read and parse header
     let mut header_buf = [0u8; ArchiveHeader::SIZE];
-    archive_file.read_exact(&mut header_buf)
+    archive_file
+        .read_exact(&mut header_buf)
         .map_err(|e| eyre!("Failed to read archive header: {}", e))?;
 
     // Verify magic
@@ -33,28 +36,41 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
     // Parse header fields
     let data_section_start = u64::from_be_bytes([
-        header_buf[8], header_buf[9], header_buf[10], header_buf[11],
-        header_buf[12], header_buf[13], header_buf[14], header_buf[15],
+        header_buf[8],
+        header_buf[9],
+        header_buf[10],
+        header_buf[11],
+        header_buf[12],
+        header_buf[13],
+        header_buf[14],
+        header_buf[15],
     ]);
 
     let index_section_start = u64::from_be_bytes([
-        header_buf[16], header_buf[17], header_buf[18], header_buf[19],
-        header_buf[20], header_buf[21], header_buf[22], header_buf[23],
+        header_buf[16],
+        header_buf[17],
+        header_buf[18],
+        header_buf[19],
+        header_buf[20],
+        header_buf[21],
+        header_buf[22],
+        header_buf[23],
     ]);
 
     println!("Extracting archive {}...", file_path);
 
     // Create output directory if it doesn't exist
-    create_dir_all(out_dir)
-        .map_err(|e| eyre!("Failed to create output directory: {}", e))?;
+    create_dir_all(out_dir).map_err(|e| eyre!("Failed to create output directory: {}", e))?;
 
     // Seek to index section and read all entries
-    archive_file.seek(std::io::SeekFrom::Start(index_section_start))
+    archive_file
+        .seek(std::io::SeekFrom::Start(index_section_start))
         .map_err(|e| eyre!("Failed to seek to index section: {}", e))?;
 
     // Read entry count
     let mut entry_count_buf = [0u8; 4];
-    archive_file.read_exact(&mut entry_count_buf)
+    archive_file
+        .read_exact(&mut entry_count_buf)
         .map_err(|e| eyre!("Failed to read entry count: {}", e))?;
     let entry_count = u32::from_be_bytes(entry_count_buf);
 
@@ -79,7 +95,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
             return Err(eyre!("Failed to read entry length for entry {}", i));
         }
         let entry_len = u32::from_be_bytes(entry_len_buf) as usize;
-        
+
         if entry_len == 0 {
             return Err(eyre!("Entry {} has length 0, which is invalid", i));
         }
@@ -87,13 +103,16 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         // Read entire entry
         let mut entry_buf = vec![0u8; entry_len];
         if archive_file.read_exact(&mut entry_buf).is_err() {
-            return Err(eyre!("Failed to read entry {} data (expected {} bytes)", i, entry_len));
+            return Err(eyre!(
+                "Failed to read entry {} data (expected {} bytes)",
+                i,
+                entry_len
+            ));
         }
 
         // Parse path
-        let path_len = u32::from_be_bytes([
-            entry_buf[0], entry_buf[1], entry_buf[2], entry_buf[3],
-        ]) as usize;
+        let path_len =
+            u32::from_be_bytes([entry_buf[0], entry_buf[1], entry_buf[2], entry_buf[3]]) as usize;
 
         let path = String::from_utf8(entry_buf[4..4 + path_len].to_vec())
             .map_err(|e| eyre!("Invalid UTF-8 in path for entry {}: {}", i, e))?;
@@ -101,20 +120,38 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
         // Parse metadata
         let data_offset = u64::from_be_bytes([
-            entry_buf[offset], entry_buf[offset+1], entry_buf[offset+2], entry_buf[offset+3],
-            entry_buf[offset+4], entry_buf[offset+5], entry_buf[offset+6], entry_buf[offset+7],
+            entry_buf[offset],
+            entry_buf[offset + 1],
+            entry_buf[offset + 2],
+            entry_buf[offset + 3],
+            entry_buf[offset + 4],
+            entry_buf[offset + 5],
+            entry_buf[offset + 6],
+            entry_buf[offset + 7],
         ]);
         offset += 8;
 
         let uncompressed_size = u64::from_be_bytes([
-            entry_buf[offset], entry_buf[offset+1], entry_buf[offset+2], entry_buf[offset+3],
-            entry_buf[offset+4], entry_buf[offset+5], entry_buf[offset+6], entry_buf[offset+7],
+            entry_buf[offset],
+            entry_buf[offset + 1],
+            entry_buf[offset + 2],
+            entry_buf[offset + 3],
+            entry_buf[offset + 4],
+            entry_buf[offset + 5],
+            entry_buf[offset + 6],
+            entry_buf[offset + 7],
         ]);
         offset += 8;
 
         let compressed_size = u64::from_be_bytes([
-            entry_buf[offset], entry_buf[offset+1], entry_buf[offset+2], entry_buf[offset+3],
-            entry_buf[offset+4], entry_buf[offset+5], entry_buf[offset+6], entry_buf[offset+7],
+            entry_buf[offset],
+            entry_buf[offset + 1],
+            entry_buf[offset + 2],
+            entry_buf[offset + 3],
+            entry_buf[offset + 4],
+            entry_buf[offset + 5],
+            entry_buf[offset + 6],
+            entry_buf[offset + 7],
         ]);
         offset += 8;
 
@@ -122,8 +159,14 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         offset += 1;
 
         let modification_time = u64::from_be_bytes([
-            entry_buf[offset], entry_buf[offset+1], entry_buf[offset+2], entry_buf[offset+3],
-            entry_buf[offset+4], entry_buf[offset+5], entry_buf[offset+6], entry_buf[offset+7],
+            entry_buf[offset],
+            entry_buf[offset + 1],
+            entry_buf[offset + 2],
+            entry_buf[offset + 3],
+            entry_buf[offset + 4],
+            entry_buf[offset + 5],
+            entry_buf[offset + 6],
+            entry_buf[offset + 7],
         ]);
         offset += 8;
 
@@ -133,13 +176,14 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         let _gid = entry_buf[offset];
         offset += 1;
 
-        let permissions = u16::from_be_bytes([entry_buf[offset], entry_buf[offset+1]]);
+        let permissions = u16::from_be_bytes([entry_buf[offset], entry_buf[offset + 1]]);
 
         // Reconstruct compression algorithm
         let compression_algorithm = match compression_byte {
             0 => CompressionAlgorithm::None,
             1 => CompressionAlgorithm::Brotli,
             2 => CompressionAlgorithm::Zstandard,
+            3 => CompressionAlgorithm::Lzma,
             _ => return Err(eyre!("Unknown compression algorithm: {}", compression_byte)),
         };
 
@@ -166,18 +210,27 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         }
 
         // Read compressed data from archive
-        archive_file.seek(std::io::SeekFrom::Start(data_section_start + entry.data_offset))
+        archive_file
+            .seek(std::io::SeekFrom::Start(
+                data_section_start + entry.data_offset,
+            ))
             .map_err(|e| eyre!("Failed to seek to data offset for {}: {}", entry.path, e))?;
 
         // Read entry length prefix (8 bytes)
         let mut entry_size_buf = [0u8; 8];
-        archive_file.read_exact(&mut entry_size_buf)
-            .map_err(|e| eyre!("Failed to read compressed data size for {}: {}", entry.path, e))?;
+        archive_file.read_exact(&mut entry_size_buf).map_err(|e| {
+            eyre!(
+                "Failed to read compressed data size for {}: {}",
+                entry.path,
+                e
+            )
+        })?;
         let _actual_compressed_size = u64::from_be_bytes(entry_size_buf);
 
         // Read compressed data
         let mut compressed_data = vec![0u8; entry.compressed_size as usize];
-        archive_file.read_exact(&mut compressed_data)
+        archive_file
+            .read_exact(&mut compressed_data)
             .map_err(|e| eyre!("Failed to read compressed data for {}: {}", entry.path, e))?;
 
         // Decompress data
@@ -193,8 +246,9 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
                 decompressed
             }
             CompressionAlgorithm::Zstandard => {
-                zstd::decode_all(std::io::Cursor::new(&compressed_data))
-                    .map_err(|e| eyre!("Failed to decompress {} with Zstandard: {}", entry.path, e))?
+                zstd::decode_all(std::io::Cursor::new(&compressed_data)).map_err(|e| {
+                    eyre!("Failed to decompress {} with Zstandard: {}", entry.path, e)
+                })?
             }
             CompressionAlgorithm::Lzma => {
                 let mut decompressed = Vec::new();
@@ -218,23 +272,31 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         // Write file
         let mut output_file = File::create(&output_file_path)
             .map_err(|e| eyre!("Failed to create output file {}: {}", entry.path, e))?;
-        output_file.write_all(&uncompressed_data)
+        output_file
+            .write_all(&uncompressed_data)
             .map_err(|e| eyre!("Failed to write to output file {}: {}", entry.path, e))?;
 
         // Set modification time using filetime
         #[cfg(unix)]
         {
-            let mtime = std::time::UNIX_EPOCH + std::time::Duration::from_secs(entry._modification_time);
+            let mtime =
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(entry._modification_time);
             let filetime = filetime::FileTime::from_system_time(mtime);
             let _ = filetime::set_file_mtime(&output_file_path, filetime);
         }
 
         if verbose {
-            println!("  Extracted: {} ({} bytes)", entry.path, entry.uncompressed_size);
+            println!(
+                "  Extracted: {} ({} bytes)",
+                entry.path, entry.uncompressed_size
+            );
         }
     }
 
-    success(&format!("Archive {} successfully extracted to {}!", file_path, out_dir));
+    success(&format!(
+        "Archive {} successfully extracted to {}!",
+        file_path, out_dir
+    ));
 
     Ok(())
 }

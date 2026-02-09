@@ -4,9 +4,9 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use crate::models::archive::{ArchiveHeader, ArchiveEndRecord};
-use crate::terminal::success;
+use crate::models::archive::{ArchiveEndRecord, ArchiveHeader};
 use crate::pager::PagerWriter;
+use crate::terminal::success;
 
 /// Validation levels
 #[allow(dead_code)]
@@ -189,19 +189,12 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
         if let Some(ref header) = header {
             match validate_index(&mut file, header) {
                 Ok((entry_count, index_entries)) => {
-                    ctx.check(
-                        &format!("Index readable ({} entries)", entry_count),
-                        Ok(()),
-                    );
+                    ctx.check(&format!("Index readable ({} entries)", entry_count), Ok(()));
 
                     // Validate offsets and sizes
                     for (i, entry) in index_entries.iter().enumerate() {
                         ctx.check(
-                            &format!(
-                                "Entry {} offset valid ({})",
-                                i + 1,
-                                &entry.path
-                            ),
+                            &format!("Entry {} offset valid ({})", i + 1, &entry.path),
                             check_offset(entry.data_offset, file_size, "Data entry"),
                         );
                     }
@@ -222,16 +215,24 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
                     for (i, entry) in index_entries.iter().enumerate() {
                         match verify_entry_data(&mut file, &header, &entry) {
                             Ok(()) => {
-                                ctx.check(&format!("Entry {} checksum ({})", i + 1, entry.path), Ok(()));
+                                ctx.check(
+                                    &format!("Entry {} checksum ({})", i + 1, entry.path),
+                                    Ok(()),
+                                );
                             }
                             Err(e) => {
-                                ctx.check(&format!("Entry {} checksum ({})", i + 1, entry.path), Err(e));
+                                ctx.check(
+                                    &format!("Entry {} checksum ({})", i + 1, entry.path),
+                                    Err(e),
+                                );
                             }
                         }
                     }
                 }
                 Err(_) => {
-                    let _ = ctx.writeln(format_args!("  ✗ Cannot validate entries: index not readable"));
+                    let _ = ctx.writeln(format_args!(
+                        "  ✗ Cannot validate entries: index not readable"
+                    ));
                 }
             }
         }
@@ -407,10 +408,7 @@ fn calculate_archive_checksum(
 }
 
 /// Parse and validate all index entries
-fn validate_index(
-    file: &mut File,
-    header: &ArchiveHeader,
-) -> Result<(u32, Vec<ParsedIndexEntry>)> {
+fn validate_index(file: &mut File, header: &ArchiveHeader) -> Result<(u32, Vec<ParsedIndexEntry>)> {
     file.seek(SeekFrom::Start(header.index_section_start))?;
 
     let mut buf = [0u8; 4];
@@ -588,7 +586,19 @@ fn verify_entry_data(
         }
         2 => zstd::decode_all(std::io::Cursor::new(&compressed))
             .map_err(|e| eyre!("Zstandard decompression error: {}", e))?,
-        _ => return Err(eyre!("Unknown compression algorithm: {}", entry.compression_algorithm)),
+        3 => {
+            let mut decompressed = Vec::new();
+            xz2::read::XzDecoder::new(std::io::Cursor::new(&compressed))
+                .read_to_end(&mut decompressed)
+                .map_err(|e| eyre!("Failed to decompress {} with LZMA: {}", entry.path, e))?;
+            decompressed
+        }
+        _ => {
+            return Err(eyre!(
+                "Unknown compression algorithm: {}",
+                entry.compression_algorithm
+            ));
+        }
     };
 
     // Verify size
