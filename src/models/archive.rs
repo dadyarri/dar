@@ -114,21 +114,6 @@ impl CompressionAlgorithm {
 }
 
 impl ArchiveIndexEntry {
-    pub fn new(path: String, data_offset: u64, uncompressed_size: u64) -> Self {
-        Self {
-            path,
-            data_offset,
-            uncompressed_size,
-            compressed_size: 0,
-            compression_algorithm: CompressionAlgorithm::None,
-            modification_time: 0,
-            uid: 0,
-            gid: 0,
-            permissions: 0o644,
-            checksum: [0u8; 32],
-        }
-    }
-
     /// Write entry to buffer in binary format
     /// Format: [entry_length: u32][path_length: u32][path: utf8][data_offset: u64][uncompressed_size: u64]
     ///         [compressed_size: u64][compression_algo: u8][mod_time: u64][uid: u8][gid: u8][perm: u16][checksum: 32bytes]
