@@ -109,7 +109,7 @@ fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result
     }
 
     // Full validation (index parsing)
-    if matches!(level, ValidationLevel::Full | ValidationLevel::Slow) {
+    if matches!(level, ValidationLevel::Full) {
         let _ = ctx.writeln(format_args!("\nIndex Validation:"));
         if let Some(ref header) = header {
             match validate_index(&mut file, header) {
