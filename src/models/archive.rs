@@ -60,6 +60,7 @@ impl ArchiveHeader {
 
 /// Archive index entry: file metadata for later retrieval
 /// Each entry is prefixed with its length for safe parsing
+#[derive(Clone, Debug)]
 pub struct ArchiveIndexEntry {
     pub path: String,
     pub data_offset: u64,

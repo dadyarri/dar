@@ -6,10 +6,9 @@ mod archive;
 mod cli;
 mod commands;
 mod models;
-mod pager;
 mod terminal;
 mod utils;
-mod validation;
+mod tui;
 
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;
