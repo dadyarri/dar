@@ -73,10 +73,20 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                         .conflicts_with("verbose")
                         .help("Enables progress bar"),
+                    Arg::new("dry-run")
+                        .short('n')
+                        .long("dry-run")
+                        .action(ArgAction::SetTrue)
+                        .help("Preview which files would be extracted without extracting"),
+                    Arg::new("strip-path")
+                        .long("strip-path")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help("Remove prefix from paths when extracting (e.g., --strip-path src extracts src/file.rs as file.rs)"),
                     Arg::new("entries")
                         .num_args(0..)
                         .action(ArgAction::Append)
-                        .help("Specific files or directories to extract (optional, extracts all if not specified)"),
+                        .help("Specific files or directories to extract (optional, supports glob patterns like *.rs, defaults to all)"),
                     Arg::new("help")
                         .short('h')
                         .long("help")

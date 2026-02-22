@@ -10,6 +10,68 @@ use crate::archive::{decompress_data, parse_index_entry};
 use crate::models::archive::{ArchiveHeader, ArchiveIndexEntry};
 use crate::terminal::success;
 
+/// Check if a path matches a glob pattern
+fn matches_glob(path: &str, pattern: &str) -> bool {
+    // Simple glob pattern matching
+    if pattern == "*" || pattern.is_empty() {
+        return true;
+    }
+
+    // Handle patterns like *.rs, dir/*.txt
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        match parts.len() {
+            2 => {
+                let prefix = parts[0];
+                let suffix = parts[1];
+                if !prefix.is_empty() && !path.starts_with(prefix) {
+                    return false;
+                }
+                if !suffix.is_empty() && !path.ends_with(suffix) {
+                    return false;
+                }
+                true
+            }
+            _ => {
+                // Multiple wildcards - for simplicity, just check containment
+                let mut current_pos = 0;
+                for part in parts {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    match path[current_pos..].find(part) {
+                        Some(pos) => current_pos += pos + part.len(),
+                        None => return false,
+                    }
+                }
+                true
+            }
+        }
+    } else {
+        // Exact match or prefix match (directory)
+        path == pattern || path.starts_with(&format!("{}/", pattern))
+    }
+}
+
+/// Strip a prefix from a path
+fn strip_prefix(path: &str, prefix: &str) -> String {
+    let prefix_with_slash = if prefix.ends_with('/') {
+        prefix.to_string()
+    } else {
+        format!("{}/", prefix)
+    };
+
+    if let Some(stripped) = path.strip_prefix(&prefix_with_slash) {
+        stripped.to_string()
+    } else if path == prefix {
+        String::new()
+    } else if path.starts_with(prefix) {
+        path[prefix.len()..].to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 pub fn call(matches: &ArgMatches) -> Result<()> {
     let file_path = matches.get_one::<String>("file").expect("File required");
     let out_dir = matches
@@ -17,6 +79,14 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         .expect("Output directory required");
     let verbose = matches.get_flag("verbose");
     let _progress = matches.get_flag("progress");
+    let dry_run = matches.get_flag("dry-run");
+    let strip_path = matches.get_one::<String>("strip-path");
+
+    // Get patterns to match (if any provided)
+    let patterns: Vec<String> = matches
+        .get_many::<String>("entries")
+        .map(|vals| vals.cloned().collect())
+        .unwrap_or_default();
 
     let mut archive_file =
         File::open(file_path).map_err(|e| eyre!("Failed to open archive {}: {}", file_path, e))?;
@@ -41,10 +111,16 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let data_section_start = u64::from_be_bytes(header_buf[8..16].try_into().unwrap());
     let index_section_start = u64::from_be_bytes(header_buf[16..24].try_into().unwrap());
 
-    println!("Extracting archive {}...", file_path);
+    if !dry_run {
+        println!("Extracting from {}", file_path);
+    } else {
+        println!("Preview: {}", file_path);
+    }
 
-    // Create output directory if it doesn't exist
-    create_dir_all(out_dir).map_err(|e| eyre!("Failed to create output directory: {}", e))?;
+    // Create output directory if it doesn't exist (skip for dry-run)
+    if !dry_run {
+        create_dir_all(out_dir).map_err(|e| eyre!("Failed to create output directory: {}", e))?;
+    }
 
     // Seek to index section and read all entries
     archive_file
@@ -66,10 +142,49 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         entries.push(entry);
     });
 
-    // Now process all entries
-    for entry in entries {
-        // Construct output file path
-        let output_file_path = Path::new(out_dir).join(&entry.path);
+    // Filter entries based on patterns
+    let matching_entries: Vec<ArchiveIndexEntry> = entries
+        .into_iter()
+        .filter(|entry| {
+            if patterns.is_empty() {
+                true
+            } else {
+                patterns.iter().any(|pattern| matches_glob(&entry.path, pattern))
+            }
+        })
+        .collect();
+
+    // Check if any entries matched
+    if matching_entries.is_empty() && !patterns.is_empty() {
+        let pattern_str = patterns.join(", ");
+        return Err(eyre!(
+            "No files matched the pattern(s): {}",
+            pattern_str
+        ));
+    }
+
+    // Print or extract matched entries
+    let mut extracted_count = 0;
+
+    for entry in matching_entries {
+        // Calculate output path
+        let output_path = if let Some(prefix) = strip_path {
+            strip_prefix(&entry.path, prefix)
+        } else {
+            entry.path.clone()
+        };
+
+        if output_path.is_empty() {
+            continue; // Skip if path after stripping is empty
+        }
+
+        let output_file_path = Path::new(out_dir).join(&output_path);
+        extracted_count += 1;
+
+        if dry_run {
+            println!("  {}", output_path);
+            continue;
+        }
 
         // Create parent directories
         if let Some(parent) = output_file_path.parent() {
@@ -130,17 +245,21 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         }
 
         if verbose {
-            println!(
-                "  Extracted: {} ({} bytes)",
-                entry.path, entry.uncompressed_size
-            );
+            println!("  {}", output_path);
         }
     }
 
-    success(&format!(
-        "Archive {} successfully extracted to {}!",
-        file_path, out_dir
-    ));
+    // Print summary
+    if dry_run {
+        let file_word = if extracted_count == 1 { "file" } else { "files" };
+        println!("\nWould extract {} {}", extracted_count, file_word);
+    } else {
+        let file_word = if extracted_count == 1 { "file" } else { "files" };
+        success(&format!(
+            "Extracted {} {} to {}",
+            extracted_count, file_word, out_dir
+        ));
+    }
 
     Ok(())
 }
