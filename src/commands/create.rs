@@ -1,7 +1,7 @@
 use clap::ArgMatches;
 use eyre::{Result, eyre};
 use ignore::WalkBuilder;
-use std::fs::{File, canonicalize, metadata};
+use std::fs::{File, canonicalize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         return Err(eyre!("File {} already exists", file));
     }
 
-    println!("Creating new archive {}...", file);
+    println!("Creating archive {}", file);
 
     // Reserve space for header (512 bytes)
     let mut archive_bytes: Vec<u8> = Vec::new();
@@ -135,7 +135,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     archive_file.write_all(&archive_bytes)?;
     archive_file.flush()?;
 
-    success(&format!("Archive {} successfully created!", file));
+    success(&format!("Created archive {}", file));
 
     Ok(())
 }
@@ -149,7 +149,6 @@ fn add_entry(
     data_section_start: &u64,
 ) -> Result<ArchiveIndexEntry> {
     let current_offset = (archive_bytes.len() - *data_section_start as usize) as u64;
-    let file_size = metadata(path)?.len();
 
     let mut file_meta = add_file(path, &mut archive_bytes, *progress)?;
     let archive_path = calculate_archive_path(path, &absolute_path);
@@ -158,20 +157,7 @@ fn add_entry(
     file_meta.data_offset = current_offset;
 
     if *verbose {
-        let ratio = if file_meta.compressed_size > 0 {
-            (file_meta.compressed_size as f64 / file_size as f64) * 100.0
-        } else {
-            0.0
-        };
-        println!(
-            "  Added: {:?} -> {} ({}B -> {}B, {:.1}%, {:?})",
-            path,
-            file_meta.path,
-            file_size,
-            file_meta.compressed_size,
-            ratio,
-            file_meta.compression_algorithm
-        );
+        println!("  {}", file_meta.path);
     }
 
     return Ok(file_meta);

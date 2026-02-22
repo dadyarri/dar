@@ -7,14 +7,14 @@ pub fn success(message: &str) {
         Some(mut t) => {
             match t.fg(term::color::GREEN) {
                 Ok(_) => {
-                    write!(t, "{}", message).unwrap();
+                    writeln!(t, "{}", message).unwrap();
                     t.reset().unwrap();
                 }
                 Err(_) => writeln!(t, "{}", message).unwrap(),
             };
         }
         _ => {
-            eprint!("{}", message);
+            eprintln!("{}", message);
         }
     }
 }
