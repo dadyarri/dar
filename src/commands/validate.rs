@@ -8,9 +8,7 @@ use crate::archive::{
     calculate_archive_checksum, decompress_data, parse_index_entry, read_end_record, read_header,
 };
 use crate::models::archive::{ArchiveHeader, ArchiveIndexEntry};
-use crate::pager::PagerWriter;
 use crate::terminal::success;
-use crate::validation::{ValidationContext, ValidationLevel};
 
 pub fn call(matches: &ArgMatches) -> Result<()> {
     let file = matches
@@ -20,211 +18,120 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let slow = matches.get_flag("slow");
 
-    let level = if slow {
-        ValidationLevel::Slow
-    } else {
-        ValidationLevel::Full
-    };
-
-    validate_archive(file, level, verbose)?;
+    validate_archive(file, slow, verbose)?;
 
     Ok(())
 }
 
-fn validate_archive(path: &str, level: ValidationLevel, verbose: bool) -> Result<()> {
+fn validate_archive(path: &str, slow: bool, verbose: bool) -> Result<()> {
     if !Path::new(path).exists() {
         return Err(eyre!("Archive file not found: {}", path));
     }
 
     let file_size = std::fs::metadata(path)?.len();
     let mut file = File::open(path)?;
-    let output = PagerWriter::new()?;
-    let mut ctx = ValidationContext::new(file_size, verbose, output);
 
-    let _ = ctx.writeln(format_args!("Validating archive: {}", path));
-    let _ = ctx.writeln(format_args!("File size: {} bytes", file_size));
-    let _ = ctx.writeln(format_args!(""));
-
-    // Basic validation
-    let _ = ctx.writeln(format_args!("Basic Checks:"));
-    ctx.check("Header present (≥512 bytes)", check_min_size(&file, 512));
-    ctx.check("End record present (≥64 bytes)", check_min_size(&file, 64));
+    // Basic checks
+    if file_size < 512 {
+        return Err(eyre!("Invalid archive: file too small"));
+    }
 
     let (header, header_result) = read_header(&mut file);
-    ctx.check("Header readable", header_result);
-
     let (end_record, end_result) = read_end_record(&mut file, file_size);
-    ctx.check("End record readable", end_result);
 
-    if header.is_some() && end_record.is_some() {
-        let h = header.as_ref().unwrap();
-        let e = end_record.as_ref().unwrap();
+    header_result?;
+    end_result?;
 
-        ctx.check(
-            "Data section offset valid",
-            check_offset(h.data_section_start, file_size, "Data"),
-        );
-        ctx.check(
-            "Index section offset valid",
-            check_offset(h.index_section_start, file_size, "Index"),
-        );
-        ctx.check(
-            "Index offsets match (header vs end record)",
-            if h.index_section_start == e.index_offset {
-                Ok(())
-            } else {
-                Err(eyre!(
-                    "Mismatch: header says {} but end record says {}",
-                    h.index_section_start,
-                    e.index_offset
-                ))
-            },
-        );
+    let h = header.unwrap();
+    let e = end_record.unwrap();
 
-        // Archive checksum verification
-        let _ = ctx.writeln(format_args!("\nChecksum Verification:"));
-        match calculate_archive_checksum(&mut file, &h, file_size) {
-            Ok(calculated) => {
-                ctx.check(
-                    "Archive checksum (header)",
-                    if h.archive_checksum == calculated {
-                        Ok(())
-                    } else {
-                        Err(eyre!("Header checksum mismatch"))
-                    },
-                );
-                ctx.check(
-                    "Archive checksum (end record)",
-                    if e.archive_checksum == calculated {
-                        Ok(())
-                    } else {
-                        Err(eyre!("End record checksum mismatch"))
-                    },
-                );
-            }
-            Err(e) => {
-                ctx.check("Archive checksum calculation", Err(e));
-            }
-        }
+    // Verify offsets
+    if h.data_section_start >= file_size || h.index_section_start >= file_size {
+        return Err(eyre!("Invalid archive: section offsets exceed file size"));
     }
 
-    // Full validation (index parsing)
-    if matches!(level, ValidationLevel::Full) {
-        let _ = ctx.writeln(format_args!("\nIndex Validation:"));
-        if let Some(ref header) = header {
-            match validate_index(&mut file, header) {
-                Ok((entry_count, index_entries)) => {
-                    ctx.check(&format!("Index readable ({} entries)", entry_count), Ok(()));
-
-                    // Validate offsets and sizes
-                    for (i, entry) in index_entries.iter().enumerate() {
-                        ctx.check(
-                            &format!("Entry {} offset valid ({})", i + 1, &entry.path),
-                            check_offset(entry.data_offset, file_size, "Data entry"),
-                        );
-                    }
-                }
-                Err(e) => {
-                    ctx.check("Index readable", Err(e));
-                }
-            }
-        }
+    if h.index_section_start != e.index_offset {
+        return Err(eyre!("Invalid archive: index offset mismatch"));
     }
 
-    // Slow validation (entry checksums)
-    if matches!(level, ValidationLevel::Slow) {
-        let _ = ctx.writeln(format_args!("\nEntry Checksum Verification (Slow Mode):"));
-        if let Some(ref header) = header {
-            match validate_index(&mut file, header) {
-                Ok((_, index_entries)) => {
-                    for (i, entry) in index_entries.iter().enumerate() {
-                        match verify_entry_data(&mut file, &header, &entry) {
-                            Ok(()) => {
-                                ctx.check(
-                                    &format!("Entry {} checksum ({})", i + 1, entry.path),
-                                    Ok(()),
-                                );
-                            }
-                            Err(e) => {
-                                ctx.check(
-                                    &format!("Entry {} checksum ({})", i + 1, entry.path),
-                                    Err(e),
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
-                    let _ = ctx.writeln(format_args!(
-                        "  ✗ Cannot validate entries: index not readable"
-                    ));
-                }
-            }
-        }
+    // Verify checksums
+    let calculated = calculate_archive_checksum(&mut file, &h, file_size)?;
+    if h.archive_checksum != calculated || e.archive_checksum != calculated {
+        return Err(eyre!("Invalid archive: checksum mismatch"));
     }
 
-    // Summary
-    let _ = ctx.writeln(format_args!("\n{}", "=".repeat(50)));
-    let _ = ctx.writeln(format_args!("Validation Summary: {}", ctx.summary()));
-
-    if ctx.is_valid() {
-        success("Archive is valid!");
-    } else {
-        let _ = ctx.writeln(format_args!("\nErrors found:"));
-        let errors = ctx.errors.clone();
-        for error in &errors {
-            let _ = ctx.writeln(format_args!("  • {}", error));
-        }
-        return Err(eyre!("Archive validation failed"));
-    }
-
-    Ok(())
-}
-
-/// Check minimum file size
-fn check_min_size(file: &File, min_size: u64) -> Result<()> {
-    file.metadata()?
-        .len()
-        .ge(&min_size)
-        .then_some(())
-        .ok_or_else(|| eyre!("File too small"))
-}
-
-/// Check offset is valid within file bounds
-fn check_offset(offset: u64, file_size: u64, location: &str) -> Result<()> {
-    if offset < file_size {
-        Ok(())
-    } else {
-        Err(eyre!(
-            "{} offset {} exceeds file size {}",
-            location,
-            offset,
-            file_size
-        ))
-    }
-}
-
-/// Parse and validate all index entries
-fn validate_index(
-    file: &mut File,
-    header: &ArchiveHeader,
-) -> Result<(u32, Vec<ArchiveIndexEntry>)> {
-    file.seek(SeekFrom::Start(header.index_section_start))?;
-
+    // Parse index
+    file.seek(SeekFrom::Start(h.index_section_start))?;
     let mut buf = [0u8; 4];
     file.read_exact(&mut buf)?;
     let entry_count = u32::from_be_bytes(buf);
 
-    let mut entries = Vec::new();
-
-    for _ in 0..entry_count {
-        match parse_index_entry(file) {
-            Ok(entry) => entries.push(entry),
-            Err(e) => return Err(eyre!("Failed to parse index entry: {}", e)),
-        }
+    // Verify file count matches header
+    if entry_count != h.total_files {
+        return Err(eyre!(
+            "Invalid archive: file count mismatch (header: {}, index: {})",
+            h.total_files,
+            entry_count
+        ));
     }
 
-    Ok((entry_count, entries))
+    let mut entries = Vec::new();
+    let mut last_offset = 0u64;
+
+    for i in 0..entry_count {
+        let entry = parse_index_entry(&mut file)?;
+
+        // Validate index structure
+        if entry.path.is_empty() {
+            return Err(eyre!("Invalid archive: entry {} has empty path", i));
+        }
+
+        // Check offsets don't overlap
+        if entry.data_offset < last_offset {
+            return Err(eyre!(
+                "Invalid archive: entry {} offset goes backward ({} < {})",
+                i,
+                entry.data_offset,
+                last_offset
+            ));
+        }
+        last_offset = entry.data_offset + entry.compressed_size;
+
+        // Validate offset is within bounds
+        if h.data_section_start + entry.data_offset + entry.compressed_size > h.index_section_start
+        {
+            return Err(eyre!(
+                "Invalid archive: entry {} extends beyond data section",
+                i
+            ));
+        }
+
+        entries.push(entry);
+    }
+
+    // Slow mode: thorough verification of all entries
+    if slow {
+        let mut verified = 0u32;
+        for (i, entry) in entries.iter().enumerate() {
+            verify_entry_data(&mut file, &h, entry)
+                .map_err(|e| eyre!("Entry {} ({}) failed verification: {}", i, entry.path, e))?;
+            verified += 1;
+
+            if verbose && (i + 1) % 10 == 0 {
+                println!("  Verified {}/{}", verified, entry_count);
+            }
+        }
+
+        if verbose {
+            println!("  Verified all {}", entry_count);
+        }
+    } else if verbose {
+        println!("  {} files", entry_count);
+    }
+
+    success(&format!("Archive {} is valid", path));
+
+    Ok(())
 }
 
 /// Verify entry data by decompressing and checking checksum
