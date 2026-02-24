@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "DAR"
+name = "dar"
 version = "5.0.0"
