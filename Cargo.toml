@@ -5,3 +5,8 @@ edition = "2024"
 
 [dependencies]
 eyre = "0.6.12"
+clap = { version = "4.5.60", features = ["cargo"] }
+
+[build-dependencies]
+clap = { version = "4.5.60", features = ["cargo"] }
+clap_complete = "4.5.66"
