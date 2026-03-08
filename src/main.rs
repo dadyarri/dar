@@ -1,4 +1,4 @@
-use eyre::Result;
+use eyre::{Context, Result};
 
 mod cli;
 mod commands;
@@ -11,7 +11,7 @@ fn main() -> Result<()> {
 
     match matches.subcommand() {
         Some(("create", sub_matches)) => {
-            commands::create::call(&sub_matches)?;
+            commands::create::call(&sub_matches).wrap_err("Failed to create archive")?;
         }
         _ => unreachable!(),
     }
