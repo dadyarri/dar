@@ -2,6 +2,7 @@ use eyre::Result;
 
 mod cli;
 mod commands;
+mod models;
 mod traits;
 mod utils;
 
