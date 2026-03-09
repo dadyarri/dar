@@ -1,5 +1,6 @@
 use eyre::{Context, Result};
 
+mod archive_builder;
 mod cli;
 mod commands;
 mod models;
