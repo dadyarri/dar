@@ -20,7 +20,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         return Err(eyre!("File {} already exists", file));
     }
 
-    if overwrite {
+    if Path::new(file).exists() && overwrite {
         fs::remove_file(file).wrap_err("Failed to delete file")?;
     }
 
