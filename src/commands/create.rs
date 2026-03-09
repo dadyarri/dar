@@ -1,9 +1,9 @@
-use crate::models::archive::ArchiveHeader;
+use crate::archive_builder::ArchiveBuilder;
 use clap::ArgMatches;
 use eyre::{eyre, Context, Result};
 use std::fs;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::path::Path;
 
 pub fn call(matches: &ArgMatches) -> Result<()> {
@@ -29,23 +29,16 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let file_handle = File::create(file).wrap_err("Failed to create file")?;
     let writer = BufWriter::new(file_handle);
 
-    create_archive(writer)?;
+    let mut builder = ArchiveBuilder::new(writer);
+    builder.write_header()?;
+    builder.build()?;
 
-    Ok(())
-}
-
-fn create_archive<W: Write>(mut writer: W) -> Result<()> {
-    ArchiveHeader::new()
-        .write(&mut writer)
-        .wrap_err("Failed to write archive header")?;
-
-    writer.flush().wrap_err("Failed to flush archive")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::archive_builder::ArchiveBuilder;
     use crate::utils::{get_unix_timestamp, read_bytes_as, read_string};
     use std::io::Cursor;
 
@@ -55,7 +48,8 @@ mod tests {
         let mut buffer = Cursor::new(Vec::new());
 
         // Act
-        create_archive(&mut buffer).expect("Should create archive");
+        let mut builder = ArchiveBuilder::new(&mut buffer);
+        builder.write_header().unwrap();
 
         // Assert
         let data = buffer.into_inner();
