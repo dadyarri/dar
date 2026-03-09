@@ -27,13 +27,64 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     println!("Creating archive {}", file);
 
     let file_handle = File::create(file).wrap_err("Failed to create file")?;
-    let mut writer = BufWriter::new(file_handle);
+    let writer = BufWriter::new(file_handle);
 
+    create_archive(writer)?;
+
+    Ok(())
+}
+
+fn create_archive<W: Write>(mut writer: W) -> Result<()> {
     ArchiveHeader::new()
         .write(&mut writer)
         .wrap_err("Failed to write archive header")?;
 
     writer.flush().wrap_err("Failed to flush archive")?;
-
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::{get_unix_timestamp, read_bytes_as, read_string};
+    use std::io::Cursor;
+
+    #[test]
+    fn test_archive_header_writing() {
+        // Arrange
+        let mut buffer = Cursor::new(Vec::new());
+
+        // Act
+        create_archive(&mut buffer).expect("Should create archive");
+
+        // Assert
+        let data = buffer.into_inner();
+        assert!(!data.is_empty(), "Archive data should not be empty");
+        assert!(
+            read_string(&*data, 0, 4).is_ok(),
+            "Failed to read archive signature"
+        );
+        assert_eq!(
+            read_string(&*data, 0, 4).unwrap(),
+            "DARI".to_string(),
+            "Invalid archive signature"
+        );
+        assert!(
+            read_bytes_as::<u8>(&*data, 4).is_ok(),
+            "Failed to read archive version"
+        );
+        assert_eq!(
+            read_bytes_as::<u8>(&*data, 4).unwrap(),
+            5,
+            "Invalid archive version"
+        );
+        assert!(
+            read_bytes_as::<u64>(&*data, 5).is_ok(),
+            "Failed to read archive creation timestamp"
+        );
+        assert!(
+            read_bytes_as::<u64>(&*data, 5).unwrap() <= get_unix_timestamp().unwrap(),
+            "Invalid archive creation timestamp"
+        );
+    }
 }
