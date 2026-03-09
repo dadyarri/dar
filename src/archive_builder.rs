@@ -22,6 +22,8 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .write(&mut self.writer)
             .wrap_err("Failed to write archive header")?;
 
+        self.index_offset += size_of::<ArchiveHeader>() as u32 + 1;
+
         Ok(())
     }
 
