@@ -26,3 +26,28 @@ impl ArchiveHeader {
         writer.write_all(bytemuck::bytes_of(self))
     }
 }
+
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug)]
+pub struct ArchiveFooter {
+    pub signature: [u8; 7],
+    pub index_offset: u32,
+    pub amount_of_files: u32,
+}
+
+unsafe impl Pod for ArchiveFooter {}
+unsafe impl Zeroable for ArchiveFooter {}
+
+impl ArchiveFooter {
+    pub fn new(index_offset: u32, amount_of_files: u32) -> Self {
+        Self {
+            signature: *b"DARIEND",
+            index_offset,
+            amount_of_files,
+        }
+    }
+
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(bytemuck::bytes_of(self))
+    }
+}
