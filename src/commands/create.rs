@@ -1,4 +1,5 @@
 use crate::archive_builder::ArchiveBuilder;
+use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{eyre, Context, Result};
 use std::fs;
@@ -31,6 +32,15 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
     let mut builder = ArchiveBuilder::new(writer);
     builder.write_header()?;
+
+    for file_entry in scan_files(content)? {
+        if verbose {
+            println!("{}", file_entry.display());
+        }
+
+        builder.add_file(&file_entry)?
+    }
+
     builder.build()?;
 
     Ok(())
