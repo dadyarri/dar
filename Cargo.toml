@@ -10,6 +10,7 @@ eyre = "0.6.12"
 clap = { version = "4.5.60", features = ["cargo"] }
 bytemuck = "1.25.0"
 ignore = "0.4.25"
+blake3 = "1.8.3"
 
 [build-dependencies]
 clap = { version = "4.5.60", features = ["cargo"] }
