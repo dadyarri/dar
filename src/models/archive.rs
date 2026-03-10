@@ -147,3 +147,15 @@ impl ArchiveIndexEntry {
         writer.write_all(bytemuck::bytes_of(self))
     }
 }
+
+pub struct ArchiveIndexEntryWrapper {
+    pub entry: ArchiveIndexEntry,
+    pub path: String,
+    pub extra: String,
+}
+
+impl ArchiveIndexEntryWrapper {
+    pub fn new(entry: ArchiveIndexEntry, path: String, extra: String) -> Self {
+        Self { entry, path, extra }
+    }
+}
