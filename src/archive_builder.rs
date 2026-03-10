@@ -5,7 +5,6 @@ use std::io::{Seek, Write};
 pub struct ArchiveBuilder<W: Write + Seek> {
     writer: W,
     index_offset: u32,
-    amount_of_files: u32,
     entries: Vec<ArchiveIndexEntry>,
 }
 
@@ -14,7 +13,6 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         Self {
             writer,
             index_offset: 0,
-            amount_of_files: 0,
             entries: Vec::new(),
         }
     }
@@ -30,7 +28,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     }
 
     pub fn build(&mut self) -> Result<()> {
-        ArchiveFooter::new(self.index_offset, self.amount_of_files)
+        ArchiveFooter::new(self.index_offset, self.entries.len() as u32)
             .write(&mut self.writer)
             .wrap_err("Failed to write archive footer")?;
 
