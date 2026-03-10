@@ -1,5 +1,6 @@
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
+use eyre::{eyre, Error};
 use std::io::Write;
 
 #[repr(C, packed)]
@@ -44,6 +45,101 @@ impl ArchiveFooter {
             signature: *b"DARIEND",
             index_offset,
             amount_of_files,
+        }
+    }
+
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(bytemuck::bytes_of(self))
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
+pub enum CompressionMethod {
+    None,
+    Brotli,
+    Zstandard,
+    Lzma,
+}
+
+impl TryFrom<u8> for CompressionMethod {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(CompressionMethod::None),
+            1 => Ok(CompressionMethod::Brotli),
+            2 => Ok(CompressionMethod::Zstandard),
+            3 => Ok(CompressionMethod::Lzma),
+            _ => Err(eyre!("Invalid value for CompressionMethod: {}", value)),
+        }
+    }
+}
+
+impl Into<u8> for CompressionMethod {
+    fn into(self: CompressionMethod) -> u8 {
+        match self {
+            CompressionMethod::None => 0,
+            CompressionMethod::Brotli => 1,
+            CompressionMethod::Zstandard => 2,
+            CompressionMethod::Lzma => 3,
+        }
+    }
+}
+
+impl CompressionMethod {
+    pub fn as_byte(&self) -> u8 {
+        *self as u8
+    }
+}
+
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub struct ArchiveIndexEntry {
+    pub offset: u32,
+    pub bitflags: u16,
+    pub compression_method: CompressionMethod,
+    pub modification_timestamp: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub perm: u16,
+    pub checksum: [u8; 32],
+    pub original_size: u32,
+    pub compressed_size: u32,
+    pub path_length: u32,
+    pub extra_length: u32,
+}
+
+unsafe impl Pod for ArchiveIndexEntry {}
+unsafe impl Zeroable for ArchiveIndexEntry {}
+
+impl ArchiveIndexEntry {
+    pub fn new(
+        offset: u32,
+        compression_method: CompressionMethod,
+        modification_timestamp: u64,
+        uid: u32,
+        gid: u32,
+        perm: u16,
+        checksum: [u8; 32],
+        original_size: u32,
+        compressed_size: u32,
+        path_length: u32,
+        extra_length: u32,
+    ) -> Self {
+        Self {
+            offset,
+            bitflags: 0,
+            compression_method,
+            modification_timestamp,
+            uid,
+            gid,
+            perm,
+            checksum,
+            original_size,
+            compressed_size,
+            path_length,
+            extra_length,
         }
     }
 

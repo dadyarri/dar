@@ -1,4 +1,4 @@
-use crate::models::archive::{ArchiveFooter, ArchiveHeader};
+use crate::models::archive::{ArchiveFooter, ArchiveHeader, ArchiveIndexEntry};
 use eyre::{Context, Result};
 use std::io::{Seek, Write};
 
@@ -6,6 +6,7 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     writer: W,
     index_offset: u32,
     amount_of_files: u32,
+    entries: Vec<ArchiveIndexEntry>,
 }
 
 impl<W: Write + Seek> ArchiveBuilder<W> {
@@ -14,6 +15,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             writer,
             index_offset: 0,
             amount_of_files: 0,
+            entries: Vec::new(),
         }
     }
 
