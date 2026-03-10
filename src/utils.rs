@@ -1,5 +1,6 @@
 use crate::traits::FromLeBytes;
 use eyre::{Context, ContextCompat, Result};
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -47,6 +48,19 @@ pub fn calculate_archive_path(dir_root: &Path, file_path: &Path) -> String {
     let relative = file_path.strip_prefix(dir_root).unwrap_or(file_path);
     let path_str = relative.to_string_lossy().to_string();
     sanitize_path(&path_str)
+}
+
+pub fn get_mode(metadata: &fs::Metadata) -> (u32, u32, u16) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.uid(), metadata.gid(), metadata.mode() as u16)
+    }
+
+    #[cfg(not(unix))]
+    {
+        (1000, 1000, 644) // Placeholder for Windows/non-Unix platforms
+    }
 }
 
 /// Cleanup path
