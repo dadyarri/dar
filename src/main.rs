@@ -3,6 +3,7 @@ use eyre::{Context, Result};
 mod archive_builder;
 mod cli;
 mod commands;
+mod counting_writer;
 mod models;
 mod traits;
 mod utils;
