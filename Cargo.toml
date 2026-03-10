@@ -11,6 +11,9 @@ clap = { version = "4.5.60", features = ["cargo"] }
 bytemuck = "1.25.0"
 ignore = "0.4.25"
 blake3 = "1.8.3"
+brotli = "8.0.2"
+zstd = "0.13.3"
+xz2 = "0.1.7"
 
 [build-dependencies]
 clap = { version = "4.5.60", features = ["cargo"] }
