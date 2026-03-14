@@ -32,12 +32,6 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue)
                         .conflicts_with("progress")
                         .help("Enables verbose output"),
-                    Arg::new("progress")
-                        .short('p')
-                        .long("progress")
-                        .action(ArgAction::SetTrue)
-                        .conflicts_with("verbose")
-                        .help("Enables progress bar"),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)

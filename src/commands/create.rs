@@ -13,7 +13,6 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
         .ok_or_else(|| eyre!("File required"))?;
 
     let verbose = matches.get_flag("verbose");
-    let progress = matches.get_flag("progress");
     let overwrite = matches.get_flag("overwrite");
     let content = matches.get_many::<String>("content").unwrap();
 
