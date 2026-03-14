@@ -37,6 +37,7 @@ impl FromLeBytes for u64 {
 }
 
 pub trait Compressor {
+    fn get_best_extensions(&self) -> &[&str];
     fn compress<InputType, OutputType>(
         &self,
         input: &mut InputType,
@@ -49,6 +50,13 @@ pub trait Compressor {
 
 pub struct NoneCompressor;
 impl Compressor for NoneCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &[
+            "jpg", "jpeg", "png", "webp", "gif", "mp4", "mp3", "zip", "gz", "rar", "7z", "pdf",
+            "bz2", "zst", "tar", "tar.gz", "bz",
+        ]
+    }
+
     fn compress<InputType, OutputType>(
         &self,
         input: &mut InputType,
@@ -66,6 +74,14 @@ impl Compressor for NoneCompressor {
 
 pub struct BrotliCompressor;
 impl Compressor for BrotliCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &[
+            "html", "htm", "xhtml", "css", "scss", "sass", "less", "stylus", "js", "mjs", "json",
+            "svg", "xml", "xsl", "xsd", "txt", "md", "markdown", "rst", "toml", "yaml", "yml",
+            "woff2", "jsx", "ts", "tsx", "mts",
+        ]
+    }
+
     fn compress<InputType, OutputType>(
         &self,
         input: &mut InputType,
@@ -87,6 +103,14 @@ impl Compressor for BrotliCompressor {
 
 pub struct ZStandardCompressor;
 impl Compressor for ZStandardCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &[
+            "log", "tar", "csv", "tsv", "db", "sql", "bak", "rs", "go", "java", "kt", "py", "rb",
+            "php", "pl", "pas", "c", "cpp", "c++", "h", "hpp", "cs", "fs", "vb", "vba", "sql",
+            "sh", "bat", "ps1", "fish", "proto", "thrift",
+        ]
+    }
+
     fn compress<InputType, OutputType>(
         &self,
         input: &mut InputType,
@@ -107,6 +131,13 @@ impl Compressor for ZStandardCompressor {
 
 pub struct LzmaCompressor;
 impl Compressor for LzmaCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &[
+            "iso", "img", "bin", "deb", "rpm", "pkg", "vmdk", "patch", "diff", "fortran", "f90",
+            "ada", "lisp", "scm", "hs", "erl", "cmake", "makefile", "mk", "tex", "bib",
+        ]
+    }
+
     fn compress<InputType, OutputType>(
         &self,
         input: &mut InputType,
