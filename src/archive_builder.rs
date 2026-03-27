@@ -6,7 +6,7 @@ use crate::utils::get_mode;
 use eyre::{Context, Result};
 use std::collections::HashMap;
 use std::fs::{metadata, File};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -83,20 +83,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             bitflags |= INDEX_FLAG_LINKED_DATA;
 
             self.entries.push(ArchiveIndexEntryWrapper::new(
-                ArchiveIndexEntry::new(
-                    existing.offset,
-                    bitflags | existing.bitflags,
-                    existing.compression_method,
-                    timestamp,
+                ArchiveIndexEntry {
+                    offset: existing.offset,
+                    bitflags: bitflags | existing.bitflags,
+                    compression_method: existing.compression_method,
+                    modification_timestamp: timestamp,
                     uid,
                     gid,
                     perm,
-                    pipeline_result.checksum,
-                    pipeline_result.original_size,
-                    existing.compressed_size,
-                    archive_path.len() as u32,
-                    pipeline_result.extra.len() as u32,
-                ),
+                    checksum: pipeline_result.checksum,
+                    original_size: pipeline_result.original_size,
+                    compressed_size: existing.compressed_size,
+                    path_length: archive_path.len() as u32,
+                    extra_length: pipeline_result.extra.len() as u32,
+                },
                 archive_path,
                 pipeline_result.extra,
             ));
@@ -107,7 +107,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         // Record byte offset where this file's data block begins
         let data_offset = self
             .writer
-            .seek(SeekFrom::Current(0))
+            .stream_position()
             .wrap_err("Failed to get current write position")? as u32;
 
         // Write file data: compressed bytes if compression ran, otherwise original bytes
@@ -124,20 +124,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .wrap_err_with(|| format!("Failed to write file data for {}", file_path.display()))?;
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
-            ArchiveIndexEntry::new(
-                data_offset,
+            ArchiveIndexEntry {
+                offset: data_offset,
                 bitflags,
-                pipeline_result.compression_method,
-                timestamp,
+                compression_method: pipeline_result.compression_method,
+                modification_timestamp: timestamp,
                 uid,
                 gid,
                 perm,
-                pipeline_result.checksum,
-                pipeline_result.original_size,
+                checksum: pipeline_result.checksum,
+                original_size: pipeline_result.original_size,
                 compressed_size,
-                archive_path.len() as u32,
-                pipeline_result.extra.len() as u32,
-            ),
+                path_length: archive_path.len() as u32,
+                extra_length: pipeline_result.extra.len() as u32,
+            },
             archive_path,
             pipeline_result.extra,
         ));
@@ -159,7 +159,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         // Record where the index section begins
         let index_offset = self
             .writer
-            .seek(SeekFrom::Current(0))
+            .stream_position()
             .wrap_err("Failed to get index offset position")? as u32;
 
         // Write all index entries: fixed-size struct + path bytes + extra bytes

@@ -78,9 +78,9 @@ impl TryFrom<u8> for CompressionMethod {
     }
 }
 
-impl Into<u8> for CompressionMethod {
-    fn into(self: CompressionMethod) -> u8 {
-        match self {
+impl From<CompressionMethod> for u8 {
+    fn from(value: CompressionMethod) -> Self {
+        match value {
             CompressionMethod::None => 0,
             CompressionMethod::Brotli => 1,
             CompressionMethod::Zstandard => 2,
@@ -112,35 +112,6 @@ unsafe impl Pod for ArchiveIndexEntry {}
 unsafe impl Zeroable for ArchiveIndexEntry {}
 
 impl ArchiveIndexEntry {
-    pub fn new(
-        offset: u32,
-        bitflags: u16,
-        compression_method: CompressionMethod,
-        modification_timestamp: u64,
-        uid: u32,
-        gid: u32,
-        perm: u16,
-        checksum: [u8; 32],
-        original_size: u32,
-        compressed_size: u32,
-        path_length: u32,
-        extra_length: u32,
-    ) -> Self {
-        Self {
-            offset,
-            bitflags,
-            compression_method,
-            modification_timestamp,
-            uid,
-            gid,
-            perm,
-            checksum,
-            original_size,
-            compressed_size,
-            path_length,
-            extra_length,
-        }
-    }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(bytemuck::bytes_of(self))

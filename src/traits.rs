@@ -89,9 +89,11 @@ impl Compressor for BrotliCompressor {
         let mut buf = Vec::new();
         input.read_to_end(&mut buf)?;
         let mut cursor = std::io::Cursor::new(buf);
-        let mut params = brotli::enc::BrotliEncoderParams::default();
-        params.quality = 11;
-        params.lgwin = 24;
+        let params = brotli::enc::BrotliEncoderParams {
+            quality: 11,
+            lgwin: 24,
+            ..Default::default()
+        };
         let mut counter = CountingWriter::new(output);
         brotli::BrotliCompress(&mut cursor, &mut counter, &params)
             .map_err(|e| eyre!("Brotli compression error: {}", e))?;
@@ -117,7 +119,7 @@ impl Compressor for ZStandardCompressor {
         input.read_to_end(&mut buf)?;
         let mut counter = CountingWriter::new(output);
         counter.write_all(
-            &*zstd::encode_all(std::io::Cursor::new(buf), 19)
+            &zstd::encode_all(std::io::Cursor::new(buf), 19)
                 .map_err(|e| eyre!("ZStandard compression error: {}", e))?,
         )?;
         Ok(CompressionOutcome {
@@ -243,7 +245,7 @@ pub fn compressor_for_extension(ext: &str, compress_images: bool) -> &'static dy
     ];
 
     for &compressor in candidates {
-        if compressor.get_best_extensions().iter().any(|e| *e == ext) {
+        if compressor.get_best_extensions().contains(&ext) {
             return compressor;
         }
     }

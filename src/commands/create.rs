@@ -86,29 +86,29 @@ mod tests {
         let data = buffer.into_inner();
         assert!(!data.is_empty(), "Archive data should not be empty");
         assert!(
-            read_string(&*data, 0, 4).is_ok(),
+            read_string(&data, 0, 4).is_ok(),
             "Failed to read archive signature"
         );
         assert_eq!(
-            read_string(&*data, 0, 4).unwrap(),
+            read_string(&data, 0, 4).unwrap(),
             "DARI".to_string(),
             "Invalid archive signature"
         );
         assert!(
-            read_bytes_as::<u8>(&*data, 4).is_ok(),
+            read_bytes_as::<u8>(&data, 4).is_ok(),
             "Failed to read archive version"
         );
         assert_eq!(
-            read_bytes_as::<u8>(&*data, 4).unwrap(),
+            read_bytes_as::<u8>(&data, 4).unwrap(),
             5,
             "Invalid archive version"
         );
         assert!(
-            read_bytes_as::<u64>(&*data, 5).is_ok(),
+            read_bytes_as::<u64>(&data, 5).is_ok(),
             "Failed to read archive creation timestamp"
         );
         assert!(
-            read_bytes_as::<u64>(&*data, 5).unwrap() <= get_unix_timestamp().unwrap(),
+            read_bytes_as::<u64>(&data, 5).unwrap() <= get_unix_timestamp().unwrap(),
             "Invalid archive creation timestamp"
         );
     }
