@@ -8,14 +8,18 @@ selection by file extension, while respecting `.gitignore` and `.darignore` rule
 ```
 CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
                                        → archive_builder.rs (stateful writer)
+                                           → pipeline.rs (checksum, compression, optional encryption, extra metadata)
                                            → models/archive.rs (binary structs)
-                                           → traits.rs (Compressor dispatch)
+                                           → traits.rs (Compressor dispatch + image-specific optimizers)
+                                           → extra.rs (encoded key/value metadata for index extra field)
                                            → counting_writer.rs (byte counter)
 ```
 
 - **`src/cli.rs`** — also `include!`'d by `build.rs` to generate shell completions at build time; any CLI change must
   stay compilable in both contexts.
-- **`src/pipeline.rs`** — intentionally empty; planned for the compression dispatch pipeline.
+- **`src/pipeline.rs`** — active processing stage used by `ArchiveBuilder`: BLAKE3 checksum, extension-based compressor
+  selection, optional ChaCha20-Poly1305 encryption, and `extra` metadata population (image/audio tags + encryption
+  metadata).
 - **`src/archive_builder.rs`** — generic over `W: Write + Seek`; tests pass `Cursor<Vec<u8>>` directly.
 
 ## Binary Format
@@ -27,21 +31,26 @@ for zero-copy serialization via `bytemuck::bytes_of(self)`. **Never derive `Pod`
 | Section          | Marker                                                      |
 |------------------|-------------------------------------------------------------|
 | Header           | `DARI` (4 B) + version `5` (1 B) + creation timestamp (8 B) |
-| File data blocks | (not yet written by `add_file`)                             |
+| File data blocks | raw/compressed/encrypted bytes written by `add_file`        |
 | Index entries    | `ArchiveIndexEntry` + path string + extra string            |
 | Footer           | `DARIEND` (7 B) + index_offset (4 B) + file count (4 B)     |
 
 ## Compression Selection (`src/traits.rs`)
 
-`Compressor` trait has `get_best_extensions() -> &[&str]` used to route files:
+`Compressor` trait has `get_best_extensions() -> &[&str]` used to route files (`compressor_for_extension` falls back to
+`ZStandardCompressor` for unknown extensions):
 
 - **`NoneCompressor`** — already-compressed: `jpg`, `png`, `mp4`, `zip`, `gz`, …
 - **`BrotliCompressor`** (quality 11) — web/text: `html`, `css`, `js`, `ts`, `md`, `toml`, `yaml`, …
 - **`ZStandardCompressor`** (level 19) — source code/data: `rs`, `go`, `py`, `log`, `csv`, `sql`, …
 - **`LzmaCompressor`** (level 9) — binary/specialized: `iso`, `deb`, `tex`, `patch`, …
+- **`PngOxipngCompressor`** — enabled only with `--compress-images`; optimizes PNG in-memory and keeps original bytes
+  when optimization is not smaller.
+- **`JpegLeptonCompressor`** — enabled only with `--compress-images`; uses Lepton for JPEG and stores original bytes on
+  failure/non-improvement.
 
-> **Note:** Compression is not yet wired into `add_file` — files are recorded with `CompressionMethod::None` and
-> uncompressed content is not written to the writer yet. `pipeline.rs` is where this should be implemented.
+> **Note:** `ArchiveBuilder::add_file` now runs the pipeline and writes file data before the index. Duplicate files are
+> deduplicated by checksum: later entries reuse the first data offset and set `INDEX_FLAG_LINKED_DATA`.
 
 ## File Walking (`src/walker.rs`)
 
@@ -79,6 +88,8 @@ cargo test                           # run all tests (unit tests are inline in t
 cargo run -- create -f out.dar src/  # create archive from src/ directory
 cargo run -- create -f out.dar -o src/  # overwrite if out.dar exists
 cargo run -- create -f out.dar -v src/  # verbose (prints each added file path)
+cargo run -- create -f out.dar --compress-images src/  # enable PNG/JPEG optimization
+cargo run -- create -f out.dar --encrypt-passphrase "secret" src/  # encrypt stored file data
 ```
 
 Shell completions are written to `completions/` by `build.rs` at build time. That directory is not committed.
