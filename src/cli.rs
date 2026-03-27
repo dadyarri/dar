@@ -1,10 +1,6 @@
 use clap::{crate_authors, crate_version};
 use clap::{Arg, ArgAction, Command};
 
-pub fn build_cli() -> Command {
-    build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
-}
-
 pub fn build_cli_with_translator<T>(translate: T) -> Command
 where
     T: Fn(&str) -> String,
@@ -72,12 +68,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_cli, build_cli_with_translator};
+    use super::build_cli_with_translator;
     use clap::error::ErrorKind;
 
     #[test]
     fn test_encrypt_flags_conflict() {
-        let result = build_cli().try_get_matches_from(vec![
+        let result = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+            .try_get_matches_from(vec![
             "dari",
             "create",
             "-f",
@@ -95,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_alias_is_accepted() {
-        let matches = build_cli()
+        let matches = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
             .try_get_matches_from(vec![
                 "dari",
                 "create",

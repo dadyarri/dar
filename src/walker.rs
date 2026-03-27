@@ -1,4 +1,5 @@
 use crate::i18n::Locale;
+use crate::utils::calculate_archive_path;
 use clap::parser::ValuesRef;
 use eyre::{Context, Result};
 use ignore::WalkBuilder;
@@ -6,7 +7,12 @@ use rust_i18n::t;
 use std::fs::canonicalize;
 use std::path::{Path, PathBuf};
 
-pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<PathBuf>> {
+pub struct ScannedFile {
+    pub source_path: PathBuf,
+    pub archive_path: String,
+}
+
+pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<ScannedFile>> {
     let mut files = vec![];
 
     for item in paths {
@@ -36,7 +42,10 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<PathB
                 })?;
 
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    files.push(entry.path().to_path_buf());
+                    files.push(ScannedFile {
+                        source_path: entry.path().to_path_buf(),
+                        archive_path: calculate_archive_path(&absolute_path, entry.path()),
+                    });
                 }
             }
         }

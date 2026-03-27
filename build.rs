@@ -117,7 +117,7 @@ fn main() {
     validate_locale_file(Path::new("locales/en.toml"), &required_keys);
     validate_locale_file(Path::new("locales/ru.toml"), &required_keys);
 
-    let mut app = build_cli();
+    let mut app = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string());
     for &shell in Shell::value_variants() {
         generate_to(shell, &mut app, "dari", "completions/").ok();
     }

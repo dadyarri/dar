@@ -9,11 +9,13 @@ pub struct CompressionOutcome {
 }
 
 /// A trait that defines how to read different integer types from bytes
+#[cfg(test)]
 pub trait FromLeBytes: Sized {
     const SIZE: usize;
     fn from_le_bytes(bytes: &[u8]) -> Self;
 }
 
+#[cfg(test)]
 impl FromLeBytes for u8 {
     const SIZE: usize = 1;
     fn from_le_bytes(bytes: &[u8]) -> u8 {
@@ -21,6 +23,7 @@ impl FromLeBytes for u8 {
     }
 }
 
+#[cfg(test)]
 impl FromLeBytes for u16 {
     const SIZE: usize = 2;
     fn from_le_bytes(bytes: &[u8]) -> u16 {
@@ -28,6 +31,7 @@ impl FromLeBytes for u16 {
     }
 }
 
+#[cfg(test)]
 impl FromLeBytes for u32 {
     const SIZE: usize = 4;
     fn from_le_bytes(bytes: &[u8]) -> Self {
@@ -35,6 +39,7 @@ impl FromLeBytes for u32 {
     }
 }
 
+#[cfg(test)]
 impl FromLeBytes for u64 {
     const SIZE: usize = 8;
     fn from_le_bytes(bytes: &[u8]) -> Self {

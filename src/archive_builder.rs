@@ -1,9 +1,7 @@
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
-use crate::pipeline::{
-    CompressionPipeline, PipelineConfig, INDEX_FLAG_LINKED_DATA,
-};
+use crate::pipeline::{CompressionPipeline, PipelineConfig, INDEX_FLAG_LINKED_DATA};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
 use std::collections::HashMap;
@@ -30,10 +28,6 @@ struct ExistingFileData {
 }
 
 impl<W: Write + Seek> ArchiveBuilder<W> {
-    pub fn new(writer: W) -> Self {
-        Self::with_config(writer, PipelineConfig::default())
-    }
-
     pub fn with_config(writer: W, config: PipelineConfig) -> Self {
         Self {
             writer,
@@ -51,7 +45,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         Ok(())
     }
 
-    pub fn add_file(&mut self, file_path: &PathBuf) -> Result<()> {
+    pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<()> {
         let fs_meta = metadata(file_path)?;
         let file_size = fs_meta.len() as usize;
         let (uid, gid, perm) = get_mode(&fs_meta);
@@ -82,7 +76,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         // Process file through the compression pipeline (checksum + algorithm selection + compression)
         let pipeline_result = self.pipeline.process_file(file_path, file_content)?;
 
-        let archive_path = file_path.display().to_string();
+        let archive_path = archive_path.to_string();
         let mut bitflags = pipeline_result.bitflags;
 
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
@@ -205,9 +199,11 @@ mod tests {
     /// Write a minimal archive (header + one real file + footer) and return the bytes.
     fn build_archive_with_file(path: &std::path::Path) -> Vec<u8> {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::new(buffer);
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
         builder.write_header().unwrap();
-        builder.add_file(&path.to_path_buf()).unwrap();
+        builder
+            .add_file(&path.to_path_buf(), &path.display().to_string())
+            .unwrap();
         builder.build().unwrap();
         builder.writer.into_inner()
     }
@@ -215,7 +211,7 @@ mod tests {
     #[test]
     fn test_header_signature_and_version() {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::new(buffer);
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
         builder.write_header().unwrap();
         let data = builder.writer.into_inner();
 
@@ -251,17 +247,16 @@ mod tests {
         std::fs::write(&f2, b"fn main() {}").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::new(buffer);
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
         builder.write_header().unwrap();
-        builder.add_file(&f1).unwrap();
-        builder.add_file(&f2).unwrap();
+        builder.add_file(&f1, &f1.display().to_string()).unwrap();
+        builder.add_file(&f2, &f2.display().to_string()).unwrap();
         builder.build().unwrap();
         let data = builder.writer.into_inner();
 
         // file count is at footer_offset + 7 (signature) + 4 (index_offset) = +11
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let file_count =
-            read_bytes_as::<u32>(&data, footer_base + 11).unwrap();
+        let file_count = read_bytes_as::<u32>(&data, footer_base + 11).unwrap();
         assert_eq!(file_count, 2, "footer file count should be 2");
     }
 
@@ -275,8 +270,7 @@ mod tests {
 
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         // index_offset is at footer_base + 7 (after signature)
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap();
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap();
 
         // Index must come after the header (13 bytes) and the file data
         assert!(
@@ -296,8 +290,7 @@ mod tests {
 
         let header_end = size_of::<ArchiveHeader>();
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
         // There must be at least some bytes between header and index (the compressed file data)
         assert!(
@@ -315,8 +308,7 @@ mod tests {
         let data = build_archive_with_file(&file_path);
 
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
         // compression_method is the 7th byte of ArchiveIndexEntry (after offset u32 + bitflags u16)
         let cm_byte = data[index_offset + 6];
@@ -336,8 +328,7 @@ mod tests {
         let data = build_archive_with_file(&file_path);
 
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
         let cm_byte = data[index_offset + 6];
         assert_eq!(
@@ -356,8 +347,7 @@ mod tests {
         let data = build_archive_with_file(&file_path);
 
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
         let cm_byte = data[index_offset + 6];
         assert_eq!(
@@ -382,13 +372,14 @@ mod tests {
             },
         );
         builder.write_header().unwrap();
-        builder.add_file(&file_path.to_path_buf()).unwrap();
+        builder
+            .add_file(&file_path.to_path_buf(), &file_path.display().to_string())
+            .unwrap();
         builder.build().unwrap();
         let data = builder.writer.into_inner();
 
         let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset =
-            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
         let cm_byte = data[index_offset + 6];
         assert_eq!(
@@ -407,10 +398,10 @@ mod tests {
         std::fs::write(&f2, b"same-content").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::new(buffer);
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
         builder.write_header().unwrap();
-        builder.add_file(&f1).unwrap();
-        builder.add_file(&f2).unwrap();
+        builder.add_file(&f1, &f1.display().to_string()).unwrap();
+        builder.add_file(&f2, &f2.display().to_string()).unwrap();
         builder.build().unwrap();
         let data = builder.writer.into_inner();
 
@@ -426,7 +417,10 @@ mod tests {
         let second_offset = read_bytes_as::<u32>(&data, second_entry_offset).unwrap();
         let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 4).unwrap();
 
-        assert_eq!(first_offset, second_offset, "deduplicated file should link to first offset");
+        assert_eq!(
+            first_offset, second_offset,
+            "deduplicated file should link to first offset"
+        );
         assert_eq!(
             second_flags & INDEX_FLAG_LINKED_DATA,
             INDEX_FLAG_LINKED_DATA,
@@ -443,10 +437,10 @@ mod tests {
         std::fs::write(&f2, b"content-b").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::new(buffer);
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
         builder.write_header().unwrap();
-        builder.add_file(&f1).unwrap();
-        builder.add_file(&f2).unwrap();
+        builder.add_file(&f1, &f1.display().to_string()).unwrap();
+        builder.add_file(&f2, &f2.display().to_string()).unwrap();
         builder.build().unwrap();
         let data = builder.writer.into_inner();
 

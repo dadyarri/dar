@@ -54,10 +54,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     for file_entry in scan_files(content, locale)? {
         if verbose {
-            println!("{}", file_entry.display());
+            println!("{}", file_entry.source_path.display());
         }
 
-        builder.add_file(&file_entry)?
+        builder.add_file(&file_entry.source_path, &file_entry.archive_path)?
     }
 
     builder.build()?;
@@ -68,6 +68,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use crate::archive_builder::ArchiveBuilder;
+    use crate::pipeline::PipelineConfig;
     use crate::utils::{get_unix_timestamp, read_bytes_as, read_string};
     use std::io::Cursor;
 
@@ -77,7 +78,8 @@ mod tests {
         let mut buffer = Cursor::new(Vec::new());
 
         // Act
-        let mut builder = ArchiveBuilder::new(&mut buffer);
+        let mut builder =
+            ArchiveBuilder::with_config(&mut buffer, PipelineConfig::default());
         builder.write_header().unwrap();
 
         // Assert

@@ -90,11 +90,6 @@ impl Into<u8> for CompressionMethod {
     }
 }
 
-impl CompressionMethod {
-    pub fn as_byte(&self) -> u8 {
-        *self as u8
-    }
-}
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]

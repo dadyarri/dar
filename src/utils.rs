@@ -1,8 +1,12 @@
-use crate::traits::FromLeBytes;
-use eyre::{Context, ContextCompat, Result};
+use eyre::{Context, Result};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+use crate::traits::FromLeBytes;
+#[cfg(test)]
+use eyre::ContextCompat;
 
 /// Gets current timestamp in seconds since Unix Epoch
 pub fn get_unix_timestamp() -> Result<u64> {
@@ -13,6 +17,7 @@ pub fn get_unix_timestamp() -> Result<u64> {
 }
 
 /// Reads number of specified type in bytearray starting from specified index
+#[cfg(test)]
 pub fn read_bytes_as<T: FromLeBytes>(bytes: &[u8], starting_from: usize) -> Result<T> {
     let end = starting_from + T::SIZE;
 
@@ -28,6 +33,7 @@ pub fn read_bytes_as<T: FromLeBytes>(bytes: &[u8], starting_from: usize) -> Resu
 }
 
 /// Reads string of specified length starting from specified index from bytearray
+#[cfg(test)]
 pub fn read_string(bytes: &[u8], starting_from: usize, length: usize) -> Result<String> {
     let end = starting_from + length;
     let slice = bytes.get(starting_from..end).wrap_err_with(|| {
