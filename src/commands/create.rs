@@ -1,17 +1,19 @@
 use crate::archive_builder::ArchiveBuilder;
+use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
+use rust_i18n::t;
 use eyre::{eyre, Context, Result};
 use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-pub fn call(matches: &ArgMatches) -> Result<()> {
+pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches
         .get_one::<String>("file")
-        .ok_or_else(|| eyre!("File required"))?;
+        .ok_or_else(|| eyre!(t!("error.file_required", locale = locale.as_str())))?;
 
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
@@ -23,16 +25,23 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let content = matches.get_many::<String>("content").unwrap();
 
     if Path::new(file).exists() && !overwrite {
-        return Err(eyre!("File {} already exists", file));
+        return Err(eyre!(
+            t!("error.file_exists", locale = locale.as_str(), file = file)
+        ));
     }
 
     if Path::new(file).exists() && overwrite {
-        fs::remove_file(file).wrap_err("Failed to delete file")?;
+        fs::remove_file(file)
+            .wrap_err(t!("error.delete_failed", locale = locale.as_str()).to_string())?;
     }
 
-    println!("Creating archive {}", file);
+    println!(
+        "{}",
+        t!("msg.creating_archive", locale = locale.as_str(), file = file)
+    );
 
-    let file_handle = File::create(file).wrap_err("Failed to create file")?;
+    let file_handle = File::create(file)
+        .wrap_err(t!("error.create_file_failed", locale = locale.as_str()).to_string())?;
     let writer = BufWriter::new(file_handle);
 
     let config = PipelineConfig {
@@ -43,7 +52,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let mut builder = ArchiveBuilder::with_config(writer, config);
     builder.write_header()?;
 
-    for file_entry in scan_files(content)? {
+    for file_entry in scan_files(content, locale)? {
         if verbose {
             println!("{}", file_entry.display());
         }

@@ -1,18 +1,25 @@
-use clap::{crate_authors, crate_description, crate_version};
+use clap::{crate_authors, crate_version};
 use clap::{Arg, ArgAction, Command};
 
 pub fn build_cli() -> Command {
+    build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+}
+
+pub fn build_cli_with_translator<T>(translate: T) -> Command
+where
+    T: Fn(&str) -> String,
+{
     Command::new("dari")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_flag(true)
         .version(crate_version!())
         .author(crate_authors!())
-        .about(crate_description!())
+        .about(translate("cli.about"))
         .subcommands(vec![
             Command::new("create")
                 .short_flag('c')
-                .about("Creates new archive")
+                .about(translate("cli.create.about"))
                 .args(vec![
                     Arg::new("file")
                         .short('f')
@@ -20,52 +27,52 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::Set)
                         .num_args(1)
                         .required(true)
-                        .help("The path to the resulting archive file"),
+                        .help(translate("cli.arg.file")),
                     Arg::new("overwrite")
                         .short('o')
                         .long("overwrite")
                         .action(ArgAction::SetTrue)
-                        .help("Overwrite existing archive file"),
+                        .help(translate("cli.arg.overwrite")),
                     Arg::new("compress-images")
                         .long("compress-images")
                         .action(ArgAction::SetTrue)
-                        .help("Losslessly optimize PNG/JPEG using image-specific codecs"),
+                        .help(translate("cli.arg.compress_images")),
                     Arg::new("encrypt")
                         .long("encrypt")
                         .action(ArgAction::Set)
                         .num_args(1)
                         .value_name("PASSPHRASE")
                         .conflicts_with("encrypt-passphrase")
-                        .help("Encrypt file data with passphrase (alias of --encrypt-passphrase)"),
+                        .help(translate("cli.arg.encrypt")),
                     Arg::new("encrypt-passphrase")
                         .long("encrypt-passphrase")
                         .action(ArgAction::Set)
                         .num_args(1)
                         .value_name("PASSPHRASE")
                         .conflicts_with("encrypt")
-                        .help("Encrypt file data with passphrase (alias of --encrypt)"),
+                        .help(translate("cli.arg.encrypt_passphrase")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
                         .action(ArgAction::SetTrue)
-                        .help("Enables verbose output"),
+                        .help(translate("cli.arg.verbose")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)
                         .action(ArgAction::Append)
-                        .help("Files/folders to add to archive"),
+                        .help(translate("cli.arg.content")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
                         .action(ArgAction::Help)
-                        .help("Shows help of the command"),
+                        .help(translate("cli.arg.help")),
                 ]),
         ])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_cli;
+    use super::{build_cli, build_cli_with_translator};
     use clap::error::ErrorKind;
 
     #[test]
@@ -102,9 +109,21 @@ mod tests {
 
         let create = matches.subcommand_matches("create").unwrap();
         assert_eq!(
-            create.get_one::<String>("encrypt-passphrase").map(String::as_str),
+            create
+                .get_one::<String>("encrypt-passphrase")
+                .map(String::as_str),
             Some("pw")
         );
     }
-}
 
+    #[test]
+    fn test_help_is_localized_for_russian() {
+        let help = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "ru").to_string())
+            .try_get_matches_from(vec!["dari", "create", "--help"])
+            .unwrap_err()
+            .to_string();
+
+        let expected = rust_i18n::t!("cli.create.about", locale = "ru").to_string();
+        assert!(help.contains(&expected));
+    }
+}
