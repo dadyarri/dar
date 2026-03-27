@@ -30,6 +30,20 @@ pub fn build_cli() -> Command {
                         .long("compress-images")
                         .action(ArgAction::SetTrue)
                         .help("Losslessly optimize PNG/JPEG using image-specific codecs"),
+                    Arg::new("encrypt")
+                        .long("encrypt")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name("PASSPHRASE")
+                        .conflicts_with("encrypt-passphrase")
+                        .help("Encrypt file data with passphrase (alias of --encrypt-passphrase)"),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name("PASSPHRASE")
+                        .conflicts_with("encrypt")
+                        .help("Encrypt file data with passphrase (alias of --encrypt)"),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -48,3 +62,49 @@ pub fn build_cli() -> Command {
                 ]),
         ])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::build_cli;
+    use clap::error::ErrorKind;
+
+    #[test]
+    fn test_encrypt_flags_conflict() {
+        let result = build_cli().try_get_matches_from(vec![
+            "dari",
+            "create",
+            "-f",
+            "out.dar",
+            "--encrypt",
+            "pw1",
+            "--encrypt-passphrase",
+            "pw2",
+            "src",
+        ]);
+
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn test_encrypt_alias_is_accepted() {
+        let matches = build_cli()
+            .try_get_matches_from(vec![
+                "dari",
+                "create",
+                "-f",
+                "out.dar",
+                "--encrypt-passphrase",
+                "pw",
+                "src",
+            ])
+            .unwrap();
+
+        let create = matches.subcommand_matches("create").unwrap();
+        assert_eq!(
+            create.get_one::<String>("encrypt-passphrase").map(String::as_str),
+            Some("pw")
+        );
+    }
+}
+

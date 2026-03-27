@@ -16,6 +16,10 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
     let compress_images = matches.get_flag("compress-images");
+    let encryption_passphrase = matches
+        .get_one::<String>("encrypt")
+        .cloned()
+        .or_else(|| matches.get_one::<String>("encrypt-passphrase").cloned());
     let content = matches.get_many::<String>("content").unwrap();
 
     if Path::new(file).exists() && !overwrite {
@@ -33,6 +37,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
     let config = PipelineConfig {
         compress_images,
+        encryption_passphrase,
     };
 
     let mut builder = ArchiveBuilder::with_config(writer, config);

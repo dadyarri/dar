@@ -119,6 +119,7 @@ unsafe impl Zeroable for ArchiveIndexEntry {}
 impl ArchiveIndexEntry {
     pub fn new(
         offset: u32,
+        bitflags: u16,
         compression_method: CompressionMethod,
         modification_timestamp: u64,
         uid: u32,
@@ -132,7 +133,7 @@ impl ArchiveIndexEntry {
     ) -> Self {
         Self {
             offset,
-            bitflags: 0,
+            bitflags,
             compression_method,
             modification_timestamp,
             uid,

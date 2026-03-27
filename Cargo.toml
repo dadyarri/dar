@@ -16,6 +16,9 @@ zstd = "0.13.3"
 xz2 = "0.1.7"
 oxipng = { version = "10.1.0", default-features = false }
 lepton_jpeg = "0.5.8"
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["std"] }
+kamadak-exif = "0.6.1"
+lofty = { version = "0.21.1", default-features = true }
 
 [build-dependencies]
 clap = { version = "4.5.60", features = ["cargo"] }

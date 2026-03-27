@@ -1,8 +1,31 @@
 use crate::models::archive::CompressionMethod;
+use crate::extra::{encode_extra_pairs, upsert_extra_pair};
 use crate::traits::{compressor_for_extension, Compressor};
+use chacha20poly1305::aead::{AeadInPlace, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce};
+use exif::{Exif, In, Reader as ExifReader, Tag};
 use eyre::Result;
+use lofty::file::TaggedFileExt;
+use lofty::prelude::Accessor;
+use lofty::probe::Probe;
 use std::io::Cursor;
 use std::path::Path;
+
+pub const INDEX_FLAG_LINKED_DATA: u16 = 0b0000_0000_0000_0001;
+pub const INDEX_FLAG_ENCRYPTED_DATA: u16 = 0b0000_0000_0000_0010;
+
+const EXTRA_KEY_ENCRYPTION_ALGO: &str = "e";
+const EXTRA_KEY_ENCRYPTION_NONCE: &str = "en";
+const EXTRA_KEY_ENCRYPTION_TAG: &str = "et";
+
+const EXTRA_KEY_IMAGE_MAKE: &str = "imk";
+const EXTRA_KEY_IMAGE_MODEL: &str = "imd";
+const EXTRA_KEY_IMAGE_DATETIME_ORIGINAL: &str = "idt";
+
+const EXTRA_KEY_AUDIO_TITLE: &str = "atl";
+const EXTRA_KEY_AUDIO_ARTIST: &str = "aar";
+const EXTRA_KEY_AUDIO_ALBUM: &str = "aal";
+const EXTRA_KEY_AUDIO_GENRE: &str = "agn";
 
 /// Result of processing a file through the pipeline.
 #[derive(Debug, Clone)]
@@ -13,6 +36,10 @@ pub struct PipelineFileData {
     pub checksum: [u8; 32],
     pub original_size: u32,
     pub compressed_size: u32,
+    pub bitflags: u16,
+    pub extra: String,
+    pub encryption_nonce_hex: Option<String>,
+    pub encryption_tag_hex: Option<String>,
 }
 
 impl PipelineFileData {
@@ -25,6 +52,10 @@ impl PipelineFileData {
             checksum,
             original_size,
             compressed_size: 0,
+            bitflags: 0,
+            extra: String::new(),
+            encryption_nonce_hex: None,
+            encryption_tag_hex: None,
         }
     }
 }
@@ -33,6 +64,7 @@ impl PipelineFileData {
 #[derive(Clone, Debug, Default)]
 pub struct PipelineConfig {
     pub compress_images: bool,
+    pub encryption_passphrase: Option<String>,
 }
 
 /// The main compression pipeline.
@@ -57,6 +89,8 @@ impl CompressionPipeline {
     ) -> Result<PipelineFileData> {
         let mut file_data = self.calculate_checksum(file_content)?;
         self.select_and_compress(file_path, &mut file_data)?;
+        self.encrypt_if_enabled(&mut file_data)?;
+        self.populate_extra(file_path, &mut file_data);
         Ok(file_data)
     }
 
@@ -100,6 +134,120 @@ impl CompressionPipeline {
         file_data.compressed_content = Some(output);
         Ok(())
     }
+
+    fn encrypt_if_enabled(&self, file_data: &mut PipelineFileData) -> Result<()> {
+        let Some(passphrase) = &self.config.encryption_passphrase else {
+            return Ok(());
+        };
+
+        // Derive a stable nonce from checksum so deduplicated linked entries can reuse metadata.
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&file_data.checksum[..12]);
+        let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
+        let cipher = ChaCha20Poly1305::new((&key).into());
+
+        let mut encrypted = match &file_data.compressed_content {
+            Some(content) => content.clone(),
+            None => file_data.original_content.clone(),
+        };
+
+        let tag = cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
+
+        encrypted.extend_from_slice(tag.as_slice());
+        file_data.compressed_size = encrypted.len() as u32;
+        file_data.compressed_content = Some(encrypted);
+        file_data.bitflags |= INDEX_FLAG_ENCRYPTED_DATA;
+        file_data.encryption_nonce_hex = Some(hex_encode(&nonce));
+        file_data.encryption_tag_hex = Some(hex_encode(tag.as_slice()));
+        Ok(())
+    }
+
+    fn populate_extra(&self, _file_path: &Path, file_data: &mut PipelineFileData) {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+
+        if self.config.encryption_passphrase.is_some() {
+            upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_ALGO, "chacha20poly1305");
+
+            if let Some(nonce) = &file_data.encryption_nonce_hex {
+                upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_NONCE, nonce.clone());
+            }
+
+            if let Some(tag) = &file_data.encryption_tag_hex {
+                upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_TAG, tag.clone());
+            }
+        }
+
+        for (key, value) in extract_image_metadata(&file_data.original_content) {
+            upsert_extra_pair(&mut pairs, key, value);
+        }
+
+        for (key, value) in extract_audio_metadata(&file_data.original_content) {
+            upsert_extra_pair(&mut pairs, key, value);
+        }
+
+        file_data.extra = encode_extra_pairs(pairs);
+    }
+}
+
+fn extract_image_metadata(bytes: &[u8]) -> Vec<(String, String)> {
+    let mut metadata = Vec::new();
+    let mut cursor = Cursor::new(bytes);
+
+    let Ok(exif) = ExifReader::new().read_from_container(&mut cursor) else {
+        return metadata;
+    };
+
+    for (tag, key) in [
+        (Tag::Make, EXTRA_KEY_IMAGE_MAKE),
+        (Tag::Model, EXTRA_KEY_IMAGE_MODEL),
+        (Tag::DateTimeOriginal, EXTRA_KEY_IMAGE_DATETIME_ORIGINAL),
+    ] {
+        push_exif_field(&mut metadata, &exif, tag, key);
+    }
+
+    metadata
+}
+
+fn push_exif_field(metadata: &mut Vec<(String, String)>, exif: &Exif, tag: Tag, key: &str) {
+    if let Some(field) = exif.get_field(tag, In::PRIMARY) {
+        upsert_extra_pair(
+            metadata,
+            key,
+            field.display_value().with_unit(exif).to_string(),
+        );
+    }
+}
+
+fn extract_audio_metadata(bytes: &[u8]) -> Vec<(String, String)> {
+    let mut metadata = Vec::new();
+
+    let Ok(tagged_file) = Probe::new(Cursor::new(bytes)).read() else {
+        return metadata;
+    };
+
+    if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        for (accessor, key) in [
+            (tag.title(), EXTRA_KEY_AUDIO_TITLE),
+            (tag.artist(), EXTRA_KEY_AUDIO_ARTIST),
+            (tag.album(), EXTRA_KEY_AUDIO_ALBUM),
+            (tag.genre(), EXTRA_KEY_AUDIO_GENRE),
+        ] {
+            if let Some(value) = accessor {
+                upsert_extra_pair(&mut metadata, key, value.to_string());
+            }
+        }
+    }
+
+    metadata
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{:02x}", byte);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +260,10 @@ mod tests {
     use std::path::Path;
 
     fn make_pipeline(compress_images: bool) -> CompressionPipeline {
-        CompressionPipeline::new(PipelineConfig { compress_images })
+        CompressionPipeline::new(PipelineConfig {
+            compress_images,
+            encryption_passphrase: None,
+        })
     }
 
     // ---- checksum ----
@@ -290,5 +441,25 @@ mod tests {
             "Compressed size should be smaller than original for repetitive data"
         );
         assert_eq!(result.compressed_size, compressed.len() as u32);
+    }
+
+    #[test]
+    fn test_encryption_sets_flag_and_extra() {
+        let pipeline = CompressionPipeline::new(PipelineConfig {
+            compress_images: false,
+            encryption_passphrase: Some("secret".to_string()),
+        });
+
+        let result = pipeline
+            .process_file(Path::new("song.mp3"), b"plain bytes".to_vec())
+            .unwrap();
+
+        assert_eq!(
+            result.bitflags & INDEX_FLAG_ENCRYPTED_DATA,
+            INDEX_FLAG_ENCRYPTED_DATA
+        );
+        assert!(result.extra.contains("e=chacha20poly1305"));
+        assert!(result.extra.contains("en="));
+        assert!(result.extra.contains("et="));
     }
 }

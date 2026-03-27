@@ -1,9 +1,12 @@
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
-use crate::pipeline::{CompressionPipeline, PipelineConfig};
+use crate::pipeline::{
+    CompressionPipeline, PipelineConfig, INDEX_FLAG_LINKED_DATA,
+};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
+use std::collections::HashMap;
 use std::fs::{metadata, File};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -15,6 +18,15 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     writer: W,
     entries: Vec<ArchiveIndexEntryWrapper>,
     pipeline: CompressionPipeline,
+    dedup_index: HashMap<[u8; 32], ExistingFileData>,
+}
+
+#[derive(Clone, Copy)]
+struct ExistingFileData {
+    offset: u32,
+    compression_method: crate::models::archive::CompressionMethod,
+    compressed_size: u32,
+    bitflags: u16,
 }
 
 impl<W: Write + Seek> ArchiveBuilder<W> {
@@ -27,6 +39,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             writer,
             entries: Vec::new(),
             pipeline: CompressionPipeline::new(config),
+            dedup_index: HashMap::new(),
         }
     }
 
@@ -69,6 +82,34 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         // Process file through the compression pipeline (checksum + algorithm selection + compression)
         let pipeline_result = self.pipeline.process_file(file_path, file_content)?;
 
+        let archive_path = file_path.display().to_string();
+        let mut bitflags = pipeline_result.bitflags;
+
+        if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
+            bitflags |= INDEX_FLAG_LINKED_DATA;
+
+            self.entries.push(ArchiveIndexEntryWrapper::new(
+                ArchiveIndexEntry::new(
+                    existing.offset,
+                    bitflags | existing.bitflags,
+                    existing.compression_method,
+                    timestamp,
+                    uid,
+                    gid,
+                    perm,
+                    pipeline_result.checksum,
+                    pipeline_result.original_size,
+                    existing.compressed_size,
+                    archive_path.len() as u32,
+                    pipeline_result.extra.len() as u32,
+                ),
+                archive_path,
+                pipeline_result.extra,
+            ));
+
+            return Ok(());
+        }
+
         // Record byte offset where this file's data block begins
         let data_offset = self
             .writer
@@ -88,11 +129,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .write_all(bytes_to_write)
             .wrap_err_with(|| format!("Failed to write file data for {}", file_path.display()))?;
 
-        let archive_path = file_path.display().to_string();
-
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry::new(
                 data_offset,
+                bitflags,
                 pipeline_result.compression_method,
                 timestamp,
                 uid,
@@ -102,11 +142,21 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 pipeline_result.original_size,
                 compressed_size,
                 archive_path.len() as u32,
-                0,
+                pipeline_result.extra.len() as u32,
             ),
             archive_path,
-            String::new(),
+            pipeline_result.extra,
         ));
+
+        self.dedup_index.insert(
+            pipeline_result.checksum,
+            ExistingFileData {
+                offset: data_offset,
+                compression_method: pipeline_result.compression_method,
+                compressed_size,
+                bitflags,
+            },
+        );
 
         Ok(())
     }
@@ -147,6 +197,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 mod tests {
     use super::*;
     use crate::models::archive::{ArchiveFooter, ArchiveHeader, CompressionMethod};
+    use crate::pipeline::INDEX_FLAG_LINKED_DATA;
     use crate::utils::read_bytes_as;
     use std::io::Cursor;
     use std::mem::size_of;
@@ -327,6 +378,7 @@ mod tests {
             buffer,
             PipelineConfig {
                 compress_images: true,
+                encryption_passphrase: None,
             },
         );
         builder.write_header().unwrap();
@@ -343,6 +395,81 @@ mod tests {
             cm_byte,
             CompressionMethod::None as u8,
             "invalid jpeg bytes should be stored unchanged when optimization fails"
+        );
+    }
+
+    #[test]
+    fn test_dedup_links_second_file_to_first_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("same1.txt");
+        let f2 = dir.path().join("same2.txt");
+        std::fs::write(&f1, b"same-content").unwrap();
+        std::fs::write(&f2, b"same-content").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::new(buffer);
+        builder.write_header().unwrap();
+        builder.add_file(&f1).unwrap();
+        builder.add_file(&f2).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let entry_size = size_of::<crate::models::archive::ArchiveIndexEntry>();
+
+        let first_offset = read_bytes_as::<u32>(&data, index_offset).unwrap();
+        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 65).unwrap() as usize;
+        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 69).unwrap() as usize;
+
+        let second_entry_offset = index_offset + entry_size + first_path_len + first_extra_len;
+        let second_offset = read_bytes_as::<u32>(&data, second_entry_offset).unwrap();
+        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 4).unwrap();
+
+        assert_eq!(first_offset, second_offset, "deduplicated file should link to first offset");
+        assert_eq!(
+            second_flags & INDEX_FLAG_LINKED_DATA,
+            INDEX_FLAG_LINKED_DATA,
+            "deduplicated entry should set linked bitflag"
+        );
+    }
+
+    #[test]
+    fn test_dedup_does_not_link_different_checksums() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.txt");
+        std::fs::write(&f1, b"content-a").unwrap();
+        std::fs::write(&f2, b"content-b").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::new(buffer);
+        builder.write_header().unwrap();
+        builder.add_file(&f1).unwrap();
+        builder.add_file(&f2).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let entry_size = size_of::<crate::models::archive::ArchiveIndexEntry>();
+
+        let first_offset = read_bytes_as::<u32>(&data, index_offset).unwrap();
+        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 65).unwrap() as usize;
+        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 69).unwrap() as usize;
+
+        let second_entry_offset = index_offset + entry_size + first_path_len + first_extra_len;
+        let second_offset = read_bytes_as::<u32>(&data, second_entry_offset).unwrap();
+        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 4).unwrap();
+
+        assert_ne!(
+            first_offset, second_offset,
+            "different files should keep distinct data offsets"
+        );
+        assert_eq!(
+            second_flags & INDEX_FLAG_LINKED_DATA,
+            0,
+            "non-duplicate entry must not set linked bitflag"
         );
     }
 }

@@ -4,6 +4,7 @@ mod archive_builder;
 mod cli;
 mod commands;
 mod counting_writer;
+mod extra;
 mod models;
 mod pipeline;
 mod traits;
