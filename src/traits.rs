@@ -1,6 +1,12 @@
 use crate::counting_writer::CountingWriter;
+use crate::models::archive::CompressionMethod;
 use eyre::{eyre, Result};
 use std::io::{Read, Write};
+
+pub struct CompressionOutcome {
+    pub bytes_written: u64,
+    pub method: CompressionMethod,
+}
 
 /// A trait that defines how to read different integer types from bytes
 pub trait FromLeBytes: Sized {
@@ -38,14 +44,11 @@ impl FromLeBytes for u64 {
 
 pub trait Compressor {
     fn get_best_extensions(&self) -> &[&str];
-    fn compress<InputType, OutputType>(
-        &self,
-        input: &mut InputType,
-        output: &mut OutputType,
-    ) -> Result<u64>
-    where
-        InputType: Read,
-        OutputType: Write;
+    /// Compress `input` into `output`, returning the number of bytes written.
+    ///
+    /// Using trait objects (`&mut dyn Read` / `&mut dyn Write`) keeps this
+    /// trait object-safe so it can be used as `&dyn Compressor`.
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome>;
 }
 
 pub struct NoneCompressor;
@@ -57,18 +60,13 @@ impl Compressor for NoneCompressor {
         ]
     }
 
-    fn compress<InputType, OutputType>(
-        &self,
-        input: &mut InputType,
-        output: &mut OutputType,
-    ) -> Result<u64>
-    where
-        InputType: Read,
-        OutputType: Write,
-    {
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
         let mut counter = CountingWriter::new(output);
         std::io::copy(input, &mut counter)?;
-        Ok(counter.bytes_written)
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method: CompressionMethod::None,
+        })
     }
 }
 
@@ -82,22 +80,20 @@ impl Compressor for BrotliCompressor {
         ]
     }
 
-    fn compress<InputType, OutputType>(
-        &self,
-        input: &mut InputType,
-        output: &mut OutputType,
-    ) -> Result<u64>
-    where
-        InputType: Read,
-        OutputType: Write,
-    {
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf)?;
+        let mut cursor = std::io::Cursor::new(buf);
         let mut params = brotli::enc::BrotliEncoderParams::default();
         params.quality = 11;
         params.lgwin = 24;
         let mut counter = CountingWriter::new(output);
-        brotli::BrotliCompress(input, &mut counter, &params)
+        brotli::BrotliCompress(&mut cursor, &mut counter, &params)
             .map_err(|e| eyre!("Brotli compression error: {}", e))?;
-        Ok(counter.bytes_written)
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method: CompressionMethod::Brotli,
+        })
     }
 }
 
@@ -111,21 +107,18 @@ impl Compressor for ZStandardCompressor {
         ]
     }
 
-    fn compress<InputType, OutputType>(
-        &self,
-        input: &mut InputType,
-        output: &mut OutputType,
-    ) -> Result<u64>
-    where
-        InputType: Read,
-        OutputType: Write,
-    {
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf)?;
         let mut counter = CountingWriter::new(output);
         counter.write_all(
-            &*zstd::encode_all(input, 19)
+            &*zstd::encode_all(std::io::Cursor::new(buf), 19)
                 .map_err(|e| eyre!("ZStandard compression error: {}", e))?,
         )?;
-        Ok(counter.bytes_written)
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method: CompressionMethod::Zstandard,
+        })
     }
 }
 
@@ -138,21 +131,117 @@ impl Compressor for LzmaCompressor {
         ]
     }
 
-    fn compress<InputType, OutputType>(
-        &self,
-        input: &mut InputType,
-        output: &mut OutputType,
-    ) -> Result<u64>
-    where
-        InputType: Read,
-        OutputType: Write,
-    {
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
         let mut counter = CountingWriter::new(output);
         {
             let mut encoder = xz2::write::XzEncoder::new(&mut counter, 9);
             std::io::copy(input, &mut encoder)?;
             encoder.finish()?;
         }
-        Ok(counter.bytes_written)
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method: CompressionMethod::Lzma,
+        })
     }
+}
+
+pub struct PngOxipngCompressor;
+impl Compressor for PngOxipngCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &["png"]
+    }
+
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
+        let mut original = Vec::new();
+        input.read_to_end(&mut original)?;
+
+        let opts = oxipng::Options::max_compression();
+        let optimized = oxipng::optimize_from_memory(&original, &opts).ok();
+        let chosen = match optimized {
+            Some(bytes) if bytes.len() < original.len() => bytes,
+            _ => original,
+        };
+
+        let mut counter = CountingWriter::new(output);
+        counter.write_all(&chosen)?;
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method: CompressionMethod::None,
+        })
+    }
+}
+
+pub struct JpegLeptonCompressor;
+impl Compressor for JpegLeptonCompressor {
+    fn get_best_extensions(&self) -> &[&str] {
+        &["jpg", "jpeg"]
+    }
+
+    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
+        let mut original = Vec::new();
+        input.read_to_end(&mut original)?;
+
+        let features = lepton_jpeg::EnabledFeatures::compat_lepton_vector_write();
+        let optimized = lepton_jpeg::encode_lepton_verify(
+            &original,
+            &features,
+            &lepton_jpeg::DEFAULT_THREAD_POOL,
+        )
+        .ok()
+        .map(|(bytes, _)| bytes);
+
+        let (chosen, method) = match optimized {
+            Some(bytes) if bytes.len() < original.len() => (bytes, CompressionMethod::LeptonJpeg),
+            _ => (original, CompressionMethod::None),
+        };
+
+        let mut counter = CountingWriter::new(output);
+        counter.write_all(&chosen)?;
+        Ok(CompressionOutcome {
+            bytes_written: counter.bytes_written,
+            method,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Static instances – zero-cost, usable as `&'static dyn Compressor`
+// ---------------------------------------------------------------------------
+
+pub static NONE_COMPRESSOR: NoneCompressor = NoneCompressor;
+pub static BROTLI_COMPRESSOR: BrotliCompressor = BrotliCompressor;
+pub static ZSTANDARD_COMPRESSOR: ZStandardCompressor = ZStandardCompressor;
+pub static LZMA_COMPRESSOR: LzmaCompressor = LzmaCompressor;
+pub static PNG_OXIPNG_COMPRESSOR: PngOxipngCompressor = PngOxipngCompressor;
+pub static JPEG_LEPTON_COMPRESSOR: JpegLeptonCompressor = JpegLeptonCompressor;
+
+/// Returns the best compressor for the given lowercase file extension.
+///
+/// Compressors are checked in priority order: None → Brotli → ZStandard → Lzma.
+/// Unknown extensions fall back to [`ZSTANDARD_COMPRESSOR`].
+pub fn compressor_for_extension(ext: &str, compress_images: bool) -> &'static dyn Compressor {
+    if compress_images {
+        if ext == "png" {
+            return &PNG_OXIPNG_COMPRESSOR;
+        }
+
+        if ext == "jpg" || ext == "jpeg" {
+            return &JPEG_LEPTON_COMPRESSOR;
+        }
+    }
+
+    let candidates: &[&'static dyn Compressor] = &[
+        &NONE_COMPRESSOR,
+        &BROTLI_COMPRESSOR,
+        &ZSTANDARD_COMPRESSOR,
+        &LZMA_COMPRESSOR,
+    ];
+
+    for &compressor in candidates {
+        if compressor.get_best_extensions().iter().any(|e| *e == ext) {
+            return compressor;
+        }
+    }
+
+    &ZSTANDARD_COMPRESSOR // default for unknown extensions
 }

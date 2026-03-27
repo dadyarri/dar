@@ -1,10 +1,11 @@
 use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
+    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
+use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
 use std::fs::{metadata, File};
-use std::io::{Seek, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -12,16 +13,20 @@ const CHUNK_SIZE: usize = 512 * 1024; // 512KB
 
 pub struct ArchiveBuilder<W: Write + Seek> {
     writer: W,
-    index_offset: u32,
     entries: Vec<ArchiveIndexEntryWrapper>,
+    pipeline: CompressionPipeline,
 }
 
 impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn new(writer: W) -> Self {
+        Self::with_config(writer, PipelineConfig::default())
+    }
+
+    pub fn with_config(writer: W, config: PipelineConfig) -> Self {
         Self {
             writer,
-            index_offset: 0,
             entries: Vec::new(),
+            pipeline: CompressionPipeline::new(config),
         }
     }
 
@@ -30,15 +35,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .write(&mut self.writer)
             .wrap_err("Failed to write archive header")?;
 
-        self.index_offset += size_of::<ArchiveHeader>() as u32 + 1;
-
         Ok(())
     }
 
     pub fn add_file(&mut self, file_path: &PathBuf) -> Result<()> {
-        // Определить порядок действий для сжатия;
-        // Сжать файл;
-
         let fs_meta = metadata(file_path)?;
         let file_size = fs_meta.len() as usize;
         let (uid, gid, perm) = get_mode(&fs_meta);
@@ -66,38 +66,283 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             file_content = std::fs::read(file_path)?;
         }
 
-        let hash = blake3::hash(&file_content);
-        let mut checksum = [0u8; 32];
-        checksum.copy_from_slice(hash.as_bytes());
+        // Process file through the compression pipeline (checksum + algorithm selection + compression)
+        let pipeline_result = self.pipeline.process_file(file_path, file_content)?;
+
+        // Record byte offset where this file's data block begins
+        let data_offset = self
+            .writer
+            .seek(SeekFrom::Current(0))
+            .wrap_err("Failed to get current write position")? as u32;
+
+        // Write file data: compressed bytes if compression ran, otherwise original bytes
+        let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
+            Some(compressed) => (compressed.as_slice(), compressed.len() as u32),
+            None => (
+                pipeline_result.original_content.as_slice(),
+                pipeline_result.original_size,
+            ),
+        };
+
+        self.writer
+            .write_all(bytes_to_write)
+            .wrap_err_with(|| format!("Failed to write file data for {}", file_path.display()))?;
+
+        let archive_path = file_path.display().to_string();
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry::new(
-                0,
-                CompressionMethod::None,
+                data_offset,
+                pipeline_result.compression_method,
                 timestamp,
                 uid,
                 gid,
                 perm,
-                checksum,
-                file_size as u32,
-                0,
-                file_path.display().to_string().len() as u32,
+                pipeline_result.checksum,
+                pipeline_result.original_size,
+                compressed_size,
+                archive_path.len() as u32,
                 0,
             ),
-            file_path.display().to_string(),
-            "".to_string(),
+            archive_path,
+            String::new(),
         ));
 
         Ok(())
     }
 
     pub fn build(&mut self) -> Result<()> {
-        ArchiveFooter::new(self.index_offset, self.entries.len() as u32)
+        // Record where the index section begins
+        let index_offset = self
+            .writer
+            .seek(SeekFrom::Current(0))
+            .wrap_err("Failed to get index offset position")? as u32;
+
+        // Write all index entries: fixed-size struct + path bytes + extra bytes
+        for wrapper in &self.entries {
+            wrapper
+                .entry
+                .write(&mut self.writer)
+                .wrap_err("Failed to write index entry")?;
+            self.writer
+                .write_all(wrapper.path.as_bytes())
+                .wrap_err("Failed to write entry path")?;
+            self.writer
+                .write_all(wrapper.extra.as_bytes())
+                .wrap_err("Failed to write entry extra")?;
+        }
+
+        // Write footer pointing at the index
+        ArchiveFooter::new(index_offset, self.entries.len() as u32)
             .write(&mut self.writer)
             .wrap_err("Failed to write archive footer")?;
 
         self.writer.flush().wrap_err("Failed to flush archive")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::archive::{ArchiveFooter, ArchiveHeader, CompressionMethod};
+    use crate::utils::read_bytes_as;
+    use std::io::Cursor;
+    use std::mem::size_of;
+
+    /// Write a minimal archive (header + one real file + footer) and return the bytes.
+    fn build_archive_with_file(path: &std::path::Path) -> Vec<u8> {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::new(buffer);
+        builder.write_header().unwrap();
+        builder.add_file(&path.to_path_buf()).unwrap();
+        builder.build().unwrap();
+        builder.writer.into_inner()
+    }
+
+    #[test]
+    fn test_header_signature_and_version() {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::new(buffer);
+        builder.write_header().unwrap();
+        let data = builder.writer.into_inner();
+
+        assert_eq!(&data[0..4], b"DARI", "signature mismatch");
+        assert_eq!(data[4], 5, "version mismatch");
+        assert!(data.len() >= size_of::<ArchiveHeader>());
+    }
+
+    #[test]
+    fn test_footer_signature_written() {
+        // Create a temp file with known content
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("hello.txt");
+        std::fs::write(&file_path, b"hello world").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        // Footer is the last `size_of::<ArchiveFooter>()` bytes
+        let footer_offset = data.len() - size_of::<ArchiveFooter>();
+        assert_eq!(
+            &data[footer_offset..footer_offset + 7],
+            b"DARIEND",
+            "footer signature mismatch"
+        );
+    }
+
+    #[test]
+    fn test_footer_file_count_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, b"aaa").unwrap();
+        std::fs::write(&f2, b"fn main() {}").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::new(buffer);
+        builder.write_header().unwrap();
+        builder.add_file(&f1).unwrap();
+        builder.add_file(&f2).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        // file count is at footer_offset + 7 (signature) + 4 (index_offset) = +11
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let file_count =
+            read_bytes_as::<u32>(&data, footer_base + 11).unwrap();
+        assert_eq!(file_count, 2, "footer file count should be 2");
+    }
+
+    #[test]
+    fn test_index_offset_points_past_file_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.txt");
+        std::fs::write(&file_path, b"some data").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        // index_offset is at footer_base + 7 (after signature)
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap();
+
+        // Index must come after the header (13 bytes) and the file data
+        assert!(
+            index_offset > size_of::<ArchiveHeader>() as u32,
+            "index_offset ({index_offset}) must be past the header"
+        );
+    }
+
+    #[test]
+    fn test_file_data_is_written_between_header_and_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("words.txt");
+        let content = b"the quick brown fox";
+        std::fs::write(&file_path, content).unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let header_end = size_of::<ArchiveHeader>();
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        // There must be at least some bytes between header and index (the compressed file data)
+        assert!(
+            index_offset > header_end,
+            "file data section should be non-empty between header and index"
+        );
+    }
+
+    #[test]
+    fn test_txt_entry_uses_brotli() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("readme.txt");
+        std::fs::write(&file_path, b"Hello from dari").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        // compression_method is the 7th byte of ArchiveIndexEntry (after offset u32 + bitflags u16)
+        let cm_byte = data[index_offset + 6];
+        assert_eq!(
+            cm_byte,
+            CompressionMethod::Brotli as u8,
+            ".txt should use Brotli"
+        );
+    }
+
+    #[test]
+    fn test_rs_entry_uses_zstandard() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("main.rs");
+        std::fs::write(&file_path, b"fn main() {}").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        let cm_byte = data[index_offset + 6];
+        assert_eq!(
+            cm_byte,
+            CompressionMethod::Zstandard as u8,
+            ".rs should use Zstandard"
+        );
+    }
+
+    #[test]
+    fn test_jpg_entry_skips_compression_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("photo.jpg");
+        std::fs::write(&file_path, b"fake jpeg data").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        let cm_byte = data[index_offset + 6];
+        assert_eq!(
+            cm_byte,
+            CompressionMethod::None as u8,
+            ".jpg should use None by default"
+        );
+    }
+
+    #[test]
+    fn test_jpg_entry_with_compress_images_falls_back_for_invalid_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("photo.jpg");
+        std::fs::write(&file_path, b"fake jpeg data that compresses aaaaaaaaa").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_config(
+            buffer,
+            PipelineConfig {
+                compress_images: true,
+            },
+        );
+        builder.write_header().unwrap();
+        builder.add_file(&file_path.to_path_buf()).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset =
+            read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        let cm_byte = data[index_offset + 6];
+        assert_eq!(
+            cm_byte,
+            CompressionMethod::None as u8,
+            "invalid jpeg bytes should be stored unchanged when optimization fails"
+        );
     }
 }

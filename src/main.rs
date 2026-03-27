@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod counting_writer;
 mod models;
+mod pipeline;
 mod traits;
 mod utils;
 mod walker;

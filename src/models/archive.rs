@@ -60,6 +60,7 @@ pub enum CompressionMethod {
     Brotli,
     Zstandard,
     Lzma,
+    LeptonJpeg,
 }
 
 impl TryFrom<u8> for CompressionMethod {
@@ -71,6 +72,7 @@ impl TryFrom<u8> for CompressionMethod {
             1 => Ok(CompressionMethod::Brotli),
             2 => Ok(CompressionMethod::Zstandard),
             3 => Ok(CompressionMethod::Lzma),
+            4 => Ok(CompressionMethod::LeptonJpeg),
             _ => Err(eyre!("Invalid value for CompressionMethod: {}", value)),
         }
     }
@@ -83,6 +85,7 @@ impl Into<u8> for CompressionMethod {
             CompressionMethod::Brotli => 1,
             CompressionMethod::Zstandard => 2,
             CompressionMethod::Lzma => 3,
+            CompressionMethod::LeptonJpeg => 4,
         }
     }
 }

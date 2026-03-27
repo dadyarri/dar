@@ -1,4 +1,5 @@
 use crate::archive_builder::ArchiveBuilder;
+use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{eyre, Context, Result};
@@ -14,6 +15,7 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
 
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
+    let compress_images = matches.get_flag("compress-images");
     let content = matches.get_many::<String>("content").unwrap();
 
     if Path::new(file).exists() && !overwrite {
@@ -29,7 +31,11 @@ pub fn call(matches: &ArgMatches) -> Result<()> {
     let file_handle = File::create(file).wrap_err("Failed to create file")?;
     let writer = BufWriter::new(file_handle);
 
-    let mut builder = ArchiveBuilder::new(writer);
+    let config = PipelineConfig {
+        compress_images,
+    };
+
+    let mut builder = ArchiveBuilder::with_config(writer, config);
     builder.write_header()?;
 
     for file_entry in scan_files(content)? {

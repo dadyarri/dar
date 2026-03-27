@@ -26,11 +26,14 @@ pub fn build_cli() -> Command {
                         .long("overwrite")
                         .action(ArgAction::SetTrue)
                         .help("Overwrite existing archive file"),
+                    Arg::new("compress-images")
+                        .long("compress-images")
+                        .action(ArgAction::SetTrue)
+                        .help("Losslessly optimize PNG/JPEG using image-specific codecs"),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
                         .action(ArgAction::SetTrue)
-                        .conflicts_with("progress")
                         .help("Enables verbose output"),
                     Arg::new("content")
                         .num_args(0..)
