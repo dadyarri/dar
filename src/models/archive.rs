@@ -1,6 +1,7 @@
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
 use eyre::{eyre, Error};
+use rust_i18n::t;
 use std::io::Write;
 
 #[repr(C, packed)]
@@ -73,7 +74,7 @@ impl TryFrom<u8> for CompressionMethod {
             2 => Ok(CompressionMethod::Zstandard),
             3 => Ok(CompressionMethod::Lzma),
             4 => Ok(CompressionMethod::LeptonJpeg),
-            _ => Err(eyre!("Invalid value for CompressionMethod: {}", value)),
+            _ => Err(eyre!(t!("cli.errors.invalid_compression_method", value = value))),
         }
     }
 }

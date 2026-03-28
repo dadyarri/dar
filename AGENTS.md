@@ -21,6 +21,8 @@ CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
   selection, optional ChaCha20-Poly1305 encryption, and `extra` metadata population (image/audio tags + encryption
   metadata).
 - **`src/archive_builder.rs`** — generic over `W: Write + Seek`; tests pass `Cursor<Vec<u8>>` directly.
+- **`src/main.rs` + `locales/*.toml`** — `rust-i18n` is initialized in `main`; CLI text and user-facing runtime errors are
+  translated via `t!(...)` keys from `locales/en.toml` and `locales/ru.toml`.
 
 ## Binary Format
 
@@ -71,7 +73,9 @@ loop; smaller files use `std::fs::read`.
 ## Error Handling
 
 All fallible functions return `eyre::Result<T>`. Chain context with `.wrap_err("…")` or
-`.wrap_err_with(|| format!("…"))`. Never use `unwrap` in non-test code.
+`.wrap_err_with(|| format!("…"))`. User-facing/runtime error text should come from `rust_i18n::t!("cli.errors.…")`
+instead of hard-coded English strings; keep literal error/assert messages only in tests. Never use `unwrap` in non-test
+code.
 
 ## Utility Helpers (`src/utils.rs`)
 

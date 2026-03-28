@@ -1,22 +1,60 @@
 _version = 1
 
-cli.about = "Archiver that combines multiple compression algorithms with useful utilities"
-cli.create.about = "Creates new archive"
-cli.arg.file = "The path to the resulting archive file"
-cli.arg.overwrite = "Overwrite existing archive file"
-cli.arg.compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
-cli.arg.encrypt = "Encrypt file data with passphrase (alias of --encrypt-passphrase)"
-cli.arg.encrypt_passphrase = "Encrypt file data with passphrase (alias of --encrypt)"
-cli.arg.verbose = "Enables verbose output"
-cli.arg.content = "Files/folders to add to archive"
-cli.arg.help = "Shows help of the command"
-error.file_required = "File required"
-error.file_exists = "File %{file} already exists"
-error.delete_failed = "Failed to delete file"
-error.create_file_failed = "Failed to create file"
-error.create_archive_failed = "Failed to create archive"
-error.canonicalize_failed = "Failed to canonicalize path %{path}"
-error.walk_failed = "Failed to walk directory %{path}"
-msg.creating_archive = "Creating archive %{file}"
+[cli]
+about = "Archiver that combines multiple compression algorithms with useful utilities"
+
+[cli.common.args]
+verbose = "Enables verbose output"
+content = "Files/folders to add to archive"
+help = "Shows help of the command"
+version = "Shows version information"
+
+[cli.common.headings]
+usage = "Usage"
+commands = "Commands"
+arguments = "Arguments"
+options = "Options"
+
+[cli.create]
+about = "Creates new archive"
+
+[cli.create.args]
+file = "The path to the resulting archive file"
+overwrite = "Overwrite existing archive file"
+compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
+encrypt = "Encrypt file data with passphrase (alias of --encrypt-passphrase)"
+encrypt_passphrase = "Encrypt file data with passphrase (alias of --encrypt)"
+passphrase_value = "PASSPHRASE"
+
+[cli.append]
+about = "Appends data to existing archive"
+
+[cli.append.args]
+file = "The path to the existing archive file"
+
+[cli.errors]
+file_required = "File required"
+file_exists = "File %{file} already exists"
+delete_failed = "Failed to delete file"
+create_file_failed = "Failed to create file"
+create_archive_failed = "Failed to create archive"
+canonicalize_failed = "Failed to canonicalize path %{path}"
+walk_failed = "Failed to walk directory %{path}"
+header_write_failed = "Failed to write archive header"
+get_write_position_failed = "Failed to get current write position"
+file_write_failed = "Failed to write file data for %{file}"
+get_index_offset_failed = "Failed to get index offset position"
+index_entry_write_failed = "Failed to write index entry"
+entry_path_write_failed = "Failed to write entry path"
+entry_extra_write_failed = "Failed to write entry extra"
+footer_write_failed = "Failed to write archive footer"
+flush_archive_failed = "Failed to flush archive"
+brotli_compression_failed = "Brotli compression error: %{error}"
+zstd_compression_failed = "ZStandard compression error: %{error}"
+invalid_compression_method = "Invalid value for CompressionMethod: %{value}"
+time_before_unix_epoch = "Time is set before Unix Epoch"
+
+[cli.messages]
+creating_archive = "Creating archive %{file}"
 
 

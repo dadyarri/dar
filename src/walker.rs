@@ -19,7 +19,7 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
         let relative_path = Path::new(item);
         let absolute_path = canonicalize(relative_path).wrap_err_with(|| {
             t!(
-                "error.canonicalize_failed",
+                "cli.errors.canonicalize_failed",
                 locale = locale.as_str(),
                 path = relative_path.display()
             )
@@ -35,7 +35,7 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
             for entry in walker {
                 let entry = entry.wrap_err_with(|| {
                     t!(
-                        "error.walk_failed",
+                        "cli.errors.walk_failed",
                         locale = locale.as_str(),
                         path = absolute_path.display()
                     )

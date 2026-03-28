@@ -4,6 +4,7 @@ use crate::models::archive::{
 use crate::pipeline::{CompressionPipeline, PipelineConfig, INDEX_FLAG_LINKED_DATA};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::fs::{metadata, File};
 use std::io::{Seek, Write};
@@ -40,7 +41,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn write_header(&mut self) -> Result<()> {
         ArchiveHeader::new()
             .write(&mut self.writer)
-            .wrap_err("Failed to write archive header")?;
+            .wrap_err(t!("cli.errors.header_write_failed"))?;
 
         Ok(())
     }
@@ -108,7 +109,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let data_offset = self
             .writer
             .stream_position()
-            .wrap_err("Failed to get current write position")? as u32;
+            .wrap_err(t!("cli.errors.get_write_position_failed"))? as u32;
 
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
@@ -121,7 +122,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         self.writer
             .write_all(bytes_to_write)
-            .wrap_err_with(|| format!("Failed to write file data for {}", file_path.display()))?;
+            .wrap_err_with(|| t!("cli.errors.file_write_failed", file = file_path.display()))?;
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry {
@@ -160,28 +161,30 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let index_offset = self
             .writer
             .stream_position()
-            .wrap_err("Failed to get index offset position")? as u32;
+            .wrap_err(t!("cli.errors.get_index_offset_failed"))? as u32;
 
         // Write all index entries: fixed-size struct + path bytes + extra bytes
         for wrapper in &self.entries {
             wrapper
                 .entry
                 .write(&mut self.writer)
-                .wrap_err("Failed to write index entry")?;
+                .wrap_err(t!("cli.errors.index_entry_write_failed"))?;
             self.writer
                 .write_all(wrapper.path.as_bytes())
-                .wrap_err("Failed to write entry path")?;
+                .wrap_err(t!("cli.errors.entry_path_write_failed"))?;
             self.writer
                 .write_all(wrapper.extra.as_bytes())
-                .wrap_err("Failed to write entry extra")?;
+                .wrap_err(t!("cli.errors.entry_extra_write_failed"))?;
         }
 
         // Write footer pointing at the index
         ArchiveFooter::new(index_offset, self.entries.len() as u32)
             .write(&mut self.writer)
-            .wrap_err("Failed to write archive footer")?;
+            .wrap_err(t!("cli.errors.footer_write_failed"))?;
 
-        self.writer.flush().wrap_err("Failed to flush archive")?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.errors.flush_archive_failed"))?;
 
         Ok(())
     }

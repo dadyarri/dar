@@ -1,6 +1,7 @@
 use crate::counting_writer::CountingWriter;
 use crate::models::archive::CompressionMethod;
 use eyre::{eyre, Result};
+use rust_i18n::t;
 use std::io::{Read, Write};
 
 pub struct CompressionOutcome {
@@ -96,7 +97,7 @@ impl Compressor for BrotliCompressor {
         };
         let mut counter = CountingWriter::new(output);
         brotli::BrotliCompress(&mut cursor, &mut counter, &params)
-            .map_err(|e| eyre!("Brotli compression error: {}", e))?;
+            .map_err(|e| eyre!(t!("cli.errors.brotli_compression_failed", error = e)))?;
         Ok(CompressionOutcome {
             bytes_written: counter.bytes_written,
             method: CompressionMethod::Brotli,
@@ -120,7 +121,7 @@ impl Compressor for ZStandardCompressor {
         let mut counter = CountingWriter::new(output);
         counter.write_all(
             &zstd::encode_all(std::io::Cursor::new(buf), 19)
-                .map_err(|e| eyre!("ZStandard compression error: {}", e))?,
+                .map_err(|e| eyre!(t!("cli.errors.zstd_compression_failed", error = e)))?,
         )?;
         Ok(CompressionOutcome {
             bytes_written: counter.bytes_written,

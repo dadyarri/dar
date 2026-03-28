@@ -1,22 +1,58 @@
 _version = 1
 
-cli.about = "Архиватор, который сочетает несколько алгоритмов сжатия и полезные утилиты"
-cli.create.about = "Создает новый архив"
-cli.arg.file = "Путь к создаваемому архиву"
-cli.arg.overwrite = "Перезаписать существующий архив"
-cli.arg.compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
-cli.arg.encrypt = "Шифровать данные файлов парольной фразой (алиас --encrypt-passphrase)"
-cli.arg.encrypt_passphrase = "Шифровать данные файлов парольной фразой (алиас --encrypt)"
-cli.arg.verbose = "Включить подробный вывод"
-cli.arg.content = "Файлы/папки для добавления в архив"
-cli.arg.help = "Показать справку по команде"
-error.file_required = "Не указан файл архива"
-error.file_exists = "Файл %{file} уже существует"
-error.delete_failed = "Не удалось удалить файл"
-error.create_file_failed = "Не удалось создать файл"
-error.create_archive_failed = "Не удалось создать архив"
-error.canonicalize_failed = "Не удалось получить абсолютный путь: %{path}"
-error.walk_failed = "Не удалось обойти каталог: %{path}"
-msg.creating_archive = "Создание архива %{file}"
+[cli]
+about = "Архиватор, который сочетает несколько алгоритмов сжатия и полезные утилиты"
 
+[cli.common.args]
+verbose = "Включить подробный вывод"
+content = "Файлы/папки для добавления в архив"
+help = "Показать справку по команде"
+version = "Показать информацию о версии"
 
+[cli.common.headings]
+usage = "Использование"
+commands = "Команды"
+arguments = "Аргументы"
+options = "Параметры"
+
+[cli.create]
+about = "Создает новый архив"
+
+[cli.create.args]
+file = "Путь к создаваемому архиву"
+overwrite = "Перезаписать существующий архив"
+compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
+encrypt = "Шифровать данные файлов парольной фразой (алиас --encrypt-passphrase)"
+encrypt_passphrase = "Шифровать данные файлов парольной фразой (алиас --encrypt)"
+passphrase_value = "ПАРОЛЬ"
+
+[cli.append]
+about = "Добавляет данные в существующий архив"
+
+[cli.append.args]
+file = "Путь к существующему архивному файлу"
+
+[cli.errors]
+file_required = "Не указан файл архива"
+file_exists = "Файл %{file} уже существует"
+delete_failed = "Не удалось удалить файл"
+create_file_failed = "Не удалось создать файл"
+create_archive_failed = "Не удалось создать архив"
+canonicalize_failed = "Не удалось получить абсолютный путь: %{path}"
+walk_failed = "Не удалось обойти каталог: %{path}"
+header_write_failed = "Не удалось записать заголовок архива"
+get_write_position_failed = "Не удалось получить позицию записи"
+file_write_failed = "Не удалось записать данные файла: %{file}"
+get_index_offset_failed = "Не удалось получить позицию смещения индекса"
+index_entry_write_failed = "Не удалось записать запись индекса"
+entry_path_write_failed = "Не удалось записать путь записи"
+entry_extra_write_failed = "Не удалось записать дополнительные данные записи"
+footer_write_failed = "Не удалось записать футер архива"
+flush_archive_failed = "Не удалось завершить запись архива"
+brotli_compression_failed = "Ошибка сжатия Brotli: %{error}"
+zstd_compression_failed = "Ошибка сжатия ZStandard: %{error}"
+invalid_compression_method = "Некорректное значение CompressionMethod: %{value}"
+time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
+
+[cli.messages]
+creating_archive = "Создание архива %{file}"

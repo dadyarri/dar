@@ -24,8 +24,10 @@ fn main() -> Result<()> {
 
     match matches.subcommand() {
         Some(("create", sub_matches)) => {
-            commands::create::call(sub_matches, &locale)
-                .wrap_err(rust_i18n::t!("error.create_archive_failed", locale = locale.as_str()).to_string())?;
+            commands::create::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.errors.create_archive_failed", locale = locale.as_str())
+                    .to_string(),
+            )?;
         }
         _ => unreachable!(),
     }

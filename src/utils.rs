@@ -1,4 +1,5 @@
 use eyre::{Context, Result};
+use rust_i18n::t;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,7 +13,7 @@ use eyre::ContextCompat;
 pub fn get_unix_timestamp() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .wrap_err("Time is set before Unix Epoch")?
+        .wrap_err(t!("cli.errors.time_before_unix_epoch"))?
         .as_secs())
 }
 

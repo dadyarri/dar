@@ -1,21 +1,80 @@
 use clap::{crate_authors, crate_version};
 use clap::{Arg, ArgAction, Command};
 
+fn root_help_template<T>(translate: &T) -> String
+where
+    T: Fn(&str) -> String,
+{
+    color_print::cformat!(
+        r#"{{before-help}}{{about-with-newline}}
+<bold><underline>{usage_heading}</underline></bold>: {{usage}}
+
+<bold><underline>{options_heading}</underline></bold>:
+{{options}}
+
+<bold><underline>{commands_heading}</underline></bold>:
+{{subcommands}}{{after-help}}"#,
+        usage_heading = translate("cli.common.headings.usage"),
+        options_heading = translate("cli.common.headings.options"),
+        commands_heading = translate("cli.common.headings.commands"),
+    )
+}
+
+fn command_help_template<T>(translate: &T) -> String
+where
+    T: Fn(&str) -> String,
+{
+    color_print::cformat!(
+        r#"{{before-help}}{{about-with-newline}}
+<bold><underline>{usage_heading}</underline></bold>: {{usage}}
+
+<bold><underline>{arguments_heading}</underline></bold>:
+{{positionals}}
+
+<bold><underline>{options_heading}</underline></bold>:
+{{options}}{{after-help}}"#,
+        usage_heading = translate("cli.common.headings.usage"),
+        arguments_heading = translate("cli.common.headings.arguments"),
+        options_heading = translate("cli.common.headings.options"),
+    )
+}
+
 pub fn build_cli_with_translator<T>(translate: T) -> Command
 where
     T: Fn(&str) -> String,
 {
+    let passphrase_value: &'static str =
+        Box::leak(translate("cli.create.args.passphrase_value").into_boxed_str());
+
     Command::new("dari")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_flag(true)
+        .disable_help_subcommand(true)
+        .disable_version_flag(true)
         .version(crate_version!())
         .author(crate_authors!())
         .about(translate("cli.about"))
+        .help_template(root_help_template(&translate))
+        .arg(
+            Arg::new("help")
+                .short('h')
+                .long("help")
+                .action(ArgAction::Help)
+                .help(translate("cli.common.args.help")),
+        )
+        .arg(
+            Arg::new("version")
+                .short('V')
+                .long("version")
+                .action(ArgAction::Version)
+                .help(translate("cli.common.args.version")),
+        )
         .subcommands(vec![
             Command::new("create")
                 .short_flag('c')
                 .about(translate("cli.create.about"))
+                .help_template(command_help_template(&translate))
                 .args(vec![
                     Arg::new("file")
                         .short('f')
@@ -23,45 +82,45 @@ where
                         .action(ArgAction::Set)
                         .num_args(1)
                         .required(true)
-                        .help(translate("cli.arg.file")),
+                        .help(translate("cli.create.args.file")),
                     Arg::new("overwrite")
                         .short('o')
                         .long("overwrite")
                         .action(ArgAction::SetTrue)
-                        .help(translate("cli.arg.overwrite")),
+                        .help(translate("cli.create.args.overwrite")),
                     Arg::new("compress-images")
                         .long("compress-images")
                         .action(ArgAction::SetTrue)
-                        .help(translate("cli.arg.compress_images")),
+                        .help(translate("cli.create.args.compress_images")),
                     Arg::new("encrypt")
                         .long("encrypt")
                         .action(ArgAction::Set)
                         .num_args(1)
-                        .value_name("PASSPHRASE")
+                        .value_name(passphrase_value)
                         .conflicts_with("encrypt-passphrase")
-                        .help(translate("cli.arg.encrypt")),
+                        .help(translate("cli.create.args.encrypt")),
                     Arg::new("encrypt-passphrase")
                         .long("encrypt-passphrase")
                         .action(ArgAction::Set)
                         .num_args(1)
-                        .value_name("PASSPHRASE")
+                        .value_name(passphrase_value)
                         .conflicts_with("encrypt")
-                        .help(translate("cli.arg.encrypt_passphrase")),
+                        .help(translate("cli.create.args.encrypt_passphrase")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
                         .action(ArgAction::SetTrue)
-                        .help(translate("cli.arg.verbose")),
+                        .help(translate("cli.common.args.verbose")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)
                         .action(ArgAction::Append)
-                        .help(translate("cli.arg.content")),
+                        .help(translate("cli.common.args.content")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
                         .action(ArgAction::Help)
-                        .help(translate("cli.arg.help")),
+                        .help(translate("cli.common.args.help")),
                 ]),
         ])
 }
@@ -75,16 +134,16 @@ mod tests {
     fn test_encrypt_flags_conflict() {
         let result = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
             .try_get_matches_from(vec![
-            "dari",
-            "create",
-            "-f",
-            "out.dar",
-            "--encrypt",
-            "pw1",
-            "--encrypt-passphrase",
-            "pw2",
-            "src",
-        ]);
+                "dari",
+                "create",
+                "-f",
+                "out.dar",
+                "--encrypt",
+                "pw1",
+                "--encrypt-passphrase",
+                "pw2",
+                "src",
+            ]);
 
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
@@ -92,17 +151,18 @@ mod tests {
 
     #[test]
     fn test_encrypt_alias_is_accepted() {
-        let matches = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
-            .try_get_matches_from(vec![
-                "dari",
-                "create",
-                "-f",
-                "out.dar",
-                "--encrypt-passphrase",
-                "pw",
-                "src",
-            ])
-            .unwrap();
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "create",
+                    "-f",
+                    "out.dar",
+                    "--encrypt-passphrase",
+                    "pw",
+                    "src",
+                ])
+                .unwrap();
 
         let create = matches.subcommand_matches("create").unwrap();
         assert_eq!(
@@ -122,5 +182,18 @@ mod tests {
 
         let expected = rust_i18n::t!("cli.create.about", locale = "ru").to_string();
         assert!(help.contains(&expected));
+    }
+
+    #[test]
+    fn test_root_help_is_available_and_localized() {
+        let help = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "ru").to_string())
+            .try_get_matches_from(vec!["dari", "--help"])
+            .unwrap_err()
+            .to_string();
+
+        let usage = rust_i18n::t!("cli.common.headings.usage", locale = "ru").to_string();
+        let commands = rust_i18n::t!("cli.common.headings.commands", locale = "ru").to_string();
+        assert!(help.contains(&usage));
+        assert!(help.contains(&commands));
     }
 }

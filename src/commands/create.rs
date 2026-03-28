@@ -3,8 +3,8 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use rust_i18n::t;
 use eyre::{eyre, Context, Result};
+use rust_i18n::t;
 use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
@@ -13,7 +13,7 @@ use std::path::Path;
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches
         .get_one::<String>("file")
-        .ok_or_else(|| eyre!(t!("error.file_required", locale = locale.as_str())))?;
+        .ok_or_else(|| eyre!(t!("cli.errors.file_required", locale = locale.as_str())))?;
 
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
@@ -25,23 +25,29 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let content = matches.get_many::<String>("content").unwrap();
 
     if Path::new(file).exists() && !overwrite {
-        return Err(eyre!(
-            t!("error.file_exists", locale = locale.as_str(), file = file)
-        ));
+        return Err(eyre!(t!(
+            "cli.errors.file_exists",
+            locale = locale.as_str(),
+            file = file
+        )));
     }
 
     if Path::new(file).exists() && overwrite {
         fs::remove_file(file)
-            .wrap_err(t!("error.delete_failed", locale = locale.as_str()).to_string())?;
+            .wrap_err(t!("cli.errors.delete_failed", locale = locale.as_str()).to_string())?;
     }
 
     println!(
         "{}",
-        t!("msg.creating_archive", locale = locale.as_str(), file = file)
+        t!(
+            "cli.messages.creating_archive",
+            locale = locale.as_str(),
+            file = file
+        )
     );
 
     let file_handle = File::create(file)
-        .wrap_err(t!("error.create_file_failed", locale = locale.as_str()).to_string())?;
+        .wrap_err(t!("cli.errors.create_file_failed", locale = locale.as_str()).to_string())?;
     let writer = BufWriter::new(file_handle);
 
     let config = PipelineConfig {
@@ -78,8 +84,7 @@ mod tests {
         let mut buffer = Cursor::new(Vec::new());
 
         // Act
-        let mut builder =
-            ArchiveBuilder::with_config(&mut buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_config(&mut buffer, PipelineConfig::default());
         builder.write_header().unwrap();
 
         // Assert
