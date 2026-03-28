@@ -18,10 +18,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
     let compress_images = matches.get_flag("compress-images");
-    let encryption_passphrase = matches
-        .get_one::<String>("encrypt")
-        .cloned()
-        .or_else(|| matches.get_one::<String>("encrypt-passphrase").cloned());
+    let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
     let content = matches.get_many::<String>("content").unwrap();
 
     if Path::new(file).exists() && !overwrite {
@@ -69,6 +66,26 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     builder.build()?;
 
     Ok(())
+}
+
+fn resolve_encryption_passphrase(matches: &ArgMatches, locale: &Locale) -> Result<Option<String>> {
+    if let Some(passphrase) = matches.get_one::<String>("encrypt-passphrase") {
+        return Ok(Some(passphrase.clone()));
+    }
+
+    if matches.get_flag("encrypt") {
+        let prompt = t!("cli.prompts.enter_passphrase", locale = locale.as_str());
+        let passphrase = rpassword::prompt_password(prompt)
+            .wrap_err(t!("cli.errors.encrypt_prompt_failed", locale = locale.as_str()).to_string())?;
+
+        if passphrase.is_empty() {
+            return Err(eyre!(t!("cli.errors.encrypt_prompt_empty", locale = locale.as_str())));
+        }
+
+        return Ok(Some(passphrase));
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]

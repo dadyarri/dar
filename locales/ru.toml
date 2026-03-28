@@ -22,8 +22,8 @@ about = "Создает новый архив"
 file = "Путь к создаваемому архиву"
 overwrite = "Перезаписать существующий архив"
 compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
-encrypt = "Шифровать данные файлов парольной фразой (алиас --encrypt-passphrase)"
-encrypt_passphrase = "Шифровать данные файлов парольной фразой (алиас --encrypt)"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
+encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
 passphrase_value = "ПАРОЛЬ"
 
 [cli.append]
@@ -53,6 +53,12 @@ brotli_compression_failed = "Ошибка сжатия Brotli: %{error}"
 zstd_compression_failed = "Ошибка сжатия ZStandard: %{error}"
 invalid_compression_method = "Некорректное значение CompressionMethod: %{value}"
 time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
+encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
+encrypt_prompt_empty = "Парольная фраза не может быть пустой"
 
 [cli.messages]
 creating_archive = "Создание архива %{file}"
+
+[cli.prompts]
+enter_passphrase = "Введите парольную фразу для шифрования: "
+

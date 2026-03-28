@@ -93,6 +93,7 @@ cargo run -- create -f out.dar src/  # create archive from src/ directory
 cargo run -- create -f out.dar -o src/  # overwrite if out.dar exists
 cargo run -- create -f out.dar -v src/  # verbose (prints each added file path)
 cargo run -- create -f out.dar --compress-images src/  # enable PNG/JPEG optimization
+cargo run -- create -f out.dar --encrypt src/  # prompt for passphrase interactively
 cargo run -- create -f out.dar --encrypt-passphrase "secret" src/  # encrypt stored file data
 ```
 
@@ -106,4 +107,3 @@ Program executions should be run in /tmp/test_dari. Make sure the directory exis
 2. Create `src/commands/name.rs` with a `pub fn call(matches: &ArgMatches) -> Result<()>`.
 3. Export it in `src/commands/mod.rs`.
 4. Add the `Some(("name", sub_matches))` arm in `src/main.rs`.
-

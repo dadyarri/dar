@@ -94,9 +94,7 @@ where
                         .help(translate("cli.create.args.compress_images")),
                     Arg::new("encrypt")
                         .long("encrypt")
-                        .action(ArgAction::Set)
-                        .num_args(1)
-                        .value_name(passphrase_value)
+                        .action(ArgAction::SetTrue)
                         .conflicts_with("encrypt-passphrase")
                         .help(translate("cli.create.args.encrypt")),
                     Arg::new("encrypt-passphrase")
@@ -139,7 +137,6 @@ mod tests {
                 "-f",
                 "out.dar",
                 "--encrypt",
-                "pw1",
                 "--encrypt-passphrase",
                 "pw2",
                 "src",
@@ -150,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypt_alias_is_accepted() {
+    fn test_encrypt_passphrase_arg_is_accepted() {
         let matches =
             build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
                 .try_get_matches_from(vec![
@@ -171,6 +168,25 @@ mod tests {
                 .map(String::as_str),
             Some("pw")
         );
+    }
+
+    #[test]
+    fn test_encrypt_flag_sets_boolean() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "create",
+                    "-f",
+                    "out.dar",
+                    "--encrypt",
+                    "src",
+                ])
+                .unwrap();
+
+        let create = matches.subcommand_matches("create").unwrap();
+        assert!(create.get_flag("encrypt"));
+        assert!(create.get_one::<String>("encrypt-passphrase").is_none());
     }
 
     #[test]

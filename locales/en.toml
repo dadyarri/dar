@@ -22,8 +22,8 @@ about = "Creates new archive"
 file = "The path to the resulting archive file"
 overwrite = "Overwrite existing archive file"
 compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
-encrypt = "Encrypt file data with passphrase (alias of --encrypt-passphrase)"
-encrypt_passphrase = "Encrypt file data with passphrase (alias of --encrypt)"
+encrypt = "Prompt for passphrase interactively to encrypt file data"
+encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
 passphrase_value = "PASSPHRASE"
 
 [cli.append]
@@ -53,8 +53,13 @@ brotli_compression_failed = "Brotli compression error: %{error}"
 zstd_compression_failed = "ZStandard compression error: %{error}"
 invalid_compression_method = "Invalid value for CompressionMethod: %{value}"
 time_before_unix_epoch = "Time is set before Unix Epoch"
+encrypt_prompt_failed = "Failed to read passphrase from the terminal"
+encrypt_prompt_empty = "Passphrase cannot be empty"
 
 [cli.messages]
 creating_archive = "Creating archive %{file}"
+
+[cli.prompts]
+enter_passphrase = "Enter encryption passphrase: "
 
 
