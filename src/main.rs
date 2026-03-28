@@ -11,6 +11,7 @@ mod extra;
 mod i18n;
 mod models;
 mod pipeline;
+mod reader;
 mod traits;
 mod utils;
 mod walker;

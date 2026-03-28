@@ -23,6 +23,10 @@ rust-i18n = "3.1.5"
 sys-locale = "0.3"
 color-print = "0.3.7"
 rpassword = "7.3.1"
+ratatui = "0.29"
+crossterm = "0.28"
+nucleo-matcher = "0.3"
+unicode-width = "0.2"
 
 [build-dependencies]
 clap = { version = "4.5.60", features = ["cargo"] }

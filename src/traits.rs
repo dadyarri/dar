@@ -2,7 +2,7 @@ use crate::counting_writer::CountingWriter;
 use crate::models::archive::CompressionMethod;
 use eyre::{Result, eyre};
 use rust_i18n::t;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 pub struct CompressionOutcome {
     pub bytes_written: u64,
@@ -55,6 +55,8 @@ pub trait Compressor {
     /// Using trait objects (`&mut dyn Read` / `&mut dyn Write`) keeps this
     /// trait object-safe so it can be used as `&dyn Compressor`.
     fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome>;
+    /// Decompress `data` that was previously produced by [`compress`](Self::compress).
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>>;
 }
 
 pub struct NoneCompressor;
@@ -73,6 +75,10 @@ impl Compressor for NoneCompressor {
             bytes_written: counter.bytes_written,
             method: CompressionMethod::None,
         })
+    }
+
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
     }
 }
 
@@ -103,6 +109,13 @@ impl Compressor for BrotliCompressor {
             method: CompressionMethod::Brotli,
         })
     }
+
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let mut output = Vec::new();
+        brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut output)
+            .map_err(|e| eyre!(t!("cli.common.errors.brotli_decompression_failed", error = e)))?;
+        Ok(output)
+    }
 }
 
 pub struct ZStandardCompressor;
@@ -128,6 +141,11 @@ impl Compressor for ZStandardCompressor {
             method: CompressionMethod::Zstandard,
         })
     }
+
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        zstd::decode_all(std::io::Cursor::new(data))
+            .map_err(|e| eyre!(t!("cli.common.errors.zstd_decompression_failed", error = e)))
+    }
 }
 
 pub struct LzmaCompressor;
@@ -150,6 +168,15 @@ impl Compressor for LzmaCompressor {
             bytes_written: counter.bytes_written,
             method: CompressionMethod::Lzma,
         })
+    }
+
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let mut decoder = xz2::read::XzDecoder::new(std::io::Cursor::new(data));
+        let mut output = Vec::new();
+        decoder
+            .read_to_end(&mut output)
+            .map_err(|e| eyre!(t!("cli.common.errors.lzma_decompression_failed", error = e)))?;
+        Ok(output)
     }
 }
 
@@ -176,6 +203,11 @@ impl Compressor for PngOxipngCompressor {
             bytes_written: counter.bytes_written,
             method: CompressionMethod::None,
         })
+    }
+
+    /// PNG data is always stored with [`CompressionMethod::None`]; decompression is identity.
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
     }
 }
 
@@ -209,6 +241,24 @@ impl Compressor for JpegLeptonCompressor {
             bytes_written: counter.bytes_written,
             method,
         })
+    }
+
+    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let mut reader = BufReader::new(std::io::Cursor::new(data));
+        let mut output = Vec::new();
+        lepton_jpeg::decode_lepton(
+            &mut reader,
+            &mut output,
+            &lepton_jpeg::EnabledFeatures::compat_lepton_vector_read(),
+            &lepton_jpeg::DEFAULT_THREAD_POOL,
+        )
+        .map_err(|e| {
+            eyre!(t!(
+                "cli.common.errors.lepton_decompression_failed",
+                error = e.message()
+            ))
+        })?;
+        Ok(output)
     }
 }
 
@@ -253,3 +303,113 @@ pub fn compressor_for_extension(ext: &str, compress_images: bool) -> &'static dy
 
     &ZSTANDARD_COMPRESSOR // default for unknown extensions
 }
+
+/// Decompress `data` that was stored with the given [`CompressionMethod`].
+///
+/// Dispatches to the matching [`Compressor::decompress_bytes`] implementation.
+/// [`CompressionMethod::None`] is a no-op (returns a copy of the input).
+pub fn decompress_bytes(method: CompressionMethod, data: &[u8]) -> Result<Vec<u8>> {
+    match method {
+        CompressionMethod::None => NONE_COMPRESSOR.decompress_bytes(data),
+        CompressionMethod::Brotli => BROTLI_COMPRESSOR.decompress_bytes(data),
+        CompressionMethod::Zstandard => ZSTANDARD_COMPRESSOR.decompress_bytes(data),
+        CompressionMethod::Lzma => LZMA_COMPRESSOR.decompress_bytes(data),
+        CompressionMethod::LeptonJpeg => JPEG_LEPTON_COMPRESSOR.decompress_bytes(data),
+    }
+}
+
+#[cfg(test)]
+mod decompress_tests {
+    use super::*;
+
+    /// Compress `data` with `compressor`, return the raw compressed bytes.
+    fn compress_to_vec(compressor: &dyn Compressor, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut cursor = std::io::Cursor::new(data);
+        compressor.compress(&mut cursor, &mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn test_none_decompress_is_identity() {
+        let data = b"raw bytes, no compression";
+        let result = NONE_COMPRESSOR.decompress_bytes(data).unwrap();
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_brotli_round_trip() {
+        let data = b"hello dari, this is highly compressible data aaaaaaaaaaaaaaaaaaa";
+        let compressed = compress_to_vec(&BROTLI_COMPRESSOR, data);
+        let decompressed = BROTLI_COMPRESSOR.decompress_bytes(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_zstandard_round_trip() {
+        let data = b"fn main() { println!(\"hello world\"); }";
+        let compressed = compress_to_vec(&ZSTANDARD_COMPRESSOR, data);
+        let decompressed = ZSTANDARD_COMPRESSOR.decompress_bytes(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_lzma_round_trip() {
+        let data = b"iso image simulation data aaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let compressed = compress_to_vec(&LZMA_COMPRESSOR, data);
+        let decompressed = LZMA_COMPRESSOR.decompress_bytes(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_free_decompress_bytes_none() {
+        let data = b"passthrough";
+        let result = decompress_bytes(CompressionMethod::None, data).unwrap();
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_free_decompress_bytes_brotli() {
+        let data = b"web content aaaaaaaaaaaaaaaaaaaaaaaaa";
+        let compressed = compress_to_vec(&BROTLI_COMPRESSOR, data);
+        let result = decompress_bytes(CompressionMethod::Brotli, &compressed).unwrap();
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_free_decompress_bytes_zstandard() {
+        let data = b"source code aaaaaaaaaaaaaaaaaaaaaaaaa";
+        let compressed = compress_to_vec(&ZSTANDARD_COMPRESSOR, data);
+        let result = decompress_bytes(CompressionMethod::Zstandard, &compressed).unwrap();
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_free_decompress_bytes_lzma() {
+        let data = b"binary data aaaaaaaaaaaaaaaaaaaaaaaaa";
+        let compressed = compress_to_vec(&LZMA_COMPRESSOR, data);
+        let result = decompress_bytes(CompressionMethod::Lzma, &compressed).unwrap();
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_brotli_decompress_rejects_garbage() {
+        assert!(BROTLI_COMPRESSOR.decompress_bytes(b"not brotli data").is_err());
+    }
+
+    #[test]
+    fn test_zstandard_decompress_rejects_garbage() {
+        assert!(ZSTANDARD_COMPRESSOR.decompress_bytes(b"not zstd data").is_err());
+    }
+
+    #[test]
+    fn test_lzma_decompress_rejects_garbage() {
+        assert!(LZMA_COMPRESSOR.decompress_bytes(b"not lzma data").is_err());
+    }
+
+    #[test]
+    fn test_lepton_decompress_rejects_garbage() {
+        assert!(JPEG_LEPTON_COMPRESSOR.decompress_bytes(b"not lepton data").is_err());
+    }
+}
+

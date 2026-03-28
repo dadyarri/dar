@@ -1,10 +1,8 @@
 use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
-use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
-};
-use crate::pipeline::{PipelineConfig, INDEX_FLAG_ENCRYPTED_DATA};
+use crate::pipeline::PipelineConfig;
+use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
@@ -13,7 +11,6 @@ use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom};
-use std::mem::size_of;
 use std::path::Path;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
@@ -64,7 +61,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             .to_string(),
         )?;
 
-    let existing_archive = load_existing_archive(&mut file_handle, file, locale)?;
+    let existing_archive = load_archive(&mut file_handle, file, locale)?;
 
     ensure_encryption_mode(
         existing_archive.encryption_mode,
@@ -88,7 +85,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         verify_passphrase_matches(&mut file_handle, probe, passphrase, file, locale)?;
     }
 
-    let ExistingArchiveState {
+    let ArchiveState {
         entries,
         index_offset,
         ..
@@ -132,192 +129,6 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     Ok(())
 }
 
-struct ExistingArchiveState {
-    entries: Vec<ArchiveIndexEntryWrapper>,
-    index_offset: u64,
-    encryption_mode: Option<bool>,
-    encryption_probe: Option<EncryptedEntryProbe>,
-}
-
-#[derive(Clone, Copy)]
-struct EncryptedEntryProbe {
-    offset: u64,
-    size: u32,
-    checksum: [u8; 32],
-}
-
-fn load_existing_archive(
-    file: &mut File,
-    file_path: &str,
-    locale: &Locale,
-) -> Result<ExistingArchiveState> {
-    let metadata = file.metadata().wrap_err(
-        t!(
-            "cli.append.errors.append_read_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-    let file_len = metadata.len();
-    let header_size = size_of::<ArchiveHeader>() as u64;
-    let footer_size = size_of::<ArchiveFooter>() as u64;
-
-    if file_len < header_size + footer_size {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_footer_invalid",
-            locale = locale.as_str()
-        )));
-    }
-
-    file.seek(SeekFrom::Start(0)).wrap_err(
-        t!(
-            "cli.append.errors.append_seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-
-    let mut header_buf = [0u8; size_of::<ArchiveHeader>()];
-    file.read_exact(&mut header_buf).wrap_err(
-        t!(
-            "cli.append.errors.append_header_read_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-    let header = *bytemuck::from_bytes::<ArchiveHeader>(&header_buf);
-
-    if header.signature != *b"DARI" || header.version != 5 {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_header_invalid",
-            locale = locale.as_str()
-        )));
-    }
-
-    let footer_pos = file_len - footer_size;
-    file.seek(SeekFrom::Start(footer_pos)).wrap_err(
-        t!(
-            "cli.append.errors.append_seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-
-    let mut footer_buf = [0u8; size_of::<ArchiveFooter>()];
-    file.read_exact(&mut footer_buf).wrap_err(
-        t!(
-            "cli.append.errors.append_footer_read_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-    let footer = *bytemuck::from_bytes::<ArchiveFooter>(&footer_buf);
-
-    if footer.signature != *b"DARIEND" {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_footer_invalid",
-            locale = locale.as_str()
-        )));
-    }
-
-    let index_offset = footer.index_offset as u64;
-    if index_offset < header_size || index_offset > footer_pos {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_footer_invalid",
-            locale = locale.as_str()
-        )));
-    }
-
-    file.seek(SeekFrom::Start(index_offset)).wrap_err(
-        t!(
-            "cli.append.errors.append_seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
-
-    let mut entries = Vec::with_capacity(footer.amount_of_files as usize);
-    let mut encryption_mode: Option<bool> = None;
-    let mut encryption_probe: Option<EncryptedEntryProbe> = None;
-    for _ in 0..footer.amount_of_files {
-        let mut entry_buf = [0u8; size_of::<ArchiveIndexEntry>()];
-        file.read_exact(&mut entry_buf).wrap_err(
-            t!(
-                "cli.append.errors.append_index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
-        )?;
-        let entry = *bytemuck::from_bytes::<ArchiveIndexEntry>(&entry_buf);
-
-        let entry_encrypted = (entry.bitflags & INDEX_FLAG_ENCRYPTED_DATA) != 0;
-        match encryption_mode {
-            None => encryption_mode = Some(entry_encrypted),
-            Some(expected) if expected != entry_encrypted => {
-                return Err(eyre!(t!(
-                    "cli.append.errors.append_mixed_encryption",
-                    locale = locale.as_str()
-                )));
-            }
-            _ => {}
-        }
-
-        if entry_encrypted && encryption_probe.is_none() {
-            encryption_probe = Some(EncryptedEntryProbe {
-                offset: entry.offset as u64,
-                size: entry.compressed_size,
-                checksum: entry.checksum,
-            });
-        }
-
-        let mut path_bytes = vec![0u8; entry.path_length as usize];
-        file.read_exact(&mut path_bytes).wrap_err(
-            t!(
-                "cli.append.errors.append_index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
-        )?;
-        let path = String::from_utf8(path_bytes).map_err(|_| {
-            eyre!(t!(
-                "cli.append.errors.append_utf8_failed",
-                locale = locale.as_str(),
-                field = "path"
-            ))
-        })?;
-
-        let mut extra_bytes = vec![0u8; entry.extra_length as usize];
-        file.read_exact(&mut extra_bytes).wrap_err(
-            t!(
-                "cli.append.errors.append_index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
-        )?;
-        let extra = String::from_utf8(extra_bytes).map_err(|_| {
-            eyre!(t!(
-                "cli.append.errors.append_utf8_failed",
-                locale = locale.as_str(),
-                field = "extra"
-            ))
-        })?;
-
-        entries.push(ArchiveIndexEntryWrapper::new(entry, path, extra));
-    }
-
-    Ok(ExistingArchiveState {
-        entries,
-        index_offset,
-        encryption_mode,
-        encryption_probe,
-    })
-}
 
 fn ensure_encryption_mode(
     existing_mode: Option<bool>,
@@ -405,10 +216,11 @@ fn verify_passphrase_matches(
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_encryption_mode, load_existing_archive, verify_passphrase_matches};
+    use super::{ensure_encryption_mode, verify_passphrase_matches};
     use crate::archive_builder::ArchiveBuilder;
     use crate::i18n::Locale;
     use crate::pipeline::PipelineConfig;
+    use crate::reader::load_archive;
     use std::fs::{File, OpenOptions};
     use std::path::Path;
 
@@ -465,7 +277,7 @@ mod tests {
             .open(&archive_path)
             .unwrap();
         let state =
-            load_existing_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
+            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
                 .unwrap();
         let probe = state.encryption_probe.unwrap();
 
@@ -509,7 +321,7 @@ mod tests {
             .open(&archive_path)
             .unwrap();
         let state =
-            load_existing_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
+            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
                 .unwrap();
         let probe = state.encryption_probe.unwrap();
 
