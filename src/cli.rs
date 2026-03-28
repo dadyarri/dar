@@ -1,5 +1,5 @@
-use clap::{crate_authors, crate_version};
 use clap::{Arg, ArgAction, Command};
+use clap::{crate_authors, crate_version};
 
 fn root_help_template<T>(translate: &T) -> String
 where
@@ -120,6 +120,50 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("append")
+                .short_flag('a')
+                .about(translate("cli.append.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.append.args.file")),
+                    Arg::new("compress-images")
+                        .long("compress-images")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.append.args.compress_images")),
+                    Arg::new("encrypt")
+                        .long("encrypt")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("encrypt-passphrase")
+                        .help(translate("cli.append.args.encrypt")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .conflicts_with("encrypt")
+                        .help(translate("cli.append.args.encrypt_passphrase")),
+                    Arg::new("verbose")
+                        .short('v')
+                        .long("verbose")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.verbose")),
+                    Arg::new("content")
+                        .num_args(0..)
+                        .required(false)
+                        .action(ArgAction::Append)
+                        .help(translate("cli.common.args.content")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
         ])
 }
 
@@ -174,14 +218,7 @@ mod tests {
     fn test_encrypt_flag_sets_boolean() {
         let matches =
             build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
-                .try_get_matches_from(vec![
-                    "dari",
-                    "create",
-                    "-f",
-                    "out.dar",
-                    "--encrypt",
-                    "src",
-                ])
+                .try_get_matches_from(vec!["dari", "create", "-f", "out.dar", "--encrypt", "src"])
                 .unwrap();
 
         let create = matches.subcommand_matches("create").unwrap();

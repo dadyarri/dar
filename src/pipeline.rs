@@ -1,6 +1,6 @@
-use crate::models::archive::CompressionMethod;
 use crate::extra::{encode_extra_pairs, upsert_extra_pair};
-use crate::traits::{compressor_for_extension, Compressor};
+use crate::models::archive::CompressionMethod;
+use crate::traits::{Compressor, compressor_for_extension};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use exif::{Exif, In, Reader as ExifReader, Tag};
@@ -151,7 +151,8 @@ impl CompressionPipeline {
             None => file_data.original_content.clone(),
         };
 
-        let tag = cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
+        let tag =
+            cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
 
         encrypted.extend_from_slice(tag.as_slice());
         file_data.compressed_size = encrypted.len() as u32;
@@ -225,7 +226,10 @@ fn extract_audio_metadata(bytes: &[u8]) -> Vec<(String, String)> {
         return metadata;
     };
 
-    if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+    if let Some(tag) = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+    {
         for (accessor, key) in [
             (tag.title(), EXTRA_KEY_AUDIO_TITLE),
             (tag.artist(), EXTRA_KEY_AUDIO_ARTIST),

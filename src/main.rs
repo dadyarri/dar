@@ -25,7 +25,13 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("create", sub_matches)) => {
             commands::create::call(sub_matches, &locale).wrap_err(
-                rust_i18n::t!("cli.errors.create_archive_failed", locale = locale.as_str())
+                rust_i18n::t!("cli.create.errors.create_archive_failed", locale = locale.as_str())
+                    .to_string(),
+            )?;
+        }
+        Some(("append", sub_matches)) => {
+            commands::append::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.append.errors.append_failed", locale = locale.as_str())
                     .to_string(),
             )?;
         }

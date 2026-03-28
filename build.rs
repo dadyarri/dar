@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use clap_complete::{generate_to, Shell};
+use clap_complete::{Shell, generate_to};
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::fs;

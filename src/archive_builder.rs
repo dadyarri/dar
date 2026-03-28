@@ -38,10 +38,28 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         }
     }
 
+    pub fn import_existing_entries(&mut self, existing_entries: Vec<ArchiveIndexEntryWrapper>) {
+        for wrapper in existing_entries {
+            if wrapper.entry.bitflags & INDEX_FLAG_LINKED_DATA == 0 {
+                self.dedup_index.insert(
+                    wrapper.entry.checksum,
+                    ExistingFileData {
+                        offset: wrapper.entry.offset,
+                        compression_method: wrapper.entry.compression_method,
+                        compressed_size: wrapper.entry.compressed_size,
+                        bitflags: wrapper.entry.bitflags,
+                    },
+                );
+            }
+
+            self.entries.push(wrapper);
+        }
+    }
+
     pub fn write_header(&mut self) -> Result<()> {
         ArchiveHeader::new()
             .write(&mut self.writer)
-            .wrap_err(t!("cli.errors.header_write_failed"))?;
+            .wrap_err(t!("cli.common.errors.header_write_failed"))?;
 
         Ok(())
     }
@@ -109,7 +127,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let data_offset = self
             .writer
             .stream_position()
-            .wrap_err(t!("cli.errors.get_write_position_failed"))? as u32;
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))? as u32;
 
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
@@ -122,7 +140,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         self.writer
             .write_all(bytes_to_write)
-            .wrap_err_with(|| t!("cli.errors.file_write_failed", file = file_path.display()))?;
+            .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = file_path.display()))?;
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry {
@@ -161,30 +179,30 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let index_offset = self
             .writer
             .stream_position()
-            .wrap_err(t!("cli.errors.get_index_offset_failed"))? as u32;
+            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))? as u32;
 
         // Write all index entries: fixed-size struct + path bytes + extra bytes
         for wrapper in &self.entries {
             wrapper
                 .entry
                 .write(&mut self.writer)
-                .wrap_err(t!("cli.errors.index_entry_write_failed"))?;
+                .wrap_err(t!("cli.common.errors.index_entry_write_failed"))?;
             self.writer
                 .write_all(wrapper.path.as_bytes())
-                .wrap_err(t!("cli.errors.entry_path_write_failed"))?;
+                .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
             self.writer
                 .write_all(wrapper.extra.as_bytes())
-                .wrap_err(t!("cli.errors.entry_extra_write_failed"))?;
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
         }
 
         // Write footer pointing at the index
         ArchiveFooter::new(index_offset, self.entries.len() as u32)
             .write(&mut self.writer)
-            .wrap_err(t!("cli.errors.footer_write_failed"))?;
+            .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
 
         self.writer
             .flush()
-            .wrap_err(t!("cli.errors.flush_archive_failed"))?;
+            .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
 
         Ok(())
     }
@@ -198,6 +216,7 @@ mod tests {
     use crate::utils::read_bytes_as;
     use std::io::Cursor;
     use std::mem::size_of;
+    use std::ptr;
 
     /// Write a minimal archive (header + one real file + footer) and return the bytes.
     fn build_archive_with_file(path: &std::path::Path) -> Vec<u8> {
@@ -467,6 +486,59 @@ mod tests {
             second_flags & INDEX_FLAG_LINKED_DATA,
             0,
             "non-duplicate entry must not set linked bitflag"
+        );
+    }
+
+    #[test]
+    fn test_import_existing_entries_seeds_dedup_map() {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+
+        let checksum = blake3::hash(b"hello world");
+        let mut checksum_bytes = [0u8; 32];
+        checksum_bytes.copy_from_slice(checksum.as_bytes());
+        let path = "existing/hello.txt".to_string();
+
+        let entry = ArchiveIndexEntry {
+            offset: 128,
+            bitflags: 0,
+            compression_method: CompressionMethod::None,
+            modification_timestamp: 0,
+            uid: 0,
+            gid: 0,
+            perm: 0,
+            checksum: checksum_bytes,
+            original_size: 11,
+            compressed_size: 11,
+            path_length: path.len() as u32,
+            extra_length: 0,
+        };
+
+        builder.import_existing_entries(vec![ArchiveIndexEntryWrapper::new(
+            entry,
+            path,
+            String::new(),
+        )]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let new_file = dir.path().join("hello.txt");
+        std::fs::write(&new_file, b"hello world").unwrap();
+        builder
+            .add_file(&new_file, "new/hello.txt")
+            .expect("append add_file should succeed");
+
+        assert_eq!(builder.entries.len(), 2);
+        let imported = &builder.entries[0];
+        let appended = &builder.entries[1];
+        let imported_offset = unsafe { ptr::read_unaligned(ptr::addr_of!(imported.entry.offset)) };
+        let appended_offset = unsafe { ptr::read_unaligned(ptr::addr_of!(appended.entry.offset)) };
+        assert_eq!(imported_offset, appended_offset);
+
+        let appended_flags = unsafe { ptr::read_unaligned(ptr::addr_of!(appended.entry.bitflags)) };
+        assert_eq!(
+            appended_flags & INDEX_FLAG_LINKED_DATA,
+            INDEX_FLAG_LINKED_DATA,
+            "appended entry should reuse imported data block"
         );
     }
 }

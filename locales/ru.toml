@@ -3,6 +3,9 @@ _version = 1
 [cli]
 about = "Архиватор, который сочетает несколько алгоритмов сжатия и полезные утилиты"
 
+[cli.prompts]
+enter_passphrase = "Введите парольную фразу для шифрования: "
+
 [cli.common.args]
 verbose = "Включить подробный вывод"
 content = "Файлы/папки для добавления в архив"
@@ -15,29 +18,9 @@ commands = "Команды"
 arguments = "Аргументы"
 options = "Параметры"
 
-[cli.create]
-about = "Создает новый архив"
-
-[cli.create.args]
-file = "Путь к создаваемому архиву"
-overwrite = "Перезаписать существующий архив"
-compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
-encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
-encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
-passphrase_value = "ПАРОЛЬ"
-
-[cli.append]
-about = "Добавляет данные в существующий архив"
-
-[cli.append.args]
-file = "Путь к существующему архивному файлу"
-
-[cli.errors]
+[cli.common.errors]
 file_required = "Не указан файл архива"
-file_exists = "Файл %{file} уже существует"
-delete_failed = "Не удалось удалить файл"
-create_file_failed = "Не удалось создать файл"
-create_archive_failed = "Не удалось создать архив"
+content_required = "Нужно указать как минимум один каталог для архивации"
 canonicalize_failed = "Не удалось получить абсолютный путь: %{path}"
 walk_failed = "Не удалось обойти каталог: %{path}"
 header_write_failed = "Не удалось записать заголовок архива"
@@ -56,9 +39,54 @@ time_before_unix_epoch = "Системное время установлено �
 encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
 encrypt_prompt_empty = "Парольная фраза не может быть пустой"
 
-[cli.messages]
+[cli.create]
+about = "Создает новый архив"
+
+[cli.create.args]
+file = "Путь к создаваемому архиву"
+overwrite = "Перезаписать существующий архив"
+compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
+encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
+passphrase_value = "ПАРОЛЬ"
+
+[cli.create.messages]
 creating_archive = "Создание архива %{file}"
 
-[cli.prompts]
-enter_passphrase = "Введите парольную фразу для шифрования: "
+[cli.create.errors]
+file_exists = "Файл %{file} уже существует"
+delete_failed = "Не удалось удалить файл"
+create_file_failed = "Не удалось создать файл"
+create_archive_failed = "Не удалось создать архив"
+
+[cli.append]
+about = "Добавляет данные в существующий архив"
+
+[cli.append.args]
+file = "Путь к существующему архивному файлу"
+compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
+encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
+
+[cli.append.messages]
+appending_archive = "Добавление файлов в архив %{file}"
+
+[cli.append.errors]
+append_failed = "Не удалось добавить данные в архив"
+append_file_missing = "Архив %{file} не существует"
+append_open_failed = "Не удалось открыть архив %{file} для добавления"
+append_truncate_failed = "Не удалось усечь архив %{file} перед перезаписью индекса"
+append_seek_failed = "Не удалось переместить указатель внутри архива %{file}"
+append_read_failed = "Не удалось прочитать архив %{file}"
+append_header_read_failed = "Не удалось прочитать заголовок архива %{file}"
+append_header_invalid = "Заголовок архива поврежден"
+append_footer_read_failed = "Не удалось прочитать футер архива %{file}"
+append_footer_invalid = "Футер архива поврежден"
+append_index_decode_failed = "Не удалось разобрать записи индекса архива"
+append_utf8_failed = "Поле %{field} в индексе архива содержит некорректный UTF-8"
+append_requires_encryption = "Архив был создан с шифрованием: укажите исходную парольную фразу"
+append_disallows_encryption = "Архив был создан без шифрования: отключите шифрование для добавления файлов"
+append_mixed_encryption = "Архив содержит одновременно зашифрованные и незашифрованные записи — добавление не поддерживается"
+append_passphrase_invalid = "Неверная парольная фраза для этого зашифрованного архива"
+append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
 

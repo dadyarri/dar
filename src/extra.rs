@@ -67,4 +67,3 @@ mod tests {
         assert_eq!(encoded, "k1=v1;k2=v2");
     }
 }
-

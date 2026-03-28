@@ -13,7 +13,7 @@ use eyre::ContextCompat;
 pub fn get_unix_timestamp() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .wrap_err(t!("cli.errors.time_before_unix_epoch"))?
+        .wrap_err(t!("cli.common.errors.time_before_unix_epoch"))?
         .as_secs())
 }
 

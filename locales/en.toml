@@ -3,6 +3,9 @@ _version = 1
 [cli]
 about = "Archiver that combines multiple compression algorithms with useful utilities"
 
+[cli.prompts]
+enter_passphrase = "Enter encryption passphrase: "
+
 [cli.common.args]
 verbose = "Enables verbose output"
 content = "Files/folders to add to archive"
@@ -15,29 +18,9 @@ commands = "Commands"
 arguments = "Arguments"
 options = "Options"
 
-[cli.create]
-about = "Creates new archive"
-
-[cli.create.args]
-file = "The path to the resulting archive file"
-overwrite = "Overwrite existing archive file"
-compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
-encrypt = "Prompt for passphrase interactively to encrypt file data"
-encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
-passphrase_value = "PASSPHRASE"
-
-[cli.append]
-about = "Appends data to existing archive"
-
-[cli.append.args]
-file = "The path to the existing archive file"
-
-[cli.errors]
+[cli.common.errors]
 file_required = "File required"
-file_exists = "File %{file} already exists"
-delete_failed = "Failed to delete file"
-create_file_failed = "Failed to create file"
-create_archive_failed = "Failed to create archive"
+content_required = "At least one input directory is required"
 canonicalize_failed = "Failed to canonicalize path %{path}"
 walk_failed = "Failed to walk directory %{path}"
 header_write_failed = "Failed to write archive header"
@@ -56,10 +39,55 @@ time_before_unix_epoch = "Time is set before Unix Epoch"
 encrypt_prompt_failed = "Failed to read passphrase from the terminal"
 encrypt_prompt_empty = "Passphrase cannot be empty"
 
-[cli.messages]
+[cli.create]
+about = "Creates new archive"
+
+[cli.create.args]
+file = "The path to the resulting archive file"
+overwrite = "Overwrite existing archive file"
+compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
+encrypt = "Prompt for passphrase interactively to encrypt file data"
+encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
+passphrase_value = "PASSPHRASE"
+
+[cli.create.messages]
 creating_archive = "Creating archive %{file}"
 
-[cli.prompts]
-enter_passphrase = "Enter encryption passphrase: "
+[cli.create.errors]
+file_exists = "File %{file} already exists"
+delete_failed = "Failed to delete file"
+create_file_failed = "Failed to create file"
+create_archive_failed = "Failed to create archive"
+
+[cli.append]
+about = "Appends data to existing archive"
+
+[cli.append.args]
+file = "The path to the existing archive file"
+compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
+encrypt = "Prompt for passphrase interactively to encrypt appended file data"
+encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+
+[cli.append.messages]
+appending_archive = "Appending into archive %{file}"
+
+[cli.append.errors]
+append_failed = "Failed to append to archive"
+append_file_missing = "Archive file %{file} does not exist"
+append_open_failed = "Failed to open archive %{file} for appending"
+append_truncate_failed = "Failed to truncate archive %{file} before rewriting the index"
+append_seek_failed = "Failed to seek within archive %{file}"
+append_read_failed = "Failed to read archive %{file}"
+append_header_read_failed = "Failed to read archive header for %{file}"
+append_header_invalid = "Archive header is invalid"
+append_footer_read_failed = "Failed to read archive footer for %{file}"
+append_footer_invalid = "Archive footer is invalid"
+append_index_decode_failed = "Failed to decode archive index entries"
+append_utf8_failed = "Archive index %{field} is not valid UTF-8"
+append_requires_encryption = "Archive was created with encryption; provide the original passphrase flags"
+append_disallows_encryption = "Archive was created without encryption; disable encryption to append"
+append_mixed_encryption = "Archive contains both encrypted and unencrypted entries, which is unsupported"
+append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
+append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
 
 

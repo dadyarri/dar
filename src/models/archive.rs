@@ -1,6 +1,6 @@
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
-use eyre::{eyre, Error};
+use eyre::{Error, eyre};
 use rust_i18n::t;
 use std::io::Write;
 
@@ -74,7 +74,10 @@ impl TryFrom<u8> for CompressionMethod {
             2 => Ok(CompressionMethod::Zstandard),
             3 => Ok(CompressionMethod::Lzma),
             4 => Ok(CompressionMethod::LeptonJpeg),
-            _ => Err(eyre!(t!("cli.errors.invalid_compression_method", value = value))),
+            _ => Err(eyre!(t!(
+                "cli.common.errors.invalid_compression_method",
+                value = value
+            ))),
         }
     }
 }
@@ -90,7 +93,6 @@ impl From<CompressionMethod> for u8 {
         }
     }
 }
-
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
@@ -113,7 +115,6 @@ unsafe impl Pod for ArchiveIndexEntry {}
 unsafe impl Zeroable for ArchiveIndexEntry {}
 
 impl ArchiveIndexEntry {
-
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(bytemuck::bytes_of(self))
     }
