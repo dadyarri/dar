@@ -7,6 +7,7 @@ selection by file extension, while respecting `.gitignore` and `.darignore` rule
 
 ```
 CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
+                  → commands/append.rs (load archive, enforce encryption, reuse walker)
                                        → archive_builder.rs (stateful writer)
                                            → pipeline.rs (checksum, compression, optional encryption, extra metadata)
                                            → models/archive.rs (binary structs)
@@ -17,10 +18,15 @@ CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
 
 - **`src/cli.rs`** — also `include!`'d by `build.rs` to generate shell completions at build time; any CLI change must
   stay compilable in both contexts.
+- **`src/commands/append.rs`** — opens an existing `.dar` with read/write access, parses header/footer/index to recover
+  entries, ensures encryption mode consistency (encrypted archives demand the original passphrase; unencrypted archives
+  reject new encryption), truncates back to `index_offset`, seeds `ArchiveBuilder::import_existing_entries`, then reruns
+  `walker::scan_files` + the pipeline before rebuilding the index/footer.
 - **`src/pipeline.rs`** — active processing stage used by `ArchiveBuilder`: BLAKE3 checksum, extension-based compressor
   selection, optional ChaCha20-Poly1305 encryption, and `extra` metadata population (image/audio tags + encryption
   metadata).
-- **`src/archive_builder.rs`** — generic over `W: Write + Seek`; tests pass `Cursor<Vec<u8>>` directly.
+- **`src/archive_builder.rs`** — generic over `W: Write + Seek`; tests pass `Cursor<Vec<u8>>` directly. Provides
+  `import_existing_entries` so append can preload the dedup map/offsets before writing new data.
 - **`src/main.rs` + `locales/*.toml`** — `rust-i18n` is initialized in `main`; CLI text and user-facing runtime errors are
   translated via `t!(...)` keys from `locales/en.toml` and `locales/ru.toml`.
 
@@ -95,6 +101,8 @@ cargo run -- create -f out.dar -v src/  # verbose (prints each added file path)
 cargo run -- create -f out.dar --compress-images src/  # enable PNG/JPEG optimization
 cargo run -- create -f out.dar --encrypt src/  # prompt for passphrase interactively
 cargo run -- create -f out.dar --encrypt-passphrase "secret" src/  # encrypt stored file data
+cargo run -- append -f out.dar assets/  # append directories/files into an existing archive
+cargo run -- append -f out.dar --encrypt-passphrase "secret" new-data/  # passphrase must match prior encryption
 ```
 
 Shell completions are written to `completions/` by `build.rs` at build time. That directory is not committed.
