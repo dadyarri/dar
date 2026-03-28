@@ -1,10 +1,10 @@
-use super::resolve_encryption_passphrase;
 use crate::archive_builder::ArchiveBuilder;
+use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs;
 use std::fs::File;
@@ -12,17 +12,23 @@ use std::io::BufWriter;
 use std::path::Path;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
-    let file = matches
-        .get_one::<String>("file")
-        .ok_or_else(|| eyre!(t!("cli.common.errors.file_required", locale = locale.as_str())))?;
+    let file = matches.get_one::<String>("file").ok_or_else(|| {
+        eyre!(t!(
+            "cli.common.errors.file_required",
+            locale = locale.as_str()
+        ))
+    })?;
 
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
-    let content = matches
-        .get_many::<String>("content")
-        .ok_or_else(|| eyre!(t!("cli.common.errors.content_required", locale = locale.as_str())))?;
+    let content = matches.get_many::<String>("content").ok_or_else(|| {
+        eyre!(t!(
+            "cli.common.errors.content_required",
+            locale = locale.as_str()
+        ))
+    })?;
 
     if Path::new(file).exists() && !overwrite {
         return Err(eyre!(t!(
@@ -33,8 +39,9 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     }
 
     if Path::new(file).exists() && overwrite {
-        fs::remove_file(file)
-            .wrap_err(t!("cli.create.errors.delete_failed", locale = locale.as_str()).to_string())?;
+        fs::remove_file(file).wrap_err(
+            t!("cli.create.errors.delete_failed", locale = locale.as_str()).to_string(),
+        )?;
     }
 
     println!(
@@ -46,8 +53,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         )
     );
 
-    let file_handle = File::create(file)
-        .wrap_err(t!("cli.create.errors.create_file_failed", locale = locale.as_str()).to_string())?;
+    let file_handle = File::create(file).wrap_err(
+        t!(
+            "cli.create.errors.create_file_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
+    )?;
     let writer = BufWriter::new(file_handle);
 
     let config = PipelineConfig {

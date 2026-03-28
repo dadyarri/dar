@@ -6,6 +6,7 @@ mod archive_builder;
 mod cli;
 mod commands;
 mod counting_writer;
+mod encryption;
 mod extra;
 mod i18n;
 mod models;
@@ -25,8 +26,11 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some(("create", sub_matches)) => {
             commands::create::call(sub_matches, &locale).wrap_err(
-                rust_i18n::t!("cli.create.errors.create_archive_failed", locale = locale.as_str())
-                    .to_string(),
+                rust_i18n::t!(
+                    "cli.create.errors.create_archive_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
             )?;
         }
         Some(("append", sub_matches)) => {

@@ -1,15 +1,15 @@
-use super::resolve_encryption_passphrase;
 use crate::archive_builder::ArchiveBuilder;
+use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
-use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, PipelineConfig};
+use crate::pipeline::{PipelineConfig, INDEX_FLAG_ENCRYPTED_DATA};
 use crate::walker::scan_files;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom};
@@ -17,9 +17,12 @@ use std::mem::size_of;
 use std::path::Path;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
-    let file = matches
-        .get_one::<String>("file")
-        .ok_or_else(|| eyre!(t!("cli.common.errors.file_required", locale = locale.as_str())))?;
+    let file = matches.get_one::<String>("file").ok_or_else(|| {
+        eyre!(t!(
+            "cli.common.errors.file_required",
+            locale = locale.as_str()
+        ))
+    })?;
 
     if !Path::new(file).exists() {
         return Err(eyre!(t!(
@@ -32,9 +35,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
-    let content = matches
-        .get_many::<String>("content")
-        .ok_or_else(|| eyre!(t!("cli.common.errors.content_required", locale = locale.as_str())))?;
+    let content = matches.get_many::<String>("content").ok_or_else(|| {
+        eyre!(t!(
+            "cli.common.errors.content_required",
+            locale = locale.as_str()
+        ))
+    })?;
 
     println!(
         "{}",
