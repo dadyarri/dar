@@ -103,4 +103,17 @@ append_mixed_encryption = "Archive contains both encrypted and unencrypted entri
 append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
 append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
 
+[cli.extractor.errors]
+open_failed = "Failed to open archive %{file}"
+seek_failed = "Failed to seek within archive"
+read_failed = "Failed to read entry data from archive"
+no_primary_for_linked = "No primary entry found for linked entry '%{path}'"
+passphrase_required = "Entry '%{path}' is encrypted but no passphrase was provided"
+decrypt_failed = "Failed to decrypt entry '%{path}': %{error}"
+decompress_failed = "Failed to decompress entry '%{path}': %{error}"
+create_dir_failed = "Failed to create directory %{path}"
+write_failed = "Failed to write extracted file %{path}"
+data_too_short = "Encrypted data is too short to contain a valid authentication tag"
+decrypt_invalid = "Decryption failed: passphrase is incorrect or data is corrupted"
+
 

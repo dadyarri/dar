@@ -8,6 +8,7 @@ mod commands;
 mod counting_writer;
 mod encryption;
 mod extra;
+mod extractor;
 mod i18n;
 mod models;
 mod pipeline;
