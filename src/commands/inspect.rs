@@ -3,7 +3,7 @@ use crate::reader;
 use crate::tui::{App, state::AppState};
 use clap::ArgMatches;
 use eyre::{Context, Result};
-use ratatui::widgets::ListState;
+use ratatui::widgets::TableState;
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -24,10 +24,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let archive_state = reader::load_archive(&mut file, file_path, locale)?;
 
-    // Pre-select the first entry so the list is never in an unselected state.
-    let mut list_state = ListState::default();
+    // Pre-select the first entry so the table is never in an unselected state.
+    let mut table_state = TableState::default();
     if !archive_state.entries.is_empty() {
-        list_state.select(Some(0));
+        table_state.select(Some(0));
     }
 
     let app_state = AppState {
@@ -35,7 +35,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         entries: archive_state.entries,
         passphrase,
         locale: locale.clone(),
-        list_state,
+        table_state,
     };
 
     App::run(app_state)

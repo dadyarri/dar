@@ -116,6 +116,9 @@ open_failed = "Failed to open archive %{file}"
 
 [tui.inspect]
 status_bar = "%{pos}/%{total}  |  ↑↓/jk navigate  q quit"
+col_file = "File"
+col_size = "Size"
+col_compression = "Compression"
 
 [cli.extractor.errors]
 open_failed = "Failed to open archive %{file}"

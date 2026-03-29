@@ -78,11 +78,11 @@ fn move_up(state: &mut AppState) {
         return;
     }
     let new = state
-        .list_state
+        .table_state
         .selected()
         .map(|i| i.saturating_sub(1))
         .unwrap_or(0);
-    state.list_state.select(Some(new));
+    state.table_state.select(Some(new));
 }
 
 fn move_down(state: &mut AppState) {
@@ -91,11 +91,11 @@ fn move_down(state: &mut AppState) {
         return;
     }
     let new = state
-        .list_state
+        .table_state
         .selected()
         .map(|i| (i + 1).min(n - 1))
         .unwrap_or(0);
-    state.list_state.select(Some(new));
+    state.table_state.select(Some(new));
 }
 
 // ---------------------------------------------------------------------------
@@ -104,26 +104,47 @@ fn move_down(state: &mut AppState) {
 
 fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     use ratatui::layout::{Constraint, Layout};
-    use ratatui::style::{Modifier, Style};
-    use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
     let locale = state.locale.as_str();
 
-    // Top area = list, bottom row = status bar.
+    // Top area = table, bottom row = status bar.
     let chunks = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
         .split(frame.area());
     let (main_area, status_area) = (chunks[0], chunks[1]);
 
-    // Build list rows: "path  compressed_size (algorithm)"
-    let items: Vec<ListItem> = state
+    // Translated column headers.
+    let col_file = rust_i18n::t!("tui.inspect.col_file", locale = locale);
+    let col_size = rust_i18n::t!("tui.inspect.col_size", locale = locale);
+    let col_compression = rust_i18n::t!("tui.inspect.col_compression", locale = locale);
+
+    let header = Row::new(vec![
+        Cell::from(col_file.as_ref()),
+        Cell::from(col_size.as_ref()),
+        Cell::from(col_compression.as_ref()),
+    ])
+    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+    // Data rows: path | compressed size | algorithm name.
+    let rows: Vec<Row> = state
         .entries
         .iter()
         .map(|w| {
-            let size = human_size(w.entry.compressed_size);
-            let algo = algorithm_name(w.entry.compression_method);
-            ListItem::new(format!("{}  {} ({})", w.path, size, algo))
+            Row::new(vec![
+                Cell::from(w.path.clone()),
+                Cell::from(human_size(w.entry.compressed_size)),
+                Cell::from(algorithm_name(w.entry.compression_method)),
+            ])
         })
         .collect();
+
+    // Column widths: path fills remaining space; size and compression are fixed.
+    let widths = [
+        Constraint::Fill(1),
+        Constraint::Length(10), // "1023.9 KB" = 9 chars + 1 padding
+        Constraint::Length(11), // "Zstandard"  = 9 chars + 2 padding
+    ];
 
     let filename = state
         .archive_path
@@ -131,18 +152,19 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         .and_then(|n| n.to_str())
         .unwrap_or("?");
 
-    let list = List::new(items)
+    let table = Table::new(rows, widths)
+        .header(header)
         .block(
             Block::default()
                 .title(format!(" {} ", filename))
                 .borders(Borders::ALL),
         )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD));
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD));
 
-    frame.render_stateful_widget(list, main_area, &mut state.list_state);
+    frame.render_stateful_widget(table, main_area, &mut state.table_state);
 
-    // Status bar
-    let pos = state.list_state.selected().map(|i| i + 1).unwrap_or(0);
+    // Status bar.
+    let pos = state.table_state.selected().map(|i| i + 1).unwrap_or(0);
     let total = state.entries.len();
     let status =
         rust_i18n::t!("tui.inspect.status_bar", locale = locale, pos = pos, total = total)

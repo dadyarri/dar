@@ -116,6 +116,9 @@ open_failed = "Не удалось открыть архив %{file}"
 
 [tui.inspect]
 status_bar = "%{pos}/%{total}  |  ↑↓/jk навигация  q выход"
+col_file = "Файл"
+col_size = "Размер"
+col_compression = "Сжатие"
 
 [cli.extractor.errors]
 open_failed = "Не удалось открыть архив %{file}"
