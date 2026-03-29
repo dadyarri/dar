@@ -458,7 +458,55 @@ fn render_preview_panel(
     let val_style = Style::default().fg(Color::White);
     let dim_style = Style::default().fg(Color::DarkGray);
 
+    let meta = &entry_preview.metadata;
+
+    // Extract encoding upfront so it can be placed in the compression section.
+    let encoding_opt = match &entry_preview.content {
+        PreviewContent::Text { encoding, .. } => Some(*encoding),
+        _ => None,
+    };
+
     // ── Compression metadata ──────────────────────────────────────────────
+    // Collect all key-value rows first so we can compute uniform key width.
+    let label_method =
+        rust_i18n::t!("tui.inspect.preview.label_method", locale = locale).into_owned();
+    let label_original =
+        rust_i18n::t!("tui.inspect.preview.label_original", locale = locale).into_owned();
+    let label_checksum =
+        rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
+
+    let size_row: (String, String) = if meta.compressed_size == 0 {
+        let label =
+            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        (label, human_size(meta.original_size))
+    } else {
+        let label =
+            rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale).into_owned();
+        let ratio = ratio_label(meta.compressed_size, meta.original_size);
+        (label, format!("{} ({})", human_size(meta.compressed_size), ratio))
+    };
+
+    // (key, value, use_dim_style)
+    let mut comp_rows: Vec<(String, String, bool)> = vec![
+        (label_method, meta.compression_method.clone(), false),
+        (label_original, human_size(meta.original_size), false),
+        (size_row.0, size_row.1, false),
+        // Show only the first 16 hex chars (8 bytes) to keep it readable.
+        (label_checksum, format!("{}…", &meta.checksum_hex[..16]), true),
+    ];
+
+    if let Some(enc) = encoding_opt {
+        let label_encoding =
+            rust_i18n::t!("tui.inspect.preview.label_encoding", locale = locale).into_owned();
+        comp_rows.push((label_encoding, enc.to_string(), false));
+    }
+
+    let max_comp_key = comp_rows
+        .iter()
+        .map(|(k, _, _)| k.chars().count())
+        .max()
+        .unwrap_or(0);
+
     let section_compression =
         rust_i18n::t!("tui.inspect.preview.section_compression", locale = locale);
     lines.push(Line::from(Span::styled(
@@ -466,51 +514,25 @@ fn render_preview_panel(
         section_style,
     )));
 
-    let meta = &entry_preview.metadata;
-
-    let label_method = rust_i18n::t!("tui.inspect.preview.label_method", locale = locale);
-    lines.push(Line::from(vec![
-        Span::styled(format!("  {:14}", label_method), key_style),
-        Span::styled(meta.compression_method.clone(), val_style),
-    ]));
-
-    let label_original = rust_i18n::t!("tui.inspect.preview.label_original", locale = locale);
-    lines.push(Line::from(vec![
-        Span::styled(format!("  {:14}", label_original), key_style),
-        Span::styled(human_size(meta.original_size), val_style),
-    ]));
-
-    if meta.compressed_size == 0 {
-        let label_stored = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale);
+    for (key, value, is_dim) in &comp_rows {
         lines.push(Line::from(vec![
-            Span::styled(format!("  {:14}", label_stored), key_style),
-            Span::styled(human_size(meta.original_size), val_style),
-        ]));
-    } else {
-        let label_compressed =
-            rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale);
-        let ratio = ratio_label(meta.compressed_size, meta.original_size);
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {:14}", label_compressed), key_style),
             Span::styled(
-                format!("{} ({})", human_size(meta.compressed_size), ratio),
-                val_style,
+                format!("  {:<width$}  ", key, width = max_comp_key),
+                key_style,
             ),
+            Span::styled(value.clone(), if *is_dim { dim_style } else { val_style }),
         ]));
     }
 
-    let label_checksum = rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale);
-    lines.push(Line::from(vec![
-        Span::styled(format!("  {:14}", label_checksum), key_style),
-        // Show only the first 16 hex chars (8 bytes) to keep it readable.
-        Span::styled(
-            format!("{}…", &meta.checksum_hex[..16]),
-            dim_style,
-        ),
-    ]));
-
     // ── Extra metadata tags ───────────────────────────────────────────────
     if !meta.extra_tags.is_empty() {
+        let max_tag_key = meta
+            .extra_tags
+            .iter()
+            .map(|(k, _)| k.chars().count())
+            .max()
+            .unwrap_or(0);
+
         lines.push(Line::from(""));
         let section_metadata =
             rust_i18n::t!("tui.inspect.preview.section_metadata", locale = locale);
@@ -520,7 +542,10 @@ fn render_preview_panel(
         )));
         for (name, value) in &meta.extra_tags {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:14}", name), key_style),
+                Span::styled(
+                    format!("  {:<width$}  ", name, width = max_tag_key),
+                    key_style,
+                ),
                 Span::styled(value.clone(), val_style),
             ]));
         }
@@ -528,8 +553,7 @@ fn render_preview_panel(
 
     // ── Content ───────────────────────────────────────────────────────────
     lines.push(Line::from(""));
-    let section_content =
-        rust_i18n::t!("tui.inspect.preview.section_content", locale = locale);
+    let section_content = rust_i18n::t!("tui.inspect.preview.section_content", locale = locale);
     lines.push(Line::from(Span::styled(
         format!(" {}", section_content),
         section_style,
@@ -539,16 +563,12 @@ fn render_preview_panel(
         PreviewContent::EncryptedNoPassphrase => {
             let msg =
                 rust_i18n::t!("tui.inspect.preview.encrypted_no_pass", locale = locale);
-            let hint =
-                rust_i18n::t!("tui.inspect.preview.encrypted_hint", locale = locale);
+            let hint = rust_i18n::t!("tui.inspect.preview.encrypted_hint", locale = locale);
             lines.push(Line::from(Span::styled(
                 format!("  {}", msg),
                 Style::default().fg(Color::Red),
             )));
-            lines.push(Line::from(Span::styled(
-                format!("  {}", hint),
-                dim_style,
-            )));
+            lines.push(Line::from(Span::styled(format!("  {}", hint), dim_style)));
         }
         PreviewContent::EncryptedWrongPassphrase => {
             let msg =
@@ -560,22 +580,14 @@ fn render_preview_panel(
         }
         PreviewContent::Binary => {
             let msg = rust_i18n::t!("tui.inspect.preview.binary", locale = locale);
-            lines.push(Line::from(Span::styled(
-                format!("  {}", msg),
-                dim_style,
-            )));
+            lines.push(Line::from(Span::styled(format!("  {}", msg), dim_style)));
         }
         PreviewContent::Text {
-            encoding,
+            encoding: _,
             text,
             truncated,
         } => {
-            let label_encoding =
-                rust_i18n::t!("tui.inspect.preview.label_encoding", locale = locale);
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {:14}", label_encoding), key_style),
-                Span::styled(encoding.to_string(), val_style),
-            ]));
+            // Encoding is shown in the compression metadata section above.
             lines.push(Line::from(""));
             for line in text.lines() {
                 lines.push(Line::from(Span::raw(line.to_string())));
