@@ -1,7 +1,7 @@
 use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
+    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
 };
-use crate::pipeline::{CompressionPipeline, PipelineConfig, INDEX_FLAG_LINKED_DATA};
+use crate::pipeline::{CompressionPipeline, PipelineConfig, PipelineFileData, INDEX_FLAG_LINKED_DATA};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
 use rust_i18n::t;
@@ -12,6 +12,29 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 const CHUNK_SIZE: usize = 512 * 1024; // 512KB
+
+/// Holds all data needed to write a file into an archive, produced by
+/// [`prepare_file_from_disk`] so that preparation can run in parallel.
+pub struct PreparedFile {
+    pub archive_path: String,
+    pub file_path: PathBuf,
+    pub pipeline_result: PipelineFileData,
+    pub timestamp: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub perm: u16,
+}
+
+/// Returned by [`ArchiveBuilder::commit_prepared`] with metadata suitable for
+/// verbose progress reporting.
+pub struct FileAddOutcome {
+    pub archive_path: String,
+    pub original_size: u64,
+    /// Bytes actually stored in the archive (compressed / encrypted size).
+    pub stored_size: u64,
+    pub compression_method: CompressionMethod,
+    pub is_dedup: bool,
+}
 
 pub struct ArchiveBuilder<W: Write + Seek> {
     writer: W,
@@ -26,6 +49,58 @@ struct ExistingFileData {
     compression_method: crate::models::archive::CompressionMethod,
     compressed_size: u32,
     bitflags: u16,
+}
+
+// ---------------------------------------------------------------------------
+// File reading helper (safe to call from multiple threads)
+// ---------------------------------------------------------------------------
+
+fn read_file_content(file_path: &PathBuf, file_size: usize) -> Result<Vec<u8>> {
+    if file_size > CHUNK_SIZE {
+        let mut file = File::open(file_path)?;
+        let mut content = Vec::with_capacity(file_size);
+        let mut buffer = vec![0u8; CHUNK_SIZE];
+        loop {
+            let n = std::io::Read::read(&mut file, &mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            content.extend_from_slice(&buffer[..n]);
+        }
+        Ok(content)
+    } else {
+        std::fs::read(file_path).map_err(Into::into)
+    }
+}
+
+/// Read, checksum, and compress a file without touching the archive writer.
+/// Safe to call from multiple threads simultaneously.
+pub fn prepare_file_from_disk(
+    pipeline: &CompressionPipeline,
+    file_path: &PathBuf,
+    archive_path: &str,
+) -> Result<PreparedFile> {
+    let fs_meta = metadata(file_path)?;
+    let file_size = fs_meta.len() as usize;
+    let (uid, gid, perm) = get_mode(&fs_meta);
+
+    let timestamp = fs_meta
+        .modified()?
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs();
+
+    let file_content = read_file_content(file_path, file_size)?;
+    let pipeline_result = pipeline.process_file(file_path, file_content)?;
+
+    Ok(PreparedFile {
+        archive_path: archive_path.to_string(),
+        file_path: file_path.clone(),
+        pipeline_result,
+        timestamp,
+        uid,
+        gid,
+        perm,
+    })
 }
 
 impl<W: Write + Seek> ArchiveBuilder<W> {
@@ -64,39 +139,13 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         Ok(())
     }
 
-    pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<()> {
-        let fs_meta = metadata(file_path)?;
-        let file_size = fs_meta.len() as usize;
-        let (uid, gid, perm) = get_mode(&fs_meta);
-
-        let timestamp = fs_meta
-            .modified()?
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs();
-
-        let mut file_content = Vec::new();
-
-        if file_size > CHUNK_SIZE {
-            let mut file = File::open(file_path)?;
-            let mut buffer = vec![0u8; CHUNK_SIZE];
-
-            loop {
-                let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-
-                file_content.extend_from_slice(&buffer[..bytes_read]);
-            }
-        } else {
-            file_content = std::fs::read(file_path)?;
-        }
-
-        // Process file through the compression pipeline (checksum + algorithm selection + compression)
-        let pipeline_result = self.pipeline.process_file(file_path, file_content)?;
-
-        let archive_path = archive_path.to_string();
+    /// Write a [`PreparedFile`] to the archive. Must be called from a single thread.
+    /// Returns a [`FileAddOutcome`] suitable for verbose progress reporting.
+    pub fn commit_prepared(&mut self, prepared: PreparedFile) -> Result<FileAddOutcome> {
+        let archive_path = prepared.archive_path;
+        let pipeline_result = prepared.pipeline_result;
         let mut bitflags = pipeline_result.bitflags;
+        let original_size = pipeline_result.original_size as u64;
 
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
             bitflags |= INDEX_FLAG_LINKED_DATA;
@@ -106,21 +155,27 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                     offset: existing.offset,
                     bitflags: bitflags | existing.bitflags,
                     compression_method: existing.compression_method,
-                    modification_timestamp: timestamp,
-                    uid,
-                    gid,
-                    perm,
+                    modification_timestamp: prepared.timestamp,
+                    uid: prepared.uid,
+                    gid: prepared.gid,
+                    perm: prepared.perm,
                     checksum: pipeline_result.checksum,
                     original_size: pipeline_result.original_size,
                     compressed_size: existing.compressed_size,
                     path_length: archive_path.len() as u32,
                     extra_length: pipeline_result.extra.len() as u32,
                 },
-                archive_path,
+                archive_path.clone(),
                 pipeline_result.extra,
             ));
 
-            return Ok(());
+            return Ok(FileAddOutcome {
+                archive_path,
+                original_size,
+                stored_size: existing.compressed_size as u64,
+                compression_method: existing.compression_method,
+                is_dedup: true,
+            });
         }
 
         // Record byte offset where this file's data block begins
@@ -140,24 +195,29 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         self.writer
             .write_all(bytes_to_write)
-            .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = file_path.display()))?;
+            .wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.file_write_failed",
+                    file = prepared.file_path.display()
+                )
+            })?;
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry {
                 offset: data_offset,
                 bitflags,
                 compression_method: pipeline_result.compression_method,
-                modification_timestamp: timestamp,
-                uid,
-                gid,
-                perm,
+                modification_timestamp: prepared.timestamp,
+                uid: prepared.uid,
+                gid: prepared.gid,
+                perm: prepared.perm,
                 checksum: pipeline_result.checksum,
                 original_size: pipeline_result.original_size,
                 compressed_size,
                 path_length: archive_path.len() as u32,
                 extra_length: pipeline_result.extra.len() as u32,
             },
-            archive_path,
+            archive_path.clone(),
             pipeline_result.extra,
         ));
 
@@ -171,6 +231,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             },
         );
 
+        Ok(FileAddOutcome {
+            archive_path,
+            original_size,
+            stored_size: compressed_size as u64,
+            compression_method: pipeline_result.compression_method,
+            is_dedup: false,
+        })
+    }
+
+    /// Convenience wrapper: prepare and commit a single file.
+    /// Use [`prepare_file_from_disk`] + [`Self::commit_prepared`] for parallel workflows.
+    pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<()> {
+        let prepared = prepare_file_from_disk(&self.pipeline, file_path, archive_path)?;
+        self.commit_prepared(prepared)?;
         Ok(())
     }
 
@@ -325,7 +399,9 @@ mod tests {
     fn test_txt_entry_uses_brotli() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("readme.txt");
-        std::fs::write(&file_path, b"Hello from dari").unwrap();
+        // Payload must be large enough that Brotli actually shrinks it
+        let content = b"Hello from dari, this is a repetitive line.\n".repeat(20);
+        std::fs::write(&file_path, &content).unwrap();
 
         let data = build_archive_with_file(&file_path);
 
@@ -345,7 +421,9 @@ mod tests {
     fn test_rs_entry_uses_zstandard() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("main.rs");
-        std::fs::write(&file_path, b"fn main() {}").unwrap();
+        // Payload must be large enough that ZStd actually shrinks it
+        let content = b"fn main() { println!(\"hello from dari\"); }\n".repeat(20);
+        std::fs::write(&file_path, &content).unwrap();
 
         let data = build_archive_with_file(&file_path);
 
@@ -539,6 +617,35 @@ mod tests {
             appended_flags & INDEX_FLAG_LINKED_DATA,
             INDEX_FLAG_LINKED_DATA,
             "appended entry should reuse imported data block"
+        );
+    }
+
+    #[test]
+    fn test_small_rs_entry_stored_uncompressed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("tiny.rs");
+        // 12 bytes — ZStd frame overhead alone exceeds this, so the pipeline
+        // must fall back to storing the original bytes with method=None.
+        std::fs::write(&file_path, b"fn main() {}").unwrap();
+
+        let data = build_archive_with_file(&file_path);
+
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+
+        let cm_byte = data[index_offset + 6];
+        assert_eq!(
+            cm_byte,
+            CompressionMethod::None as u8,
+            "tiny .rs file should be stored uncompressed when ZStd cannot shrink it"
+        );
+
+        // Verify the stored size equals the original size (no compression applied)
+        let original_size = read_bytes_as::<u32>(&data, index_offset + 57).unwrap();
+        let compressed_size = read_bytes_as::<u32>(&data, index_offset + 61).unwrap();
+        assert_eq!(
+            original_size, compressed_size,
+            "stored size must equal original size for an uncompressed entry"
         );
     }
 }

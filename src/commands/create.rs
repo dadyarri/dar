@@ -1,10 +1,12 @@
-use crate::archive_builder::ArchiveBuilder;
+use crate::archive_builder::{prepare_file_from_disk, ArchiveBuilder, FileAddOutcome};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
-use crate::pipeline::PipelineConfig;
+use crate::models::archive::CompressionMethod;
+use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{eyre, Context, Result};
+use rayon::prelude::*;
 use rust_i18n::t;
 use std::fs;
 use std::fs::File;
@@ -53,6 +55,25 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         )
     );
 
+    // Collect all files first so we can process them in parallel.
+    let file_entries = scan_files(content, locale)?;
+
+    let config = PipelineConfig {
+        compress_images,
+        encryption_passphrase,
+    };
+
+    // Build a shared pipeline used only for the parallel read+compress phase.
+    // `CompressionPipeline` is Sync, so `&pipeline` is safe to share across threads.
+    let pipeline = CompressionPipeline::new(config.clone());
+
+    // ── Parallel phase: read + checksum + compress ──────────────────────────
+    let prepared: Vec<_> = file_entries
+        .par_iter()
+        .map(|entry| prepare_file_from_disk(&pipeline, &entry.source_path, &entry.archive_path))
+        .collect::<Result<_>>()?;
+
+    // ── Serial phase: dedup-check + write to archive ─────────────────────────
     let file_handle = File::create(file).wrap_err(
         t!(
             "cli.create.errors.create_file_failed",
@@ -62,25 +83,80 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     )?;
     let writer = BufWriter::new(file_handle);
 
-    let config = PipelineConfig {
-        compress_images,
-        encryption_passphrase,
-    };
-
     let mut builder = ArchiveBuilder::with_config(writer, config);
     builder.write_header()?;
 
-    for file_entry in scan_files(content, locale)? {
-        if verbose {
-            println!("{}", file_entry.source_path.display());
-        }
+    for prepared_file in prepared {
+        let outcome = builder.commit_prepared(prepared_file)?;
 
-        builder.add_file(&file_entry.source_path, &file_entry.archive_path)?
+        if verbose {
+            print_verbose_outcome(&outcome);
+        }
     }
 
     builder.build()?;
 
     Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1_024;
+    const MB: u64 = 1_024 * KB;
+    const GB: u64 = 1_024 * MB;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn compression_method_label(method: CompressionMethod) -> &'static str {
+    match method {
+        CompressionMethod::None => "stored",
+        CompressionMethod::Brotli => "brotli",
+        CompressionMethod::Zstandard => "zstd",
+        CompressionMethod::Lzma => "lzma",
+        CompressionMethod::LeptonJpeg => "lepton",
+    }
+}
+
+fn print_verbose_outcome(outcome: &FileAddOutcome) {
+    let orig = format_size(outcome.original_size);
+
+    if outcome.is_dedup {
+        println!("  {:<60} {:>10}  [dedup]", outcome.archive_path, orig);
+        return;
+    }
+
+    match outcome.compression_method {
+        CompressionMethod::None => {
+            println!(
+                "  {:<60} {:>10}  [stored]",
+                outcome.archive_path, orig
+            );
+        }
+        method => {
+            let ratio = if outcome.original_size > 0 {
+                outcome.stored_size as f64 / outcome.original_size as f64 * 100.0
+            } else {
+                100.0
+            };
+            let stored = format_size(outcome.stored_size);
+            println!(
+                "  {:<60} {:>10} → {:>10}  [{}, {:.0}%]",
+                outcome.archive_path,
+                orig,
+                stored,
+                compression_method_label(method),
+                ratio,
+            );
+        }
+    }
 }
 
 #[cfg(test)]

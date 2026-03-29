@@ -122,11 +122,12 @@ impl CompressionPipeline {
 
         file_data.compression_method = outcome.method;
 
-        // If output is identical and method is None, keep original in-place.
-        if matches!(outcome.method, CompressionMethod::None)
-            && output.len() == file_data.original_content.len()
-            && output.as_slice() == file_data.original_content.as_slice()
-        {
+        // If the compressor did not actually shrink the data (common for small, random, or
+        // already-dense files), fall back to storing the original bytes with method=None.
+        // This covers both NoneCompressor (copies verbatim) and real compressors
+        // (ZStd/Brotli/LZMA) whose output grows instead of shrinking.
+        if output.len() >= file_data.original_content.len() {
+            file_data.compression_method = CompressionMethod::None;
             return Ok(());
         }
 
@@ -311,8 +312,10 @@ mod tests {
     #[test]
     fn test_rs_uses_zstandard() {
         let pipeline = make_pipeline(false);
+        // Payload must be large enough that ZStd actually shrinks it
+        let data = b"fn main() { println!(\"hello\"); }\n".repeat(20);
         let result = pipeline
-            .process_file(Path::new("main.rs"), b"fn main() {}".to_vec())
+            .process_file(Path::new("main.rs"), data)
             .unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Zstandard),
@@ -323,8 +326,10 @@ mod tests {
     #[test]
     fn test_html_uses_brotli() {
         let pipeline = make_pipeline(false);
+        // Payload must be large enough that Brotli actually shrinks it
+        let data = b"<html><body><p>hello from dari</p></body></html>\n".repeat(20);
         let result = pipeline
-            .process_file(Path::new("index.html"), b"<html></html>".to_vec())
+            .process_file(Path::new("index.html"), data)
             .unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Brotli),
@@ -335,8 +340,10 @@ mod tests {
     #[test]
     fn test_iso_uses_lzma() {
         let pipeline = make_pipeline(false);
+        // Payload must be large enough that LZMA actually shrinks it
+        let data = b"fake iso data sector padding \x00\x00\x00\x00\x00\x00\x00\x00\n".repeat(30);
         let result = pipeline
-            .process_file(Path::new("disk.iso"), b"fake iso data".to_vec())
+            .process_file(Path::new("disk.iso"), data)
             .unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Lzma),
@@ -347,8 +354,10 @@ mod tests {
     #[test]
     fn test_unknown_extension_uses_zstandard() {
         let pipeline = make_pipeline(false);
+        // Payload must be large enough that ZStd actually shrinks it
+        let data = b"unknown extension data repeated for compressibility\n".repeat(20);
         let result = pipeline
-            .process_file(Path::new("data.myext"), b"some data".to_vec())
+            .process_file(Path::new("data.myext"), data)
             .unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Zstandard),

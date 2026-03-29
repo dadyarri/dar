@@ -63,8 +63,20 @@ pub struct NoneCompressor;
 impl Compressor for NoneCompressor {
     fn get_best_extensions(&self) -> &[&str] {
         &[
-            "jpg", "jpeg", "png", "webp", "gif", "mp4", "mp3", "zip", "gz", "rar", "7z", "pdf",
-            "bz2", "zst", "tar", "tar.gz", "bz",
+            // Images / video / audio already using lossy or proprietary codecs
+            "jpg", "jpeg", "png", "webp", "gif", "mp4", "mp3", "aac", "ogg", "flac", "wav",
+            "mkv", "avi", "mov", "m4a", "m4v",
+            // Already-compressed archives / containers
+            "zip", "gz", "rar", "7z", "bz2", "zst", "tar", "bz", "xz", "lzma", "lz4", "lz",
+            "zlib",
+            // JVM / mobile / package archives (ZIP-based, already compressed)
+            "jar", "war", "ear", "apk", "ipa", "aab",
+            // Language-specific package archives
+            "whl", "egg", "nupkg", "gem",
+            // Binary / document formats with internal compression
+            "pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "epub", "cbz",
+            // WebAssembly (binary bytecode, compresses poorly)
+            "wasm",
         ]
     }
 
@@ -97,8 +109,8 @@ impl Compressor for BrotliCompressor {
         input.read_to_end(&mut buf)?;
         let mut cursor = std::io::Cursor::new(buf);
         let params = brotli::enc::BrotliEncoderParams {
-            quality: 11,
-            lgwin: 24,
+            quality: 6,
+            lgwin: 22,
             ..Default::default()
         };
         let mut counter = CountingWriter::new(output);
@@ -133,7 +145,7 @@ impl Compressor for ZStandardCompressor {
         input.read_to_end(&mut buf)?;
         let mut counter = CountingWriter::new(output);
         counter.write_all(
-            &zstd::encode_all(std::io::Cursor::new(buf), 19)
+            &zstd::encode_all(std::io::Cursor::new(buf), 3)
                 .map_err(|e| eyre!(t!("cli.common.errors.zstd_compression_failed", error = e)))?,
         )?;
         Ok(CompressionOutcome {
