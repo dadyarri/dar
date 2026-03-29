@@ -1,6 +1,10 @@
 use crate::i18n::Locale;
 use crate::reader;
-use crate::tui::{App, state::{AppState, Focus}, tree};
+use crate::tui::{
+    App,
+    state::{AppState, Focus},
+    tree,
+};
 use clap::ArgMatches;
 use eyre::{Context, Result};
 use ratatui::widgets::TableState;

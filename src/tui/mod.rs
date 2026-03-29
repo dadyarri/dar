@@ -3,17 +3,17 @@ pub mod state;
 pub mod tree;
 
 use crate::tui::{
-    preview::{build_preview, PreviewContent},
+    preview::{PreviewContent, build_preview},
     state::{AppState, Focus},
     tree as tui_tree,
 };
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use eyre::Result;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::panic;
 
@@ -403,9 +403,8 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     let right_text = format!(" {} ", total_text);
     let right_width = right_text.chars().count() as u16;
-    let status_chunks =
-        Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
-            .split(status_area);
+    let status_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
+        .split(status_area);
 
     frame.render_widget(
         Paragraph::new(Line::from(hint_spans)).style(bar_bg),
@@ -484,14 +483,16 @@ fn render_preview_panel(
         rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
 
     let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label =
-            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
         (label, human_size(meta.original_size))
     } else {
         let label =
             rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale).into_owned();
         let ratio = ratio_label(meta.compressed_size, meta.original_size);
-        (label, format!("{} ({})", human_size(meta.compressed_size), ratio))
+        (
+            label,
+            format!("{} ({})", human_size(meta.compressed_size), ratio),
+        )
     };
 
     // (key, value, use_dim_style)
@@ -500,7 +501,11 @@ fn render_preview_panel(
         (label_original, human_size(meta.original_size), false),
         (size_row.0, size_row.1, false),
         // Show only the first 16 hex chars (8 bytes) to keep it readable.
-        (label_checksum, format!("{}…", &meta.checksum_hex[..16]), true),
+        (
+            label_checksum,
+            format!("{}…", &meta.checksum_hex[..16]),
+            true,
+        ),
     ];
 
     if let Some(enc) = encoding_opt {
@@ -569,8 +574,7 @@ fn render_preview_panel(
 
     match &entry_preview.content {
         PreviewContent::EncryptedNoPassphrase => {
-            let msg =
-                rust_i18n::t!("tui.inspect.preview.encrypted_no_pass", locale = locale);
+            let msg = rust_i18n::t!("tui.inspect.preview.encrypted_no_pass", locale = locale);
             let hint = rust_i18n::t!("tui.inspect.preview.encrypted_hint", locale = locale);
             lines.push(Line::from(Span::styled(
                 format!("  {}", msg),
@@ -579,8 +583,7 @@ fn render_preview_panel(
             lines.push(Line::from(Span::styled(format!("  {}", hint), dim_style)));
         }
         PreviewContent::EncryptedWrongPassphrase => {
-            let msg =
-                rust_i18n::t!("tui.inspect.preview.wrong_passphrase", locale = locale);
+            let msg = rust_i18n::t!("tui.inspect.preview.wrong_passphrase", locale = locale);
             lines.push(Line::from(Span::styled(
                 format!("  {}", msg),
                 Style::default().fg(Color::Red),
@@ -602,8 +605,7 @@ fn render_preview_panel(
             }
             if *truncated {
                 lines.push(Line::from(""));
-                let trunc_msg =
-                    rust_i18n::t!("tui.inspect.preview.truncated", locale = locale);
+                let trunc_msg = rust_i18n::t!("tui.inspect.preview.truncated", locale = locale);
                 lines.push(Line::from(Span::styled(
                     format!("  {}", trunc_msg),
                     dim_style,
@@ -622,8 +624,7 @@ fn render_preview_panel(
             }
             if *truncated {
                 lines.push(Line::from(""));
-                let trunc_msg =
-                    rust_i18n::t!("tui.inspect.preview.truncated", locale = locale);
+                let trunc_msg = rust_i18n::t!("tui.inspect.preview.truncated", locale = locale);
                 lines.push(Line::from(Span::styled(
                     format!("  {}", trunc_msg),
                     dim_style,
@@ -703,4 +704,3 @@ fn ratio_label(compressed: u32, original: u32) -> String {
         format!("{:.1}% larger", (ratio - 1.0) * 100.0)
     }
 }
-

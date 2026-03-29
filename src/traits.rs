@@ -64,11 +64,9 @@ impl Compressor for NoneCompressor {
     fn get_best_extensions(&self) -> &[&str] {
         &[
             // Images / video / audio already using lossy or proprietary codecs
-            "jpg", "jpeg", "png", "webp", "gif", "mp4", "mp3", "aac", "ogg", "flac", "wav",
-            "mkv", "avi", "mov", "m4a", "m4v",
-            // Already-compressed archives / containers
-            "zip", "gz", "rar", "7z", "bz2", "zst", "tar", "bz", "xz", "lzma", "lz4", "lz",
-            "zlib",
+            "jpg", "jpeg", "png", "webp", "gif", "mp4", "mp3", "aac", "ogg", "flac", "wav", "mkv",
+            "avi", "mov", "m4a", "m4v", // Already-compressed archives / containers
+            "zip", "gz", "rar", "7z", "bz2", "zst", "tar", "bz", "xz", "lzma", "lz4", "lz", "zlib",
             // JVM / mobile / package archives (ZIP-based, already compressed)
             "jar", "war", "ear", "apk", "ipa", "aab",
             // Language-specific package archives
@@ -124,8 +122,12 @@ impl Compressor for BrotliCompressor {
 
     fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
         let mut output = Vec::new();
-        brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut output)
-            .map_err(|e| eyre!(t!("cli.common.errors.brotli_decompression_failed", error = e)))?;
+        brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut output).map_err(|e| {
+            eyre!(t!(
+                "cli.common.errors.brotli_decompression_failed",
+                error = e
+            ))
+        })?;
         Ok(output)
     }
 }
@@ -406,12 +408,20 @@ mod decompress_tests {
 
     #[test]
     fn test_brotli_decompress_rejects_garbage() {
-        assert!(BROTLI_COMPRESSOR.decompress_bytes(b"not brotli data").is_err());
+        assert!(
+            BROTLI_COMPRESSOR
+                .decompress_bytes(b"not brotli data")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_zstandard_decompress_rejects_garbage() {
-        assert!(ZSTANDARD_COMPRESSOR.decompress_bytes(b"not zstd data").is_err());
+        assert!(
+            ZSTANDARD_COMPRESSOR
+                .decompress_bytes(b"not zstd data")
+                .is_err()
+        );
     }
 
     #[test]
@@ -421,7 +431,10 @@ mod decompress_tests {
 
     #[test]
     fn test_lepton_decompress_rejects_garbage() {
-        assert!(JPEG_LEPTON_COMPRESSOR.decompress_bytes(b"not lepton data").is_err());
+        assert!(
+            JPEG_LEPTON_COMPRESSOR
+                .decompress_bytes(b"not lepton data")
+                .is_err()
+        );
     }
 }
-

@@ -1,3 +1,7 @@
+// Functions in this module are part of the extraction API that will be wired to a CLI command
+// once the `extract` subcommand is added. Suppress dead-code lints in the meantime.
+#![allow(dead_code)]
+
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, INDEX_FLAG_LINKED_DATA};
 use crate::traits::decompress_bytes;
@@ -138,7 +142,10 @@ fn extract_one(
 }
 
 /// Find the data offset of the first non-linked entry that has `checksum`.
-pub fn resolve_primary_offset(checksum: &[u8; 32], all_entries: &[ArchiveIndexEntryWrapper]) -> Option<u64> {
+pub fn resolve_primary_offset(
+    checksum: &[u8; 32],
+    all_entries: &[ArchiveIndexEntryWrapper],
+) -> Option<u64> {
     all_entries
         .iter()
         .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & INDEX_FLAG_LINKED_DATA) == 0)
@@ -215,35 +222,11 @@ fn decrypt_data(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Result<Ve
 mod tests {
     use super::*;
     use crate::archive_builder::ArchiveBuilder;
+    use crate::i18n::Locale;
     use crate::pipeline::PipelineConfig;
     use crate::reader::load_archive;
-    use crate::i18n::Locale;
+    use crate::test_utils::build_archive;
     use std::fs::File;
-
-    fn build_archive(
-        dir: &tempfile::TempDir,
-        name: &str,
-        files: &[(&str, &[u8])],
-        passphrase: Option<&str>,
-    ) -> std::path::PathBuf {
-        let archive_path = dir.path().join(name);
-        let file_handle = File::create(&archive_path).unwrap();
-        let mut builder = ArchiveBuilder::with_config(
-            file_handle,
-            PipelineConfig {
-                compress_images: false,
-                encryption_passphrase: passphrase.map(str::to_owned),
-            },
-        );
-        builder.write_header().unwrap();
-        for (archive_name, content) in files {
-            let tmp = dir.path().join(archive_name);
-            std::fs::write(&tmp, content).unwrap();
-            builder.add_file(&tmp, archive_name).unwrap();
-        }
-        builder.build().unwrap();
-        archive_path
-    }
 
     fn load(path: &std::path::Path) -> Vec<ArchiveIndexEntryWrapper> {
         let locale = Locale::new("en");
@@ -381,23 +364,15 @@ mod tests {
         let content = b"duplicate content that will be deduplicated";
 
         // Write identical content under two names; the second becomes linked.
-        let archive_path = dir.path().join("dedup.dar");
-        let file_handle = File::create(&archive_path).unwrap();
-        let mut builder = ArchiveBuilder::with_config(
-            file_handle,
-            PipelineConfig {
-                compress_images: false,
-                encryption_passphrase: None,
-            },
+        let archive_path = build_archive(
+            &dir,
+            "dedup.dar",
+            &[
+                ("copy1.txt", content.as_ref()),
+                ("copy2.txt", content.as_ref()),
+            ],
+            None,
         );
-        builder.write_header().unwrap();
-        let tmp1 = dir.path().join("copy1.txt");
-        let tmp2 = dir.path().join("copy2.txt");
-        std::fs::write(&tmp1, content).unwrap();
-        std::fs::write(&tmp2, content).unwrap();
-        builder.add_file(&tmp1, "copy1.txt").unwrap();
-        builder.add_file(&tmp2, "copy2.txt").unwrap();
-        builder.build().unwrap();
 
         let entries = load(&archive_path);
         assert_eq!(entries.len(), 2);
@@ -431,4 +406,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

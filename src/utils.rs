@@ -98,7 +98,11 @@ pub fn plural_suffix(n: usize, locale: &str) -> &'static str {
             }
         }
         _ => {
-            if n == 1 { "one" } else { "other" }
+            if n == 1 {
+                "one"
+            } else {
+                "other"
+            }
         }
     }
 }

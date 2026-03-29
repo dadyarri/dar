@@ -1,12 +1,14 @@
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
 };
-use crate::pipeline::{CompressionPipeline, PipelineConfig, PipelineFileData, INDEX_FLAG_LINKED_DATA};
+use crate::pipeline::{
+    CompressionPipeline, INDEX_FLAG_LINKED_DATA, PipelineConfig, PipelineFileData,
+};
 use crate::utils::get_mode;
 use eyre::{Context, Result};
 use rust_i18n::t;
 use std::collections::HashMap;
-use std::fs::{metadata, File};
+use std::fs::{File, metadata};
 use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -177,10 +179,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         }
 
         // Record byte offset where this file's data block begins
-        let data_offset = self
-            .writer
-            .stream_position()
-            .wrap_err(t!("cli.common.errors.get_write_position_failed"))? as u32;
+        let data_offset =
+            self.writer
+                .stream_position()
+                .wrap_err(t!("cli.common.errors.get_write_position_failed"))? as u32;
 
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
@@ -193,12 +195,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         self.writer
             .write_all(bytes_to_write)
-            .wrap_err_with(|| {
-                t!(
-                    "cli.common.errors.file_write_failed",
-                    file = archive_path
-                )
-            })?;
+            .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = archive_path))?;
 
         self.entries.push(ArchiveIndexEntryWrapper::new(
             ArchiveIndexEntry {
@@ -248,10 +245,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     pub fn build(&mut self) -> Result<()> {
         // Record where the index section begins
-        let index_offset = self
-            .writer
-            .stream_position()
-            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))? as u32;
+        let index_offset =
+            self.writer
+                .stream_position()
+                .wrap_err(t!("cli.common.errors.get_index_offset_failed"))? as u32;
 
         // Write all index entries: fixed-size struct + path bytes + extra bytes
         for wrapper in &self.entries {

@@ -13,6 +13,8 @@ mod i18n;
 mod models;
 mod pipeline;
 mod reader;
+#[cfg(test)]
+mod test_utils;
 mod traits;
 mod tui;
 mod utils;
@@ -44,8 +46,11 @@ fn main() -> Result<()> {
         }
         Some(("inspect", sub_matches)) => {
             commands::inspect::call(sub_matches, &locale).wrap_err(
-                rust_i18n::t!("cli.inspect.errors.inspect_failed", locale = locale.as_str())
-                    .to_string(),
+                rust_i18n::t!(
+                    "cli.inspect.errors.inspect_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
             )?;
         }
         _ => unreachable!(),

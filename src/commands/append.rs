@@ -7,7 +7,7 @@ use crate::walker::scan_files;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom};
@@ -129,7 +129,6 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     Ok(())
 }
 
-
 fn ensure_encryption_mode(
     existing_mode: Option<bool>,
     encrypting_now: bool,
@@ -217,12 +216,10 @@ fn verify_passphrase_matches(
 #[cfg(test)]
 mod tests {
     use super::{ensure_encryption_mode, verify_passphrase_matches};
-    use crate::archive_builder::ArchiveBuilder;
     use crate::i18n::Locale;
-    use crate::pipeline::PipelineConfig;
     use crate::reader::load_archive;
-    use std::fs::{File, OpenOptions};
-    use std::path::Path;
+    use crate::test_utils::build_archive;
+    use std::fs::OpenOptions;
 
     #[test]
     fn test_ensure_encryption_mode_requires_passphrase_when_expected() {
@@ -251,25 +248,12 @@ mod tests {
     fn test_verify_passphrase_matches_accepts_correct_passphrase() {
         let locale = Locale::new("en");
         let dir = tempfile::tempdir().unwrap();
-        let archive_path = dir.path().join("enc.dar");
-        let data_path = dir.path().join("file.txt");
-        std::fs::write(&data_path, b"secret data").unwrap();
-
-        {
-            let file_handle = File::create(&archive_path).unwrap();
-            let mut builder = ArchiveBuilder::with_config(
-                file_handle,
-                PipelineConfig {
-                    compress_images: false,
-                    encryption_passphrase: Some("secret".into()),
-                },
-            );
-            builder.write_header().unwrap();
-            builder
-                .add_file(&data_path, data_path.file_name().unwrap().to_str().unwrap())
-                .unwrap();
-            builder.build().unwrap();
-        }
+        let archive_path = build_archive(
+            &dir,
+            "enc.dar",
+            &[("file.txt", b"secret data")],
+            Some("secret"),
+        );
 
         let mut archive_file = OpenOptions::new()
             .read(true)
@@ -277,8 +261,7 @@ mod tests {
             .open(&archive_path)
             .unwrap();
         let state =
-            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
-                .unwrap();
+            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale).unwrap();
         let probe = state.encryption_probe.unwrap();
 
         verify_passphrase_matches(
@@ -295,25 +278,12 @@ mod tests {
     fn test_verify_passphrase_matches_rejects_invalid_passphrase() {
         let locale = Locale::new("en");
         let dir = tempfile::tempdir().unwrap();
-        let archive_path = dir.path().join("enc_fail.dar");
-        let data_path = dir.path().join("file.txt");
-        std::fs::write(&data_path, b"secret data").unwrap();
-
-        {
-            let file_handle = File::create(&archive_path).unwrap();
-            let mut builder = ArchiveBuilder::with_config(
-                file_handle,
-                PipelineConfig {
-                    compress_images: false,
-                    encryption_passphrase: Some("secret".into()),
-                },
-            );
-            builder.write_header().unwrap();
-            builder
-                .add_file(&data_path, Path::new("file.txt").to_str().unwrap())
-                .unwrap();
-            builder.build().unwrap();
-        }
+        let archive_path = build_archive(
+            &dir,
+            "enc_fail.dar",
+            &[("file.txt", b"secret data")],
+            Some("secret"),
+        );
 
         let mut archive_file = OpenOptions::new()
             .read(true)
@@ -321,8 +291,7 @@ mod tests {
             .open(&archive_path)
             .unwrap();
         let state =
-            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale)
-                .unwrap();
+            load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale).unwrap();
         let probe = state.encryption_probe.unwrap();
 
         assert!(

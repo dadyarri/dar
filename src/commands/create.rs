@@ -1,11 +1,11 @@
-use crate::archive_builder::{prepare_file_from_disk, ArchiveBuilder, FileAddOutcome};
+use crate::archive_builder::{ArchiveBuilder, FileAddOutcome, prepare_file_from_disk};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::models::archive::CompressionMethod;
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rayon::prelude::*;
 use rust_i18n::t;
 use std::fs;
@@ -135,10 +135,7 @@ fn print_verbose_outcome(outcome: &FileAddOutcome) {
 
     match outcome.compression_method {
         CompressionMethod::None => {
-            println!(
-                "  {:<60} {:>10}  [stored]",
-                outcome.archive_path, orig
-            );
+            println!("  {:<60} {:>10}  [stored]", outcome.archive_path, orig);
         }
         method => {
             let ratio = if outcome.original_size > 0 {

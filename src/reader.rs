@@ -12,6 +12,8 @@ use std::mem::size_of;
 /// Parsed state of an existing `.dar` archive.
 pub struct ArchiveState {
     pub entries: Vec<ArchiveIndexEntryWrapper>,
+    /// Archive header; reserved for the forthcoming `extract` command.
+    #[allow(dead_code)]
     pub header: ArchiveHeader,
     pub encryption_mode: Option<bool>,
     /// Byte offset where the index section starts; used by `append` to truncate before rewriting.
@@ -212,39 +214,12 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::archive_builder::ArchiveBuilder;
     use crate::i18n::Locale;
-    use crate::pipeline::PipelineConfig;
+    use crate::test_utils::build_archive;
     use std::fs::File;
 
     fn en() -> Locale {
         Locale::new("en")
-    }
-
-    /// Build a scratch archive using `ArchiveBuilder` and return its path.
-    fn build_archive(
-        dir: &tempfile::TempDir,
-        name: &str,
-        files: &[(&str, &[u8])],
-        passphrase: Option<&str>,
-    ) -> std::path::PathBuf {
-        let archive_path = dir.path().join(name);
-        let file_handle = File::create(&archive_path).unwrap();
-        let mut builder = ArchiveBuilder::with_config(
-            file_handle,
-            PipelineConfig {
-                compress_images: false,
-                encryption_passphrase: passphrase.map(str::to_owned),
-            },
-        );
-        builder.write_header().unwrap();
-        for (archive_name, content) in files {
-            let tmp = dir.path().join(archive_name);
-            std::fs::write(&tmp, content).unwrap();
-            builder.add_file(&tmp, archive_name).unwrap();
-        }
-        builder.build().unwrap();
-        archive_path
     }
 
     // --- single entry ---
@@ -317,7 +292,9 @@ mod tests {
         let path = build_archive(&dir, "enc2.dar", &[("f.txt", b"secret")], Some("pass"));
         let mut f = File::open(&path).unwrap();
         let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
-        let probe = state.encryption_probe.expect("probe should be Some for encrypted archive");
+        let probe = state
+            .encryption_probe
+            .expect("probe should be Some for encrypted archive");
         assert!(probe.size > 0);
         assert_ne!(probe.checksum, [0u8; 32]);
     }
@@ -430,4 +407,3 @@ mod tests {
         assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
     }
 }
-

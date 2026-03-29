@@ -314,9 +314,7 @@ mod tests {
         let pipeline = make_pipeline(false);
         // Payload must be large enough that ZStd actually shrinks it
         let data = b"fn main() { println!(\"hello\"); }\n".repeat(20);
-        let result = pipeline
-            .process_file(Path::new("main.rs"), data)
-            .unwrap();
+        let result = pipeline.process_file(Path::new("main.rs"), data).unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Zstandard),
             "Expected Zstandard for .rs"
@@ -342,9 +340,7 @@ mod tests {
         let pipeline = make_pipeline(false);
         // Payload must be large enough that LZMA actually shrinks it
         let data = b"fake iso data sector padding \x00\x00\x00\x00\x00\x00\x00\x00\n".repeat(30);
-        let result = pipeline
-            .process_file(Path::new("disk.iso"), data)
-            .unwrap();
+        let result = pipeline.process_file(Path::new("disk.iso"), data).unwrap();
         assert!(
             matches!(result.compression_method, CompressionMethod::Lzma),
             "Expected Lzma for .iso"

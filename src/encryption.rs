@@ -1,6 +1,6 @@
 use crate::i18n::Locale;
 use clap::ArgMatches;
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use rust_i18n::t;
 
 pub fn resolve_encryption_passphrase(
