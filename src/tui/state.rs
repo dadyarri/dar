@@ -1,8 +1,9 @@
 use crate::i18n::Locale;
 use crate::models::archive::ArchiveIndexEntryWrapper;
+use ratatui::widgets::ListState;
 use std::path::PathBuf;
 
-/// Minimal application state passed to `App::run` for the inspect TUI.
+/// Application state passed into `App::run` for the inspect TUI.
 pub struct AppState {
     /// Path to the `.dar` file being inspected (used for the title bar).
     pub archive_path: PathBuf,
@@ -12,6 +13,7 @@ pub struct AppState {
     pub passphrase: Option<String>,
     /// Active locale for all TUI translations.
     pub locale: Locale,
+    /// Drives the ratatui `List` widget — tracks both the selected row (cursor)
+    /// and the scroll offset so the selected item is always visible.
+    pub list_state: ListState,
 }
-
-

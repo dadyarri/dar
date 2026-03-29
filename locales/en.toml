@@ -115,8 +115,7 @@ inspect_failed = "Failed to inspect archive"
 open_failed = "Failed to open archive %{file}"
 
 [tui.inspect]
-skeleton_hint = "Press q to quit  (%{n} entries)"
-unknown_filename = "unknown"
+status_bar = "%{pos}/%{total}  |  ↑↓/jk navigate  q quit"
 
 [cli.extractor.errors]
 open_failed = "Failed to open archive %{file}"

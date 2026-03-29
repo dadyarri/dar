@@ -115,8 +115,7 @@ inspect_failed = "Не удалось открыть архив для прос�
 open_failed = "Не удалось открыть архив %{file}"
 
 [tui.inspect]
-skeleton_hint = "Нажмите q для выхода  (%{n} записей)"
-unknown_filename = "неизвестно"
+status_bar = "%{pos}/%{total}  |  ↑↓/jk навигация  q выход"
 
 [cli.extractor.errors]
 open_failed = "Не удалось открыть архив %{file}"
