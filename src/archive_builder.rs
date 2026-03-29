@@ -17,7 +17,6 @@ const CHUNK_SIZE: usize = 512 * 1024; // 512KB
 /// [`prepare_file_from_disk`] so that preparation can run in parallel.
 pub struct PreparedFile {
     pub archive_path: String,
-    pub file_path: PathBuf,
     pub pipeline_result: PipelineFileData,
     pub timestamp: u64,
     pub uid: u32,
@@ -94,7 +93,6 @@ pub fn prepare_file_from_disk(
 
     Ok(PreparedFile {
         archive_path: archive_path.to_string(),
-        file_path: file_path.clone(),
         pipeline_result,
         timestamp,
         uid,
@@ -198,7 +196,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .wrap_err_with(|| {
                 t!(
                     "cli.common.errors.file_write_failed",
-                    file = prepared.file_path.display()
+                    file = archive_path
                 )
             })?;
 
