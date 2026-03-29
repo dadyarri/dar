@@ -270,7 +270,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     // When preview is open and the terminal is wide enough, split horizontally.
     let show_preview = state.preview_open && main_area.width >= 80;
     let (list_area, preview_area): (Rect, Option<Rect>) = if show_preview {
-        let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        let cols = Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(main_area);
         (cols[0], Some(cols[1]))
     } else {
