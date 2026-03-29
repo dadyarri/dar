@@ -1,5 +1,29 @@
 pub const EXTRA_SEMICOLON_ESCAPE: &str = "%3B";
 
+/// Parse `"k1=v1;k2=v2;…"` into a `Vec<(String, String)>`, skipping empty segments.
+///
+/// Decode counterpart of [`encode_extra_pairs`].
+pub fn parse_extra_pairs(extra: &str) -> Vec<(String, String)> {
+    extra
+        .split(';')
+        .filter_map(|seg| {
+            let mut it = seg.splitn(2, '=');
+            let k = it.next()?.trim();
+            let v = it.next()?.trim();
+            if k.is_empty() || v.is_empty() {
+                None
+            } else {
+                Some((k.to_string(), v.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// Returns `true` when the `extra` field contains an `e=…` encryption marker.
+pub fn is_entry_encrypted(extra: &str) -> bool {
+    parse_extra_pairs(extra).iter().any(|(k, _)| k == "e")
+}
+
 fn sanitize_extra_component(input: String) -> String {
     input.replace(';', EXTRA_SEMICOLON_ESCAPE)
 }
@@ -65,5 +89,23 @@ mod tests {
         ]);
 
         assert_eq!(encoded, "k1=v1;k2=v2");
+    }
+
+    #[test]
+    fn test_parse_extra_pairs() {
+        let decoded = parse_extra_pairs("k1=v1;k2=v2");
+        assert_eq!(
+            decoded,
+            vec![
+                ("k1".to_string(), "v1".to_string()),
+                ("k2".to_string(), "v2".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_is_encrypted_extra() {
+        assert!(is_entry_encrypted("e=some_encryption_marker"));
+        assert!(!is_entry_encrypted("k1=v1;k2=v2"));
     }
 }

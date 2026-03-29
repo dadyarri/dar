@@ -2,7 +2,6 @@ pub mod preview;
 pub mod state;
 pub mod tree;
 
-use crate::models::archive::CompressionMethod;
 use crate::tui::{
     preview::{build_preview, PreviewContent},
     state::{AppState, Focus},
@@ -309,7 +308,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
                 let e = &state.entries[idx];
                 (
                     human_size(e.entry.compressed_size),
-                    algorithm_name(e.entry.compression_method),
+                    e.entry.compression_method.as_str(),
                 )
             } else {
                 (String::new(), "")
@@ -705,12 +704,3 @@ fn ratio_label(compressed: u32, original: u32) -> String {
     }
 }
 
-fn algorithm_name(method: CompressionMethod) -> &'static str {
-    match method {
-        CompressionMethod::None => "None",
-        CompressionMethod::Brotli => "Brotli",
-        CompressionMethod::Zstandard => "Zstandard",
-        CompressionMethod::Lzma => "LZMA",
-        CompressionMethod::LeptonJpeg => "Lepton",
-    }
-}

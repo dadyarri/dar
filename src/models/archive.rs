@@ -94,6 +94,19 @@ impl From<CompressionMethod> for u8 {
     }
 }
 
+impl CompressionMethod {
+    /// Human-readable algorithm name used in display and metadata output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompressionMethod::None => "None",
+            CompressionMethod::Brotli => "Brotli",
+            CompressionMethod::Zstandard => "Zstandard",
+            CompressionMethod::Lzma => "LZMA",
+            CompressionMethod::LeptonJpeg => "Lepton JPEG",
+        }
+    }
+}
+
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
 pub struct ArchiveIndexEntry {

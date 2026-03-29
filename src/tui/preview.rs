@@ -1,10 +1,7 @@
-use crate::models::archive::{ArchiveIndexEntryWrapper, CompressionMethod};
-use crate::pipeline::INDEX_FLAG_LINKED_DATA;
+use crate::extra::{is_entry_encrypted, parse_extra_pairs};
+use crate::extractor::{read_raw_entry_bytes, try_decrypt_bytes};
+use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::traits::decompress_bytes;
-use chacha20poly1305::aead::{AeadInPlace, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::LazyLock;
 use syntect::easy::HighlightLines;
@@ -12,8 +9,7 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
-static SYNTAX_SET: LazyLock<SyntaxSet> =
-    LazyLock::new(|| SyntaxSet::load_defaults_newlines());
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| SyntaxSet::load_defaults_newlines());
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 // ---------------------------------------------------------------------------
@@ -87,11 +83,6 @@ pub struct EntryPreview {
 // Public helpers
 // ---------------------------------------------------------------------------
 
-/// Returns `true` when the `extra` field contains an `e=…` encryption marker.
-pub fn is_entry_encrypted(extra: &str) -> bool {
-    parse_pairs(extra).iter().any(|(k, _)| k == "e")
-}
-
 /// Build a complete [`EntryPreview`] for `entry`.
 ///
 /// Reads, optionally decrypts and decompresses the data from `archive_path` on
@@ -107,13 +98,13 @@ pub fn build_preview(
     let metadata = build_metadata(entry, locale);
     let encrypted = is_entry_encrypted(&entry.extra);
 
-    let content = match load_bytes(archive_path, entry, all_entries) {
+    let content = match read_raw_entry_bytes(archive_path, entry, all_entries) {
         None => PreviewContent::Binary,
         Some(raw) => {
             if encrypted {
                 match passphrase {
                     None => PreviewContent::EncryptedNoPassphrase,
-                    Some(pass) => match decrypt_bytes(&raw, &entry.entry.checksum, pass) {
+                    Some(pass) => match try_decrypt_bytes(&raw, &entry.entry.checksum, pass) {
                         None => PreviewContent::EncryptedWrongPassphrase,
                         Some(decrypted) => decode_content(entry, &decrypted),
                     },
@@ -139,7 +130,7 @@ fn build_metadata(entry: &ArchiveIndexEntryWrapper, locale: &str) -> EntryMetada
         .map(|b| format!("{:02x}", b))
         .collect();
 
-    let all_pairs = parse_pairs(&entry.extra);
+    let all_pairs = parse_extra_pairs(&entry.extra);
     let extra_tags: Vec<(String, String)> = all_pairs
         .iter()
         .filter(|(k, _)| !ENCRYPTION_KEYS.contains(&k.as_str()))
@@ -156,92 +147,13 @@ fn build_metadata(entry: &ArchiveIndexEntryWrapper, locale: &str) -> EntryMetada
         })
         .collect();
 
-    let method_name = match entry.entry.compression_method {
-        CompressionMethod::None => "None",
-        CompressionMethod::Brotli => "Brotli",
-        CompressionMethod::Zstandard => "Zstandard",
-        CompressionMethod::Lzma => "LZMA",
-        CompressionMethod::LeptonJpeg => "Lepton JPEG",
-    };
-
     EntryMetadata {
-        compression_method: method_name.to_string(),
+        compression_method: entry.entry.compression_method.as_str().to_string(),
         original_size: entry.entry.original_size,
         compressed_size: entry.entry.compressed_size,
         checksum_hex,
         extra_tags,
     }
-}
-
-/// Parse `"k1=v1;k2=v2;…"` into a `Vec<(String, String)>`, skipping empty segments.
-pub fn parse_pairs(extra: &str) -> Vec<(String, String)> {
-    extra
-        .split(';')
-        .filter_map(|seg| {
-            let mut it = seg.splitn(2, '=');
-            let k = it.next()?.trim();
-            let v = it.next()?.trim();
-            if k.is_empty() || v.is_empty() {
-                None
-            } else {
-                Some((k.to_string(), v.to_string()))
-            }
-        })
-        .collect()
-}
-
-/// Resolve the data offset for `entry`, following the linked-data chain.
-fn resolve_offset(
-    entry: &ArchiveIndexEntryWrapper,
-    all_entries: &[ArchiveIndexEntryWrapper],
-) -> Option<u64> {
-    if entry.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0 {
-        let cs = entry.entry.checksum;
-        all_entries
-            .iter()
-            .find(|e| e.entry.checksum == cs && (e.entry.bitflags & INDEX_FLAG_LINKED_DATA) == 0)
-            .map(|e| e.entry.offset as u64)
-    } else {
-        Some(entry.entry.offset as u64)
-    }
-}
-
-/// Read the raw (compressed / encrypted) bytes from the archive file.
-fn load_bytes(
-    archive_path: &Path,
-    entry: &ArchiveIndexEntryWrapper,
-    all_entries: &[ArchiveIndexEntryWrapper],
-) -> Option<Vec<u8>> {
-    let offset = resolve_offset(entry, all_entries)?;
-    let mut file = File::open(archive_path).ok()?;
-    file.seek(SeekFrom::Start(offset)).ok()?;
-    let mut buf = vec![0u8; entry.entry.compressed_size as usize];
-    file.read_exact(&mut buf).ok()?;
-    Some(buf)
-}
-
-/// Decrypt a ChaCha20-Poly1305 ciphertext using the same scheme as `pipeline.rs`.
-///
-/// Returns `None` if the data is too short or the AEAD tag does not verify.
-fn decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<Vec<u8>> {
-    if data.len() < 16 {
-        return None;
-    }
-    let tag_bytes = &data[data.len() - 16..];
-    let mut ciphertext = data[..data.len() - 16].to_vec();
-    let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&checksum[..12]);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
-    cipher
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&nonce),
-            b"",
-            &mut ciphertext,
-            Tag::from_slice(tag_bytes),
-        )
-        .ok()?;
-    Some(ciphertext)
 }
 
 /// Decompress `raw` bytes and then classify them as text or binary.
@@ -339,7 +251,9 @@ fn try_highlight(text: &str, extension: &str) -> Option<Vec<ratatui::text::Line<
                 // Strip trailing newline/CR from the last token on this line.
                 let is_last = i == ranges.len() - 1;
                 let text_owned: String = if is_last {
-                    content.trim_end_matches(|c| c == '\n' || c == '\r').to_string()
+                    content
+                        .trim_end_matches(|c| c == '\n' || c == '\r')
+                        .to_string()
                 } else {
                     content.to_string()
                 };

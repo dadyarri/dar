@@ -138,14 +138,63 @@ fn extract_one(
 }
 
 /// Find the data offset of the first non-linked entry that has `checksum`.
-fn resolve_primary_offset(checksum: &[u8; 32], all_entries: &[ArchiveIndexEntryWrapper]) -> Option<u64> {
+pub fn resolve_primary_offset(checksum: &[u8; 32], all_entries: &[ArchiveIndexEntryWrapper]) -> Option<u64> {
     all_entries
         .iter()
         .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & INDEX_FLAG_LINKED_DATA) == 0)
         .map(|e| e.entry.offset as u64)
 }
 
-/// Decrypt ChaCha20-Poly1305 ciphertext.
+/// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
+///
+/// Follows `INDEX_FLAG_LINKED_DATA` to resolve the actual data offset.  Returns
+/// `None` on any I/O error so callers that only need a best-effort read (e.g.
+/// the inspect preview) can handle the failure gracefully.
+pub fn read_raw_entry_bytes(
+    archive_path: &Path,
+    entry: &ArchiveIndexEntryWrapper,
+    all_entries: &[ArchiveIndexEntryWrapper],
+) -> Option<Vec<u8>> {
+    let offset = if entry.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0 {
+        resolve_primary_offset(&entry.entry.checksum, all_entries)?
+    } else {
+        entry.entry.offset as u64
+    };
+    let mut file = File::open(archive_path).ok()?;
+    file.seek(SeekFrom::Start(offset)).ok()?;
+    let mut buf = vec![0u8; entry.entry.compressed_size as usize];
+    file.read_exact(&mut buf).ok()?;
+    Some(buf)
+}
+
+/// Attempt to decrypt a ChaCha20-Poly1305 ciphertext.
+///
+/// Returns `None` if `data` is too short or the AEAD tag does not verify (wrong
+/// passphrase).  Use this when only a success/failure answer is needed; `decrypt_data`
+/// wraps this for the extractor where a proper `Result` with a user-facing message
+/// is expected.
+pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<Vec<u8>> {
+    if data.len() < 16 {
+        return None;
+    }
+    let tag_bytes = &data[data.len() - 16..];
+    let mut ciphertext = data[..data.len() - 16].to_vec();
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&checksum[..12]);
+    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    cipher
+        .decrypt_in_place_detached(
+            Nonce::from_slice(&nonce),
+            b"",
+            &mut ciphertext,
+            Tag::from_slice(tag_bytes),
+        )
+        .ok()?;
+    Some(ciphertext)
+}
+
+/// Decrypt ChaCha20-Poly1305 ciphertext, returning a user-facing `Result`.
 ///
 /// The nonce is the first 12 bytes of `checksum` (matching the encoding in
 /// `pipeline.rs`).  The authentication tag occupies the last 16 bytes of
@@ -154,25 +203,8 @@ fn decrypt_data(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Result<Ve
     if data.len() < 16 {
         return Err(eyre!(t!("cli.extractor.errors.data_too_short")));
     }
-
-    let tag_bytes = data[data.len() - 16..].to_vec();
-    let mut ciphertext = data[..data.len() - 16].to_vec();
-
-    let mut nonce_bytes = [0u8; 12];
-    nonce_bytes.copy_from_slice(&checksum[..12]);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
-
-    cipher
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&nonce_bytes),
-            b"",
-            &mut ciphertext,
-            Tag::from_slice(&tag_bytes),
-        )
-        .map_err(|_| eyre!(t!("cli.extractor.errors.decrypt_invalid")))?;
-
-    Ok(ciphertext)
+    try_decrypt_bytes(data, checksum, passphrase)
+        .ok_or_else(|| eyre!(t!("cli.extractor.errors.decrypt_invalid")))
 }
 
 // ---------------------------------------------------------------------------
@@ -399,5 +431,4 @@ mod tests {
         assert!(result.is_err());
     }
 }
-
 
