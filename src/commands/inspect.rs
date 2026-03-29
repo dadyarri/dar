@@ -1,6 +1,6 @@
 use crate::i18n::Locale;
 use crate::reader;
-use crate::tui::{App, state::AppState, tree};
+use crate::tui::{App, state::{AppState, Focus}, tree};
 use clap::ArgMatches;
 use eyre::{Context, Result};
 use ratatui::widgets::TableState;
@@ -40,6 +40,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         tree_root,
         visible,
         table_state,
+        preview_open: false,
+        focus: Focus::List,
+        preview_scroll: 0,
+        preview_cache: None,
     };
 
     App::run(app_state)

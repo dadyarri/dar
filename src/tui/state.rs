@@ -1,8 +1,16 @@
 use crate::i18n::Locale;
 use crate::models::archive::ArchiveIndexEntryWrapper;
+use crate::tui::preview::EntryPreview;
 use crate::tui::tree::{FlatNode, TreeNode};
 use ratatui::widgets::TableState;
 use std::path::PathBuf;
+
+/// Which panel currently owns keyboard focus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    List,
+    Preview,
+}
 
 /// Application state passed into `App::run` for the inspect TUI.
 pub struct AppState {
@@ -20,4 +28,12 @@ pub struct AppState {
     pub visible: Vec<FlatNode>,
     /// Drives the ratatui `Table` widget; cursor indexes into `visible`.
     pub table_state: TableState,
+    /// Whether the preview panel is currently open.
+    pub preview_open: bool,
+    /// Which panel currently receives key input.
+    pub focus: Focus,
+    /// Vertical scroll offset (in lines) for the preview panel.
+    pub preview_scroll: u16,
+    /// Cached preview for the last opened file: `(entry_idx, preview)`.
+    pub preview_cache: Option<(usize, EntryPreview)>,
 }

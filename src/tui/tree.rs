@@ -219,13 +219,32 @@ mod tests {
     }
 
     #[test]
-    fn flatten_all_expanded() {
+    fn flatten_collapsed_by_default() {
+        // Dirs start collapsed, so only top-level nodes are visible.
         let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
         let root = build_tree(&entries);
         let visible = flatten_visible(&root);
-        // src/ (depth 0) + src/main.rs (depth 1) + README.md (depth 0)
+        // src/ (collapsed, depth 0) + README.md (depth 0) — main.rs is hidden
+        assert_eq!(visible.len(), 2);
+        assert!(visible[0].is_dir);
+        assert!(!visible[0].expanded);
+        assert_eq!(visible[0].display_name, "src");
+        assert_eq!(visible[0].depth, 0);
+        assert_eq!(visible[1].display_name, "README.md");
+        assert_eq!(visible[1].depth, 0);
+    }
+
+    #[test]
+    fn expand_dir_shows_children() {
+        // After explicitly expanding src/, its child becomes visible.
+        let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
+        let mut root = build_tree(&entries);
+        toggle_expanded(&mut root, "src");
+        let visible = flatten_visible(&root);
+        // src/ (expanded, depth 0) + main.rs (depth 1) + README.md (depth 0)
         assert_eq!(visible.len(), 3);
         assert!(visible[0].is_dir);
+        assert!(visible[0].expanded);
         assert_eq!(visible[0].display_name, "src");
         assert_eq!(visible[0].depth, 0);
         assert_eq!(visible[1].display_name, "main.rs");
@@ -236,9 +255,9 @@ mod tests {
 
     #[test]
     fn collapsed_dir_hides_children() {
+        // Dirs are collapsed by default, so children are never visible without a toggle.
         let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
-        let mut root = build_tree(&entries);
-        toggle_expanded(&mut root, "src");
+        let root = build_tree(&entries);
         let visible = flatten_visible(&root);
         // src/ (collapsed) + README.md
         assert_eq!(visible.len(), 2);
@@ -247,20 +266,36 @@ mod tests {
     }
 
     #[test]
-    fn double_toggle_restores_expanded() {
+    fn double_toggle_restores_collapsed() {
+        // Start collapsed → expand → collapse again.
         let entries = vec![make_entry("src/main.rs")];
         let mut root = build_tree(&entries);
-        toggle_expanded(&mut root, "src");
-        toggle_expanded(&mut root, "src");
+        toggle_expanded(&mut root, "src"); // now expanded
+        toggle_expanded(&mut root, "src"); // back to collapsed
         let visible = flatten_visible(&root);
-        assert_eq!(visible.len(), 2); // src/ + main.rs
-        assert!(visible[0].expanded);
+        assert_eq!(visible.len(), 1); // only src/ — main.rs hidden again
+        assert!(!visible[0].expanded);
     }
 
     #[test]
     fn nested_collapse() {
+        // Nested dirs all start collapsed; only the outermost dir is visible.
         let entries = vec![make_entry("a/b/c.txt")];
         let root = build_tree(&entries);
+        let visible = flatten_visible(&root);
+        // Only a/ is visible (collapsed); a/b/ and a/b/c.txt are hidden.
+        assert_eq!(visible.len(), 1);
+        assert!(visible[0].is_dir);
+        assert!(!visible[0].expanded);
+    }
+
+    #[test]
+    fn nested_expand_all_shows_file() {
+        // After expanding every level, the file entry should be reachable.
+        let entries = vec![make_entry("a/b/c.txt")];
+        let mut root = build_tree(&entries);
+        toggle_expanded(&mut root, "a");
+        toggle_expanded(&mut root, "a/b");
         let visible = flatten_visible(&root);
         // a/ + a/b/ + a/b/c.txt
         assert_eq!(visible.len(), 3);
