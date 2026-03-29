@@ -1,6 +1,6 @@
 use crate::i18n::Locale;
 use crate::reader;
-use crate::tui::{App, state::AppState};
+use crate::tui::{App, state::AppState, tree};
 use clap::ArgMatches;
 use eyre::{Context, Result};
 use ratatui::widgets::TableState;
@@ -24,9 +24,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let archive_state = reader::load_archive(&mut file, file_path, locale)?;
 
-    // Pre-select the first entry so the table is never in an unselected state.
+    let tree_root = tree::build_tree(&archive_state.entries);
+    let visible = tree::flatten_visible(&tree_root);
+
     let mut table_state = TableState::default();
-    if !archive_state.entries.is_empty() {
+    if !visible.is_empty() {
         table_state.select(Some(0));
     }
 
@@ -35,6 +37,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         entries: archive_state.entries,
         passphrase,
         locale: locale.clone(),
+        tree_root,
+        visible,
         table_state,
     };
 

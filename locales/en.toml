@@ -115,7 +115,7 @@ inspect_failed = "Failed to inspect archive"
 open_failed = "Failed to open archive %{file}"
 
 [tui.inspect]
-status_bar = "%{pos}/%{total}  |  ↑↓/jk navigate  q quit"
+status_bar = "%{pos}/%{vis} visible (%{total} total)  |  ↑↓/jk navigate  Enter/Space toggle  q quit"
 col_file = "File"
 col_size = "Size"
 col_compression = "Compression"

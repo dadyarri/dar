@@ -115,7 +115,7 @@ inspect_failed = "Не удалось открыть архив для прос�
 open_failed = "Не удалось открыть архив %{file}"
 
 [tui.inspect]
-status_bar = "%{pos}/%{total}  |  ↑↓/jk навигация  q выход"
+status_bar = "%{pos}/%{vis} видимых (%{total} всего)  |  ↑↓/jk навигация  Enter/Пробел свернуть  q выход"
 col_file = "Файл"
 col_size = "Размер"
 col_compression = "Сжатие"

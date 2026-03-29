@@ -1,7 +1,8 @@
 pub mod state;
+pub mod tree;
 
 use crate::models::archive::CompressionMethod;
-use crate::tui::state::AppState;
+use crate::tui::{state::AppState, tree as tui_tree};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -66,6 +67,8 @@ fn run_loop<B: ratatui::backend::Backend>(
                 (KeyCode::Up, _) | (KeyCode::Char('k'), _) => move_up(state),
                 (KeyCode::Down, _) | (KeyCode::Char('j'), _) => move_down(state),
 
+                (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => toggle_at_cursor(state),
+
                 _ => {}
             }
         }
@@ -74,7 +77,7 @@ fn run_loop<B: ratatui::backend::Backend>(
 }
 
 fn move_up(state: &mut AppState) {
-    if state.entries.is_empty() {
+    if state.visible.is_empty() {
         return;
     }
     let new = state
@@ -86,7 +89,7 @@ fn move_up(state: &mut AppState) {
 }
 
 fn move_down(state: &mut AppState) {
-    let n = state.entries.len();
+    let n = state.visible.len();
     if n == 0 {
         return;
     }
@@ -96,6 +99,33 @@ fn move_down(state: &mut AppState) {
         .map(|i| (i + 1).min(n - 1))
         .unwrap_or(0);
     state.table_state.select(Some(new));
+}
+
+/// Toggle expand/collapse on the currently selected directory node, then
+/// rebuild `visible` and keep the cursor on the same node.
+fn toggle_at_cursor(state: &mut AppState) {
+    let Some(idx) = state.table_state.selected() else {
+        return;
+    };
+    let Some(flat) = state.visible.get(idx) else {
+        return;
+    };
+    if !flat.is_dir {
+        return;
+    }
+
+    let full_path = flat.full_path.clone();
+    tui_tree::toggle_expanded(&mut state.tree_root, &full_path);
+    state.visible = tui_tree::flatten_visible(&state.tree_root);
+
+    // The toggled dir node is still visible after the toggle — find it again.
+    let new_idx = state
+        .visible
+        .iter()
+        .position(|n| n.full_path == full_path)
+        .unwrap_or(0)
+        .min(state.visible.len().saturating_sub(1));
+    state.table_state.select(Some(new_idx));
 }
 
 // ---------------------------------------------------------------------------
@@ -126,15 +156,33 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     ])
     .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
 
-    // Data rows: path | compressed size | algorithm name.
+    // Build one row per visible FlatNode.
     let rows: Vec<Row> = state
-        .entries
+        .visible
         .iter()
-        .map(|w| {
+        .map(|flat| {
+            let icon = if flat.is_dir {
+                if flat.expanded { "▼ " } else { "▶ " }
+            } else {
+                "  " // 2 spaces align with dir icon width
+            };
+            let indent = "  ".repeat(flat.depth);
+            let file_cell = format!("{}{}{}", indent, icon, flat.display_name);
+
+            let (size_str, algo_str) = if let Some(idx) = flat.entry_idx {
+                let e = &state.entries[idx];
+                (
+                    human_size(e.entry.compressed_size),
+                    algorithm_name(e.entry.compression_method),
+                )
+            } else {
+                (String::new(), "")
+            };
+
             Row::new(vec![
-                Cell::from(w.path.clone()),
-                Cell::from(human_size(w.entry.compressed_size)),
-                Cell::from(algorithm_name(w.entry.compression_method)),
+                Cell::from(file_cell),
+                Cell::from(size_str),
+                Cell::from(algo_str),
             ])
         })
         .collect();
@@ -142,8 +190,8 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     // Column widths: path fills remaining space; size and compression are fixed.
     let widths = [
         Constraint::Fill(1),
-        Constraint::Length(10), // "1023.9 KB" = 9 chars + 1 padding
-        Constraint::Length(11), // "Zstandard"  = 9 chars + 2 padding
+        Constraint::Length(10),
+        Constraint::Length(11),
     ];
 
     let filename = state
@@ -163,12 +211,18 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     frame.render_stateful_widget(table, main_area, &mut state.table_state);
 
-    // Status bar.
+    // Status bar: pos/visible (total total) | hints
     let pos = state.table_state.selected().map(|i| i + 1).unwrap_or(0);
+    let vis = state.visible.len();
     let total = state.entries.len();
-    let status =
-        rust_i18n::t!("tui.inspect.status_bar", locale = locale, pos = pos, total = total)
-            .to_string();
+    let status = rust_i18n::t!(
+        "tui.inspect.status_bar",
+        locale = locale,
+        pos = pos,
+        vis = vis,
+        total = total
+    )
+    .to_string();
     frame.render_widget(Paragraph::new(status), status_area);
 }
 
