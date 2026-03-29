@@ -193,6 +193,9 @@ fn toggle_preview(state: &mut AppState) {
 fn close_preview(state: &mut AppState) {
     state.preview_open = false;
     state.focus = Focus::List;
+    state.preview_scroll = 0;
+    state.preview_line_count = 0;
+    state.preview_viewport_height = 0;
     // Keep the cache so it can be reused if the user reopens the same entry.
 }
 
@@ -233,6 +236,8 @@ fn build_and_cache_preview(state: &mut AppState, entry_idx: usize) {
     };
     state.preview_cache = Some((entry_idx, preview));
     state.preview_scroll = 0;
+    state.preview_line_count = 0;
+    state.preview_viewport_height = 0;
 }
 
 fn scroll_preview_up(state: &mut AppState, lines: u16) {
@@ -240,7 +245,10 @@ fn scroll_preview_up(state: &mut AppState, lines: u16) {
 }
 
 fn scroll_preview_down(state: &mut AppState, lines: u16) {
-    state.preview_scroll = state.preview_scroll.saturating_add(lines);
+    let max_scroll = state
+        .preview_line_count
+        .saturating_sub(state.preview_viewport_height);
+    state.preview_scroll = state.preview_scroll.saturating_add(lines).min(max_scroll);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +261,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
-    let locale = state.locale.as_str();
+    let locale = state.locale.as_str().to_owned();
 
     // Top area = main content, bottom row = status bar.
     let vert = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(frame.area());
@@ -353,7 +361,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     // ── Status bar ─────────────────────────────────────────────────────────
     let total = state.entries.len();
-    let total_key = crate::utils::plural_key(total, "tui.inspect.status_total", locale);
+    let total_key = crate::utils::plural_key(total, "tui.inspect.status_total", &locale);
     let total_text = rust_i18n::t!(&total_key, locale = locale, total = total);
 
     let key_style = Style::default()
@@ -417,7 +425,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 fn render_preview_panel(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
-    state: &AppState,
+    state: &mut AppState,
 ) {
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
@@ -604,6 +612,17 @@ fn render_preview_panel(
         }
     }
 
+    // Keep counters current so scroll clamping in the event loop is accurate.
+    // Subtract 2 for the top/bottom borders.
+    let viewport_width = area.width.saturating_sub(2);
+    let viewport_height = area.height.saturating_sub(2);
+    let line_count = count_rendered_lines(&lines, viewport_width);
+    state.preview_line_count = line_count;
+    state.preview_viewport_height = viewport_height;
+    // Clamp the scroll offset in case the viewport grew or content shrank.
+    let max_scroll = line_count.saturating_sub(viewport_height);
+    state.preview_scroll = state.preview_scroll.min(max_scroll);
+
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false })
@@ -615,6 +634,29 @@ fn render_preview_panel(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Count the total number of terminal rows that `lines` occupies when rendered
+/// inside a panel of `viewport_width` columns (with `Wrap { trim: false }`).
+///
+/// Each logical [`Line`] takes `ceil(visible_width / viewport_width)` rows,
+/// with a minimum of 1 row for empty lines.
+fn count_rendered_lines(lines: &[ratatui::text::Line], viewport_width: u16) -> u16 {
+    if viewport_width == 0 {
+        return lines.len() as u16;
+    }
+    let w = viewport_width as usize;
+    lines
+        .iter()
+        .map(|line| {
+            let width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if width == 0 {
+                1
+            } else {
+                ((width + w - 1) / w) as u16
+            }
+        })
+        .fold(0u16, |acc, n| acc.saturating_add(n))
+}
 
 fn human_size(bytes: u32) -> String {
     const KB: u32 = 1024;

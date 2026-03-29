@@ -34,6 +34,10 @@ pub struct AppState {
     pub focus: Focus,
     /// Vertical scroll offset (in lines) for the preview panel.
     pub preview_scroll: u16,
+    /// Total logical lines in the last-rendered preview content (updated each frame).
+    pub preview_line_count: u16,
+    /// Usable height of the preview viewport in terminal rows (updated each frame).
+    pub preview_viewport_height: u16,
     /// Cached preview for the last opened file: `(entry_idx, preview)`.
     pub preview_cache: Option<(usize, EntryPreview)>,
 }

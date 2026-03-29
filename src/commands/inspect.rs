@@ -43,6 +43,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         preview_open: false,
         focus: Focus::List,
         preview_scroll: 0,
+        preview_line_count: 0,
+        preview_viewport_height: 0,
         preview_cache: None,
     };
 
