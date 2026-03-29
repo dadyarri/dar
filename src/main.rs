@@ -14,6 +14,7 @@ mod models;
 mod pipeline;
 mod reader;
 mod traits;
+mod tui;
 mod utils;
 mod walker;
 
@@ -38,6 +39,12 @@ fn main() -> Result<()> {
         Some(("append", sub_matches)) => {
             commands::append::call(sub_matches, &locale).wrap_err(
                 rust_i18n::t!("cli.append.errors.append_failed", locale = locale.as_str())
+                    .to_string(),
+            )?;
+        }
+        Some(("inspect", sub_matches)) => {
+            commands::inspect::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.inspect.errors.inspect_failed", locale = locale.as_str())
                     .to_string(),
             )?;
         }

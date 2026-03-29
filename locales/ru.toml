@@ -103,6 +103,21 @@ append_mixed_encryption = "Архив содержит одновременно 
 append_passphrase_invalid = "Неверная парольная фраза для этого зашифрованного архива"
 append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
 
+[cli.inspect]
+about = "Интерактивный просмотр содержимого архива"
+
+[cli.inspect.args]
+file = "Путь к архивному файлу для просмотра"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+
+[cli.inspect.errors]
+inspect_failed = "Не удалось открыть архив для просмотра"
+open_failed = "Не удалось открыть архив %{file}"
+
+[tui.inspect]
+skeleton_hint = "Нажмите q для выхода  (%{n} записей)"
+unknown_filename = "неизвестно"
+
 [cli.extractor.errors]
 open_failed = "Не удалось открыть архив %{file}"
 seek_failed = "Не удалось переместить указатель внутри архива"

@@ -103,6 +103,21 @@ append_mixed_encryption = "Archive contains both encrypted and unencrypted entri
 append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
 append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
 
+[cli.inspect]
+about = "Interactively inspect the contents of an archive"
+
+[cli.inspect.args]
+file = "The path to the archive file to inspect"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+
+[cli.inspect.errors]
+inspect_failed = "Failed to inspect archive"
+open_failed = "Failed to open archive %{file}"
+
+[tui.inspect]
+skeleton_hint = "Press q to quit  (%{n} entries)"
+unknown_filename = "unknown"
+
 [cli.extractor.errors]
 open_failed = "Failed to open archive %{file}"
 seek_failed = "Failed to seek within archive"

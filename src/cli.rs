@@ -164,6 +164,30 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("inspect")
+                .short_flag('i')
+                .about(translate("cli.inspect.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.inspect.args.file")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .help(translate("cli.inspect.args.encrypt_passphrase")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
         ])
 }
 
