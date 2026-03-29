@@ -471,6 +471,7 @@ fn render_preview_panel(
     // Extract encoding upfront so it can be placed in the compression section.
     let encoding_opt = match &entry_preview.content {
         PreviewContent::Text { encoding, .. } => Some(*encoding),
+        PreviewContent::HighlightedText { encoding, .. } => Some(*encoding),
         _ => None,
     };
 
@@ -599,6 +600,26 @@ fn render_preview_panel(
             lines.push(Line::from(""));
             for line in text.lines() {
                 lines.push(Line::from(Span::raw(line.to_string())));
+            }
+            if *truncated {
+                lines.push(Line::from(""));
+                let trunc_msg =
+                    rust_i18n::t!("tui.inspect.preview.truncated", locale = locale);
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", trunc_msg),
+                    dim_style,
+                )));
+            }
+        }
+        PreviewContent::HighlightedText {
+            encoding: _,
+            lines: highlighted_lines,
+            truncated,
+        } => {
+            // Encoding is shown in the compression metadata section above.
+            lines.push(Line::from(""));
+            for hl_line in highlighted_lines {
+                lines.push(hl_line.clone());
             }
             if *truncated {
                 lines.push(Line::from(""));

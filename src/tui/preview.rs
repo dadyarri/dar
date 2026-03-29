@@ -6,6 +6,15 @@ use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::LazyLock;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
+use syntect::util::LinesWithEndings;
+
+static SYNTAX_SET: LazyLock<SyntaxSet> =
+    LazyLock::new(|| SyntaxSet::load_defaults_newlines());
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -50,7 +59,13 @@ pub enum PreviewContent {
     EncryptedNoPassphrase,
     /// Entry is encrypted; the supplied passphrase did not decrypt successfully.
     EncryptedWrongPassphrase,
-    /// Successfully decoded text content.
+    /// Successfully decoded and syntax-highlighted text content.
+    HighlightedText {
+        encoding: &'static str,
+        lines: Vec<ratatui::text::Line<'static>>,
+        truncated: bool,
+    },
+    /// Successfully decoded text content (no syntax highlighting available).
     Text {
         encoding: &'static str,
         text: String,
@@ -233,11 +248,18 @@ fn decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<V
 fn decode_content(entry: &ArchiveIndexEntryWrapper, raw: &[u8]) -> PreviewContent {
     let plain =
         decompress_bytes(entry.entry.compression_method, raw).unwrap_or_else(|_| raw.to_vec());
-    classify_bytes(&plain)
+    let extension = std::path::Path::new(&entry.path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    classify_bytes(&plain, extension)
 }
 
 /// Classify `bytes` as UTF-8 text, Windows-1251 text, or binary.
-fn classify_bytes(bytes: &[u8]) -> PreviewContent {
+/// When the content is UTF-8 text and `extension` is recognised by syntect,
+/// returns [`PreviewContent::HighlightedText`]; otherwise falls back to
+/// [`PreviewContent::Text`].
+fn classify_bytes(bytes: &[u8], extension: &str) -> PreviewContent {
     let preview = if bytes.len() > TEXT_PREVIEW_LIMIT {
         &bytes[..TEXT_PREVIEW_LIMIT]
     } else {
@@ -261,6 +283,14 @@ fn classify_bytes(bytes: &[u8]) -> PreviewContent {
 
     // Try UTF-8 first (covers plain ASCII as well).
     if let Ok(s) = std::str::from_utf8(preview) {
+        // Attempt syntax highlighting for the detected extension.
+        if let Some(highlighted) = try_highlight(s, extension) {
+            return PreviewContent::HighlightedText {
+                encoding: "UTF-8",
+                lines: highlighted,
+                truncated,
+            };
+        }
         return PreviewContent::Text {
             encoding: "UTF-8",
             text: s.to_string(),
@@ -283,4 +313,47 @@ fn classify_bytes(bytes: &[u8]) -> PreviewContent {
     PreviewContent::Binary
 }
 
+/// Try to syntax-highlight `text` for the given file `extension`.
+///
+/// Returns `None` when no matching syntax definition is found or an error
+/// occurs during highlighting; the caller should fall back to plain text.
+fn try_highlight(text: &str, extension: &str) -> Option<Vec<ratatui::text::Line<'static>>> {
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
 
+    if extension.is_empty() {
+        return None;
+    }
+
+    let syntax = SYNTAX_SET.find_syntax_by_extension(extension)?;
+    let theme = &THEME_SET.themes["base16-ocean.dark"];
+    let mut highlighter = HighlightLines::new(syntax, theme);
+
+    let mut result: Vec<Line<'static>> = Vec::new();
+    for line_str in LinesWithEndings::from(text) {
+        let ranges = highlighter.highlight_line(line_str, &SYNTAX_SET).ok()?;
+        let spans: Vec<Span<'static>> = ranges
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (style, content))| {
+                // Strip trailing newline/CR from the last token on this line.
+                let is_last = i == ranges.len() - 1;
+                let text_owned: String = if is_last {
+                    content.trim_end_matches(|c| c == '\n' || c == '\r').to_string()
+                } else {
+                    content.to_string()
+                };
+                if text_owned.is_empty() {
+                    return None;
+                }
+                let fg = style.foreground;
+                Some(Span::styled(
+                    text_owned,
+                    Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)),
+                ))
+            })
+            .collect();
+        result.push(Line::from(spans));
+    }
+    Some(result)
+}

@@ -29,6 +29,7 @@ crossterm = "0.28"
 nucleo-matcher = "0.3"
 unicode-width = "0.2"
 encoding_rs = "0.8"
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 
 [build-dependencies]
 clap = { version = "4.5.60", features = ["cargo"] }
