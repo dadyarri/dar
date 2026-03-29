@@ -377,6 +377,13 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let close_hint = rust_i18n::t!("tui.inspect.hint_close_preview", locale = locale);
     let scroll_hint = rust_i18n::t!("tui.inspect.hint_scroll", locale = locale);
 
+    let selected_is_dir = state
+        .table_state
+        .selected()
+        .and_then(|i| state.visible.get(i))
+        .map(|flat| flat.is_dir)
+        .unwrap_or(false);
+
     let hints_vec: Vec<(&str, &str)> = if state.focus == Focus::Preview {
         vec![
             ("↑↓/PgUp/PgDn", scroll_hint.as_ref()),
@@ -384,12 +391,13 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
             ("q", quit_hint.as_ref()),
         ]
     } else {
-        vec![
-            ("↑↓/jk", nav_hint.as_ref()),
-            ("Enter/Space", toggle_hint.as_ref()),
-            ("Tab", preview_hint.as_ref()),
-            ("q", quit_hint.as_ref()),
-        ]
+        let mut hints = vec![("↑↓/jk", nav_hint.as_ref())];
+        if selected_is_dir {
+            hints.push(("Enter/Space", toggle_hint.as_ref()));
+        }
+        hints.push(("Tab", preview_hint.as_ref()));
+        hints.push(("q", quit_hint.as_ref()));
+        hints
     };
 
     let mut hint_spans: Vec<Span> = vec![Span::raw(" ")];
