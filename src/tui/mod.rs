@@ -4,7 +4,7 @@ pub mod state;
 pub mod tree;
 
 use crate::tui::{
-    preview::{PreviewContent, build_preview},
+    preview::{build_preview, PreviewContent},
     search::apply_fuzzy_filter,
     state::{AppState, Focus},
     tree as tui_tree,
@@ -12,10 +12,10 @@ use crate::tui::{
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use eyre::Result;
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::panic;
 
@@ -356,7 +356,46 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
                 "  "
             };
             let indent = "  ".repeat(flat.depth);
-            let file_cell = format!("{}{}{}", indent, icon, flat.display_name);
+
+            let file_cell: Line = if flat.match_indices.is_empty() {
+                Line::raw(format!("{}{}{}", indent, icon, flat.display_name))
+            } else {
+                // Build spans: prefix (indent + icon) plain, then walk display_name
+                // char-by-char and highlight positions listed in match_indices.
+                let highlight = Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD);
+                let mut spans: Vec<Span> = vec![Span::raw(format!("{}{}", indent, icon))];
+                // match_indices are already sorted (done in search.rs).
+                let mut idx_iter = flat.match_indices.iter().peekable();
+                let mut current_text = String::new();
+                let mut in_match = false;
+                for (char_pos, ch) in flat.display_name.chars().enumerate() {
+                    let is_match = idx_iter.peek().copied() == Some(&(char_pos as u32));
+                    if is_match {
+                        idx_iter.next();
+                    }
+                    if is_match != in_match {
+                        if !current_text.is_empty() {
+                            spans.push(if in_match {
+                                Span::styled(std::mem::take(&mut current_text), highlight)
+                            } else {
+                                Span::raw(std::mem::take(&mut current_text))
+                            });
+                        }
+                        in_match = is_match;
+                    }
+                    current_text.push(ch);
+                }
+                if !current_text.is_empty() {
+                    spans.push(if in_match {
+                        Span::styled(current_text, highlight)
+                    } else {
+                        Span::raw(current_text)
+                    });
+                }
+                Line::from(spans)
+            };
 
             let (size_str, algo_str) = if let Some(idx) = flat.entry_idx {
                 let e = &state.entries[idx];

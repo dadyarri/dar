@@ -22,6 +22,9 @@ pub struct FlatNode {
     pub full_path: String,
     /// Index into the original `entries` slice; `None` for implicit directory nodes.
     pub entry_idx: Option<usize>,
+    /// Character positions inside `display_name` that caused this node to match
+    /// the fuzzy search query.  Empty when not in search mode.
+    pub match_indices: Vec<u32>,
 }
 
 impl TreeNode {
@@ -140,6 +143,7 @@ fn flatten_node(node: &TreeNode, depth: usize, out: &mut Vec<FlatNode>) {
         display_name: node.name.clone(),
         full_path: node.full_path.clone(),
         entry_idx: node.entry_idx,
+        match_indices: Vec::new(),
     });
     if node.is_dir && node.expanded {
         for child in &node.children {
