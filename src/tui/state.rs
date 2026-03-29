@@ -40,4 +40,8 @@ pub struct AppState {
     pub preview_viewport_height: u16,
     /// Cached preview for the last opened file: `(entry_idx, preview)`.
     pub preview_cache: Option<(usize, EntryPreview)>,
+    /// Current text typed into the fuzzy search bar; empty when inactive.
+    pub search_query: String,
+    /// Whether the `/` search input box is currently open and receiving input.
+    pub search_active: bool,
 }

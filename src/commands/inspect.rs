@@ -50,6 +50,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         preview_line_count: 0,
         preview_viewport_height: 0,
         preview_cache: None,
+        search_query: String::new(),
+        search_active: false,
     };
 
     App::run(app_state)

@@ -1,9 +1,11 @@
 pub mod preview;
+pub mod search;
 pub mod state;
 pub mod tree;
 
 use crate::tui::{
     preview::{PreviewContent, build_preview},
+    search::apply_fuzzy_filter,
     state::{AppState, Focus},
     tree as tui_tree,
 };
@@ -63,6 +65,41 @@ fn run_loop<B: ratatui::backend::Backend>(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+
+            // ── Search mode ────────────────────────────────────────────────
+            if state.search_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        // Clear query, deactivate search, restore full tree.
+                        state.search_query.clear();
+                        state.search_active = false;
+                        state.visible = tui_tree::flatten_visible(&state.tree_root);
+                        state.table_state.select(if state.visible.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        });
+                    }
+                    KeyCode::Enter => {
+                        // Keep current filtered view, close input box.
+                        state.search_active = false;
+                        if state.table_state.selected().is_none() && !state.visible.is_empty() {
+                            state.table_state.select(Some(0));
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        state.search_query.pop();
+                        rebuild_visible_from_search(state);
+                    }
+                    KeyCode::Char(c) => {
+                        state.search_query.push(c);
+                        rebuild_visible_from_search(state);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
             match (key.code, key.modifiers) {
                 (KeyCode::Char('q'), _)
                 | (KeyCode::Char('Q'), _)
@@ -93,6 +130,13 @@ fn run_loop<B: ratatui::backend::Backend>(
 
                 // Esc closes the preview when it is open.
                 (KeyCode::Esc, _) if state.preview_open => close_preview(state),
+
+                // '/' activates fuzzy search.
+                (KeyCode::Char('/'), _) => {
+                    state.search_active = true;
+                    // Don't clear an existing query — let the user see the
+                    // previous filter and extend/delete it.
+                }
 
                 _ => {}
             }
@@ -196,6 +240,16 @@ fn close_preview(state: &mut AppState) {
     state.preview_line_count = 0;
     state.preview_viewport_height = 0;
     // Keep the cache so it can be reused if the user reopens the same entry.
+}
+
+/// Rebuild `visible` from the current `search_query` and reset the cursor.
+fn rebuild_visible_from_search(state: &mut AppState) {
+    state.visible = apply_fuzzy_filter(&state.search_query, &state.tree_root);
+    state.table_state.select(if state.visible.is_empty() {
+        None
+    } else {
+        Some(0)
+    });
 }
 
 /// Rebuild the preview cache for the currently selected entry.
@@ -376,52 +430,109 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let preview_hint = rust_i18n::t!("tui.inspect.hint_preview", locale = locale);
     let close_hint = rust_i18n::t!("tui.inspect.hint_close_preview", locale = locale);
     let scroll_hint = rust_i18n::t!("tui.inspect.hint_scroll", locale = locale);
+    let search_hint = rust_i18n::t!("tui.inspect.hint_search", locale = locale);
+    let search_type_hint = rust_i18n::t!("tui.inspect.hint_search_type", locale = locale);
+    let search_keep_hint = rust_i18n::t!("tui.inspect.hint_search_keep", locale = locale);
+    let search_restore_hint = rust_i18n::t!("tui.inspect.hint_search_restore", locale = locale);
 
-    let selected_is_dir = state
-        .table_state
-        .selected()
-        .and_then(|i| state.visible.get(i))
-        .map(|flat| flat.is_dir)
-        .unwrap_or(false);
+    if state.search_active {
+        // ── Search input box ───────────────────────────────────────────────
+        // Left: "/ {query}█"
+        let prompt_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+        let cursor_style = Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD);
+        let input_spans = vec![
+            Span::styled(" / ", prompt_style),
+            Span::styled(
+                state.search_query.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("█", cursor_style),
+        ];
 
-    let hints_vec: Vec<(&str, &str)> = if state.focus == Focus::Preview {
-        vec![
-            ("↑↓/PgUp/PgDn", scroll_hint.as_ref()),
-            ("Tab/Esc", close_hint.as_ref()),
-            ("q", quit_hint.as_ref()),
+        // Right: "type to filter   Enter keep   Esc restore"
+        let mut search_hint_spans: Vec<Span> = Vec::new();
+        for (i, (key, desc)) in [
+            ("Enter", search_keep_hint.as_ref()),
+            ("Esc", search_restore_hint.as_ref()),
         ]
+        .iter()
+        .enumerate()
+        {
+            if i > 0 {
+                search_hint_spans.push(Span::raw("   "));
+            }
+            search_hint_spans.push(Span::styled(*key, key_style));
+            search_hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
+        }
+        search_hint_spans.push(Span::raw("   "));
+        search_hint_spans.push(Span::styled(format!("{search_type_hint}  "), desc_style));
+
+        let status_chunks =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(status_area);
+        frame.render_widget(
+            Paragraph::new(Line::from(input_spans)).style(bar_bg),
+            status_chunks[0],
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(search_hint_spans))
+                .style(bar_bg)
+                .alignment(ratatui::layout::Alignment::Right),
+            status_chunks[1],
+        );
     } else {
-        let mut hints = vec![("↑↓/jk", nav_hint.as_ref())];
-        if selected_is_dir {
-            hints.push(("Enter/Space", toggle_hint.as_ref()));
-        }
-        hints.push(("Tab", preview_hint.as_ref()));
-        hints.push(("q", quit_hint.as_ref()));
-        hints
-    };
+        let selected_is_dir = state
+            .table_state
+            .selected()
+            .and_then(|i| state.visible.get(i))
+            .map(|flat| flat.is_dir)
+            .unwrap_or(false);
 
-    let mut hint_spans: Vec<Span> = vec![Span::raw(" ")];
-    for (i, (key, desc)) in hints_vec.iter().enumerate() {
-        if i > 0 {
-            hint_spans.push(Span::raw("   "));
+        let hints_vec: Vec<(&str, &str)> = if state.focus == Focus::Preview {
+            vec![
+                ("↑↓/PgUp/PgDn", scroll_hint.as_ref()),
+                ("Tab/Esc", close_hint.as_ref()),
+                ("q", quit_hint.as_ref()),
+            ]
+        } else {
+            let mut hints = vec![("↑↓/jk", nav_hint.as_ref())];
+            if selected_is_dir {
+                hints.push(("Enter/Space", toggle_hint.as_ref()));
+            }
+            hints.push(("Tab", preview_hint.as_ref()));
+            hints.push(("/", search_hint.as_ref()));
+            hints.push(("q", quit_hint.as_ref()));
+            hints
+        };
+
+        let mut hint_spans: Vec<Span> = vec![Span::raw(" ")];
+        for (i, (key, desc)) in hints_vec.iter().enumerate() {
+            if i > 0 {
+                hint_spans.push(Span::raw("   "));
+            }
+            hint_spans.push(Span::styled(*key, key_style));
+            hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
         }
-        hint_spans.push(Span::styled(*key, key_style));
-        hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
+
+        let right_text = format!(" {} ", total_text);
+        let right_width = right_text.chars().count() as u16;
+        let status_chunks =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
+                .split(status_area);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(hint_spans)).style(bar_bg),
+            status_chunks[0],
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(right_text, count_style)])).style(bar_bg),
+            status_chunks[1],
+        );
     }
-
-    let right_text = format!(" {} ", total_text);
-    let right_width = right_text.chars().count() as u16;
-    let status_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
-        .split(status_area);
-
-    frame.render_widget(
-        Paragraph::new(Line::from(hint_spans)).style(bar_bg),
-        status_chunks[0],
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(right_text, count_style)])).style(bar_bg),
-        status_chunks[1],
-    );
 }
 
 // ---------------------------------------------------------------------------
