@@ -70,6 +70,46 @@ pub fn get_mode(metadata: &fs::Metadata) -> (u32, u32, u16) {
     }
 }
 
+/// Returns the CLDR plural-category suffix for `n` in the given `locale`.
+///
+/// | suffix   | when (ru)                                  | when (en / default)  |
+/// |----------|--------------------------------------------|----------------------|
+/// | `"one"`  | n % 10 == 1, n % 100 != 11                 | n == 1               |
+/// | `"few"`  | n % 10 in 2–4, n % 100 not in 12–14       | —                    |
+/// | `"many"` | everything else (ru)                       | —                    |
+/// | `"other"`| —                                          | everything else (en) |
+///
+/// Combine the suffix with a dot-separated key prefix to get the final i18n key:
+/// ```ignore
+/// let key = plural_key(total, "tui.inspect.status_total", locale);
+/// rust_i18n::t!(&key, locale = locale, total = total)
+/// ```
+pub fn plural_suffix(n: usize, locale: &str) -> &'static str {
+    match locale {
+        "ru" => {
+            let rem10 = n % 10;
+            let rem100 = n % 100;
+            if rem10 == 1 && rem100 != 11 {
+                "one"
+            } else if (2..=4).contains(&rem10) && !(12..=14).contains(&rem100) {
+                "few"
+            } else {
+                "many"
+            }
+        }
+        _ => {
+            if n == 1 { "one" } else { "other" }
+        }
+    }
+}
+
+/// Returns the fully-qualified i18n key for a plural-aware translation.
+///
+/// Example: `plural_key(5, "tui.inspect.status_total", "ru")` → `"tui.inspect.status_total_many"`
+pub fn plural_key(n: usize, prefix: &str, locale: &str) -> String {
+    format!("{prefix}_{}", plural_suffix(n, locale))
+}
+
 /// Cleanup path
 fn sanitize_path(path: &str) -> String {
     let mut components = Vec::new();

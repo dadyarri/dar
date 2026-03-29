@@ -6,10 +6,10 @@ use crate::tui::{state::AppState, tree as tui_tree};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use eyre::Result;
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::panic;
 
@@ -135,13 +135,13 @@ fn toggle_at_cursor(state: &mut AppState) {
 fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     use ratatui::layout::{Constraint, Layout};
     use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
     let locale = state.locale.as_str();
 
     // Top area = table, bottom row = status bar.
-    let chunks = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
-        .split(frame.area());
+    let chunks = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(frame.area());
     let (main_area, status_area) = (chunks[0], chunks[1]);
 
     // Translated column headers.
@@ -154,7 +154,11 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         Cell::from(col_size.as_ref()),
         Cell::from(col_compression.as_ref()),
     ])
-    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
 
     // Build one row per visible FlatNode.
     let rows: Vec<Row> = state
@@ -211,19 +215,54 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     frame.render_stateful_widget(table, main_area, &mut state.table_state);
 
-    // Status bar: pos/visible (total total) | hints
-    let pos = state.table_state.selected().map(|i| i + 1).unwrap_or(0);
-    let vis = state.visible.len();
+    // ── Status bar ────────────────────────────────────────────────────────────
     let total = state.entries.len();
-    let status = rust_i18n::t!(
-        "tui.inspect.status_bar",
-        locale = locale,
-        pos = pos,
-        vis = vis,
-        total = total
-    )
-    .to_string();
-    frame.render_widget(Paragraph::new(status), status_area);
+
+    let total_key = crate::utils::plural_key(total, "tui.inspect.status_total", locale);
+    let total_text = rust_i18n::t!(&total_key, locale = locale, total = total);
+
+    // Styles used in the status bar.
+    let key_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+    let count_style = Style::default().fg(Color::LightCyan);
+    let bar_bg = Style::default().bg(Color::Black);
+
+    // (key label, translated action description)
+    let nav_hint = rust_i18n::t!("tui.inspect.hint_navigate", locale = locale);
+    let toggle_hint = rust_i18n::t!("tui.inspect.hint_toggle", locale = locale);
+    let quit_hint = rust_i18n::t!("tui.inspect.hint_quit", locale = locale);
+    let hints: &[(&str, &str)] = &[
+        ("↑↓/jk", nav_hint.as_ref()),
+        ("Enter/Space", toggle_hint.as_ref()),
+        ("q", quit_hint.as_ref()),
+    ];
+
+    let mut hint_spans: Vec<Span> = vec![Span::raw(" ")];
+    for (i, (key, desc)) in hints.iter().enumerate() {
+        if i > 0 {
+            hint_spans.push(Span::raw("   "));
+        }
+        hint_spans.push(Span::styled(*key, key_style));
+        hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
+    }
+
+    // Right side: total entry count — size the column to the text length so it
+    // sits flush against the right edge.
+    let right_text = format!(" {} ", total_text);
+    let right_width = right_text.chars().count() as u16;
+    let status_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
+        .split(status_area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(hint_spans)).style(bar_bg),
+        status_chunks[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(right_text, count_style)])).style(bar_bg),
+        status_chunks[1],
+    );
 }
 
 // ---------------------------------------------------------------------------
