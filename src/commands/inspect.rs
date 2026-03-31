@@ -52,6 +52,9 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         preview_cache: None,
         search_query: String::new(),
         search_active: false,
+        meta_search_query: String::new(),
+        meta_search_active: false,
+        meta_search_error: None,
     };
 
     App::run(app_state)

@@ -55,4 +55,10 @@ pub struct AppState {
     pub search_query: String,
     /// Whether the `/` search input box is currently open and receiving input.
     pub search_active: bool,
+    /// Current text typed into the metadata search bar; empty when inactive.
+    pub meta_search_query: String,
+    /// Whether the `s` metadata search input box is currently open and receiving input.
+    pub meta_search_active: bool,
+    /// Parse error from the last metadata search input attempt, if any.
+    pub meta_search_error: Option<String>,
 }

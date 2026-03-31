@@ -1,9 +1,11 @@
+pub mod meta_search;
 pub mod preview;
 pub mod search;
 pub mod state;
 pub mod tree;
 
 use crate::tui::{
+    meta_search::{apply_meta_filter, parse_meta_query, TAG_ALIASES_FULL},
     preview::{build_preview, PreviewContent},
     search::apply_fuzzy_filter,
     state::{AppState, Focus, PreviewMode},
@@ -64,6 +66,40 @@ fn run_loop<B: ratatui::backend::Backend>(
         if let Event::Key(key) = event::read()? {
             // Only react to key-press events; ignore repeat/release.
             if key.kind != KeyEventKind::Press {
+                continue;
+            }
+
+            // ── Meta-search mode ───────────────────────────────────────────
+            if state.meta_search_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        state.meta_search_query.clear();
+                        state.meta_search_active = false;
+                        state.meta_search_error = None;
+                        state.visible = tui_tree::flatten_visible(&state.tree_root);
+                        state.table_state.select(if state.visible.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        });
+                    }
+                    KeyCode::Enter => {
+                        state.meta_search_active = false;
+                        state.meta_search_error = None;
+                        if state.table_state.selected().is_none() && !state.visible.is_empty() {
+                            state.table_state.select(Some(0));
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        state.meta_search_query.pop();
+                        rebuild_visible_from_meta_search(state);
+                    }
+                    KeyCode::Char(c) => {
+                        state.meta_search_query.push(c);
+                        rebuild_visible_from_meta_search(state);
+                    }
+                    _ => {}
+                }
                 continue;
             }
 
@@ -142,6 +178,14 @@ fn run_loop<B: ratatui::backend::Backend>(
                     state.search_active = true;
                     // Don't clear an existing query — let the user see the
                     // previous filter and extend/delete it.
+                }
+
+                // 's' activates metadata search.
+                (KeyCode::Char('s'), _) => {
+                    // Close filename search if it was open.
+                    state.search_active = false;
+                    state.meta_search_active = true;
+                    state.meta_search_error = None;
                 }
 
                 _ => {}
@@ -269,6 +313,25 @@ fn rebuild_visible_from_search(state: &mut AppState) {
     });
 }
 
+/// Parse `meta_search_query` and rebuild `visible`; store any parse error.
+fn rebuild_visible_from_meta_search(state: &mut AppState) {
+    match parse_meta_query(&state.meta_search_query) {
+        Ok(predicates) => {
+            state.meta_search_error = None;
+            state.visible = apply_meta_filter(&predicates, &state.entries, &state.tree_root);
+        }
+        Err(e) => {
+            state.meta_search_error = Some(e);
+            // Keep the previous visible list so the display isn't jarring.
+        }
+    }
+    state.table_state.select(if state.visible.is_empty() {
+        None
+    } else {
+        Some(0)
+    });
+}
+
 /// Rebuild the preview cache for the currently selected entry.
 /// Automatically closes the preview window if a directory is selected.
 fn refresh_preview(state: &mut AppState) {
@@ -338,9 +401,16 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let (main_area, status_area) = (vert[0], vert[1]);
 
     // The list always fills the full main area; a preview floats on top.
-    let list_area = main_area;
+    // When meta search is active, split horizontally: list on the left,
+    // tag-search help panel on the right.
+    let (list_area, meta_help_area): (Rect, Option<Rect>) = if state.meta_search_active {
+        let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(34)]).split(main_area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (main_area, None)
+    };
     let preview_area: Option<Rect> = if state.preview_mode != PreviewMode::Closed {
-        Some(centered_popup_rect(96, 94, main_area))
+        Some(centered_popup_rect(96, 94, list_area))
     } else {
         None
     };
@@ -461,6 +531,11 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     frame.render_stateful_widget(table, list_area, &mut state.table_state);
 
+    // ── Meta-search help panel (right split) ───────────────────────────────
+    if let Some(help_area) = meta_help_area {
+        render_meta_search_help_panel(frame, help_area, &state.meta_search_error, &locale);
+    }
+
     // ── Preview floating window ────────────────────────────────────────────
     if let Some(area) = preview_area {
         use ratatui::widgets::Clear;
@@ -492,13 +567,64 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let close_hint = rust_i18n::t!("tui.inspect.hint_close_preview", locale = locale);
     let scroll_hint = rust_i18n::t!("tui.inspect.hint_scroll", locale = locale);
     let search_hint = rust_i18n::t!("tui.inspect.hint_search", locale = locale);
+    let meta_search_hint = rust_i18n::t!("tui.inspect.hint_meta_search", locale = locale);
     let search_type_hint = rust_i18n::t!("tui.inspect.hint_search_type", locale = locale);
     let search_keep_hint = rust_i18n::t!("tui.inspect.hint_search_keep", locale = locale);
     let search_restore_hint = rust_i18n::t!("tui.inspect.hint_search_restore", locale = locale);
+    let meta_search_keep_hint =
+        rust_i18n::t!("tui.inspect.hint_meta_search_keep", locale = locale);
+    let meta_search_restore_hint =
+        rust_i18n::t!("tui.inspect.hint_meta_search_restore", locale = locale);
 
-    if state.search_active {
-        // ── Search input box ───────────────────────────────────────────────
-        // Left: "/ {query}█"
+    if state.meta_search_active {
+        // ── Metadata search input box ──────────────────────────────────────
+        let prompt_style = Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD);
+        let cursor_style = Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD);
+        let input_spans = vec![
+            Span::styled(" s ", prompt_style),
+            Span::styled(
+                state.meta_search_query.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("█", cursor_style),
+        ];
+
+        // Right: keybinding hints only (error is shown in the help panel).
+        let mut hint_spans: Vec<Span> = Vec::new();
+        for (i, (key, desc)) in [
+            ("Enter", meta_search_keep_hint.as_ref()),
+            ("Esc", meta_search_restore_hint.as_ref()),
+        ]
+        .iter()
+        .enumerate()
+        {
+            if i > 0 {
+                hint_spans.push(Span::raw("   "));
+            }
+            hint_spans.push(Span::styled(*key, key_style));
+            hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
+        }
+        hint_spans.push(Span::raw("  "));
+
+        let status_chunks =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(status_area);
+        frame.render_widget(
+            Paragraph::new(Line::from(input_spans)).style(bar_bg),
+            status_chunks[0],
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(hint_spans))
+                .style(bar_bg)
+                .alignment(ratatui::layout::Alignment::Right),
+            status_chunks[1],
+        );
+    } else if state.search_active {
+        // ── Filename search input box ──────────────────────────────────────
         let prompt_style = Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
@@ -603,6 +729,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
                     }
                 }
                 hints.push(("/", search_hint.as_ref()));
+                hints.push(("s", meta_search_hint.as_ref()));
                 hints.push(("q", quit_hint.as_ref()));
                 hints
             }
@@ -637,6 +764,95 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 // ---------------------------------------------------------------------------
 // Preview panel rendering
 // ---------------------------------------------------------------------------
+
+/// Render the **tag-search help** panel shown as a right split when meta search is active.
+///
+/// Shows usage examples and a table of all available tag aliases with their
+/// localised descriptions.  If there is a current parse error it is displayed
+/// prominently at the top.
+fn render_meta_search_help_panel(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    error: &Option<String>,
+    locale: &str,
+) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let block = Block::default()
+        .title(" Tag Search ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let heading_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let alias_style = Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+    let example_style = Style::default().fg(Color::White);
+    let error_style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+
+    let max_alias = TAG_ALIASES_FULL
+        .iter()
+        .map(|(a, _, _)| a.len())
+        .max()
+        .unwrap_or(6);
+
+    let mut lines: Vec<Line> = vec![Line::from("")];
+
+    // ── Parse-error callout ───────────────────────────────────────────────
+    if let Some(err) = error {
+        // Wrap error text to fit inside the panel (content width = area - 2 borders - 2 padding).
+        let wrap_width = area.width.saturating_sub(4) as usize;
+        let mut word_buf = String::new();
+        let mut row = String::new();
+        for word in err.split_whitespace() {
+            if !row.is_empty() && row.len() + 1 + word.len() > wrap_width {
+                lines.push(Line::from(Span::styled(format!(" {row}"), error_style)));
+                row.clear();
+            }
+            if !row.is_empty() {
+                row.push(' ');
+            }
+            row.push_str(word);
+            word_buf.clear();
+            let _ = word_buf;
+        }
+        if !row.is_empty() {
+            lines.push(Line::from(Span::styled(format!(" {row}"), error_style)));
+        }
+        lines.push(Line::from(""));
+    }
+
+    // ── Examples ─────────────────────────────────────────────────────────
+    lines.push(Line::from(Span::styled(" Examples", heading_style)));
+    for example in &[
+        " artist:beatles",
+        " album:abbey road",
+        " make:canon model:5D",
+    ] {
+        lines.push(Line::from(Span::styled(*example, example_style)));
+    }
+    lines.push(Line::from(""));
+
+    // ── Tag table ─────────────────────────────────────────────────────────
+    lines.push(Line::from(Span::styled(" Tags", heading_style)));
+    for &(alias, _key, i18n_key) in TAG_ALIASES_FULL {
+        let desc = rust_i18n::t!(i18n_key, locale = locale).into_owned();
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<width$}  ", alias, width = max_alias),
+                alias_style,
+            ),
+            Span::styled(desc, desc_style),
+        ]));
+    }
+
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
 
 /// Render the **metadata** floating window (compression stats + extra tags).
 fn render_metadata_panel(
