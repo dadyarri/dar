@@ -320,14 +320,12 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let vert = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(frame.area());
     let (main_area, status_area) = (vert[0], vert[1]);
 
-    // When preview is open and the terminal is wide enough, split horizontally.
-    let show_preview = state.preview_open && main_area.width >= 80;
-    let (list_area, preview_area): (Rect, Option<Rect>) = if show_preview {
-        let cols = Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)])
-            .split(main_area);
-        (cols[0], Some(cols[1]))
+    // The list always fills the full main area; preview floats on top.
+    let list_area = main_area;
+    let preview_area: Option<Rect> = if state.preview_open {
+        Some(centered_popup_rect(96, 94, main_area))
     } else {
-        (main_area, None)
+        None
     };
 
     // ── File-tree table ────────────────────────────────────────────────────
@@ -446,8 +444,10 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     frame.render_stateful_widget(table, list_area, &mut state.table_state);
 
-    // ── Preview panel ──────────────────────────────────────────────────────
+    // ── Preview floating window ────────────────────────────────────────────
     if let Some(area) = preview_area {
+        use ratatui::widgets::Clear;
+        frame.render_widget(Clear, area);
         render_preview_panel(frame, area, state);
     }
 
@@ -531,10 +531,10 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
             .map(|flat| flat.is_dir)
             .unwrap_or(false);
 
-        let hints_vec: Vec<(&str, &str)> = if state.focus == Focus::Preview {
+        let hints_vec: Vec<(&str, &str)> = if state.preview_open {
             vec![
                 ("↑↓/PgUp/PgDn", scroll_hint.as_ref()),
-                ("Tab/Esc", close_hint.as_ref()),
+                ("Esc", close_hint.as_ref()),
                 ("q", quit_hint.as_ref()),
             ]
         } else {
@@ -813,6 +813,26 @@ fn render_preview_panel(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Return a [`Rect`] centered inside `r` that spans `percent_x`% of the width
+/// and `percent_y`% of the height, used for floating popup windows.
+fn centered_popup_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    use ratatui::layout::{Constraint, Layout};
+    let margin_v = (100u16.saturating_sub(percent_y)) / 2;
+    let margin_h = (100u16.saturating_sub(percent_x)) / 2;
+    let vert = Layout::vertical([
+        Constraint::Percentage(margin_v),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage(margin_v),
+    ])
+    .split(r);
+    Layout::horizontal([
+        Constraint::Percentage(margin_h),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage(margin_h),
+    ])
+    .split(vert[1])[1]
+}
 
 /// Count the total number of terminal rows that `lines` occupies when rendered
 /// inside a panel of `viewport_width` columns (with `Wrap { trim: false }`).
