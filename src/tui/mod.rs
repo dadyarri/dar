@@ -6,9 +6,10 @@ pub mod tree;
 use crate::tui::{
     preview::{build_preview, PreviewContent},
     search::apply_fuzzy_filter,
-    state::{AppState, Focus},
+    state::{AppState, Focus, PreviewMode},
     tree as tui_tree,
 };
+use crate::models::archive::CompressionMethod;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -105,7 +106,7 @@ fn run_loop<B: ratatui::backend::Backend>(
                 | (KeyCode::Char('Q'), _)
                 | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
 
-                // Preview navigation (scroll) when preview panel is focused.
+                // Preview navigation (scroll) when a preview window is focused.
                 (KeyCode::Up, _) if state.focus == Focus::Preview => {
                     scroll_preview_up(state, 1);
                 }
@@ -119,17 +120,22 @@ fn run_loop<B: ratatui::backend::Backend>(
                     scroll_preview_down(state, 10);
                 }
 
-                // List navigation when list is focused (or preview is closed).
+                // List navigation (works even while a preview window is open).
                 (KeyCode::Up, _) | (KeyCode::Char('k'), _) => move_up(state),
                 (KeyCode::Down, _) | (KeyCode::Char('j'), _) => move_down(state),
 
                 (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => toggle_at_cursor(state),
 
-                // Tab: open / close / switch the preview panel.
-                (KeyCode::Tab, _) => toggle_preview(state),
+                // 'm': open/switch-to/close the metadata floating window.
+                (KeyCode::Char('m'), _) => open_or_switch_preview(state, PreviewMode::Metadata),
 
-                // Esc closes the preview when it is open.
-                (KeyCode::Esc, _) if state.preview_open => close_preview(state),
+                // 'c': open/switch-to/close the content floating window.
+                (KeyCode::Char('c'), _) => open_or_switch_preview(state, PreviewMode::Content),
+
+                // Esc closes whichever preview window is open.
+                (KeyCode::Esc, _) if state.preview_mode != PreviewMode::Closed => {
+                    close_preview(state);
+                }
 
                 // '/' activates fuzzy search.
                 (KeyCode::Char('/'), _) => {
@@ -159,7 +165,7 @@ fn move_up(state: &mut AppState) {
         .map(|i| i.saturating_sub(1))
         .unwrap_or(0);
     state.table_state.select(Some(new));
-    if state.preview_open {
+    if state.preview_mode != PreviewMode::Closed {
         refresh_preview(state);
     }
 }
@@ -175,7 +181,7 @@ fn move_down(state: &mut AppState) {
         .map(|i| (i + 1).min(n - 1))
         .unwrap_or(0);
     state.table_state.select(Some(new));
-    if state.preview_open {
+    if state.preview_mode != PreviewMode::Closed {
         refresh_preview(state);
     }
 }
@@ -207,15 +213,17 @@ fn toggle_at_cursor(state: &mut AppState) {
     state.table_state.select(Some(new_idx));
 }
 
-/// Open the preview for the selected file entry (or close it if already open).
-/// Pressing Tab on a directory does nothing.
-fn toggle_preview(state: &mut AppState) {
-    if state.preview_open {
+/// Open the requested preview mode, switch to it if another is open, or
+/// close it if it is already active (toggle).  Pressing on a directory does
+/// nothing.
+fn open_or_switch_preview(state: &mut AppState, mode: PreviewMode) {
+    // Toggle off if already in this mode.
+    if state.preview_mode == mode {
         close_preview(state);
         return;
     }
 
-    // Check that the selected node is a file.
+    // Require a file entry to be selected.
     let Some(idx) = state.table_state.selected() else {
         return;
     };
@@ -225,16 +233,25 @@ fn toggle_preview(state: &mut AppState) {
     if flat.is_dir || flat.entry_idx.is_none() {
         return;
     }
-
     let entry_idx = flat.entry_idx.unwrap();
-    build_and_cache_preview(state, entry_idx);
-    state.preview_open = true;
+
+    if state.preview_mode == PreviewMode::Closed {
+        // Opening fresh: build cache and reset scroll.
+        build_and_cache_preview(state, entry_idx);
+    } else {
+        // Switching between Metadata ↔ Content: cache is valid, just reset scroll.
+        state.preview_scroll = 0;
+        state.preview_line_count = 0;
+        state.preview_viewport_height = 0;
+    }
+
+    state.preview_mode = mode;
     state.focus = Focus::Preview;
 }
 
-/// Close the preview panel and return focus to the list.
+/// Close whichever preview window is open and return focus to the list.
 fn close_preview(state: &mut AppState) {
-    state.preview_open = false;
+    state.preview_mode = PreviewMode::Closed;
     state.focus = Focus::List;
     state.preview_scroll = 0;
     state.preview_line_count = 0;
@@ -253,7 +270,7 @@ fn rebuild_visible_from_search(state: &mut AppState) {
 }
 
 /// Rebuild the preview cache for the currently selected entry.
-/// Automatically closes the preview if a directory is selected.
+/// Automatically closes the preview window if a directory is selected.
 fn refresh_preview(state: &mut AppState) {
     let Some(idx) = state.table_state.selected() else {
         return;
@@ -262,9 +279,9 @@ fn refresh_preview(state: &mut AppState) {
         return;
     };
     if flat.is_dir || flat.entry_idx.is_none() {
-        // Directories have no preview; switch focus back to list.
+        // Directories have no preview — close the floating window.
+        close_preview(state);
         state.preview_cache = None;
-        state.focus = Focus::List;
         return;
     }
     let entry_idx = flat.entry_idx.unwrap();
@@ -320,9 +337,9 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let vert = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(frame.area());
     let (main_area, status_area) = (vert[0], vert[1]);
 
-    // The list always fills the full main area; preview floats on top.
+    // The list always fills the full main area; a preview floats on top.
     let list_area = main_area;
-    let preview_area: Option<Rect> = if state.preview_open {
+    let preview_area: Option<Rect> = if state.preview_mode != PreviewMode::Closed {
         Some(centered_popup_rect(96, 94, main_area))
     } else {
         None
@@ -448,7 +465,11 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     if let Some(area) = preview_area {
         use ratatui::widgets::Clear;
         frame.render_widget(Clear, area);
-        render_preview_panel(frame, area, state);
+        match state.preview_mode {
+            PreviewMode::Metadata => render_metadata_panel(frame, area, state),
+            PreviewMode::Content => render_content_panel(frame, area, state),
+            PreviewMode::Closed => {}
+        }
     }
 
     // ── Status bar ─────────────────────────────────────────────────────────
@@ -466,7 +487,8 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let nav_hint = rust_i18n::t!("tui.inspect.hint_navigate", locale = locale);
     let toggle_hint = rust_i18n::t!("tui.inspect.hint_toggle", locale = locale);
     let quit_hint = rust_i18n::t!("tui.inspect.hint_quit", locale = locale);
-    let preview_hint = rust_i18n::t!("tui.inspect.hint_preview", locale = locale);
+    let metadata_hint = rust_i18n::t!("tui.inspect.hint_metadata", locale = locale);
+    let content_hint = rust_i18n::t!("tui.inspect.hint_content", locale = locale);
     let close_hint = rust_i18n::t!("tui.inspect.hint_close_preview", locale = locale);
     let scroll_hint = rust_i18n::t!("tui.inspect.hint_scroll", locale = locale);
     let search_hint = rust_i18n::t!("tui.inspect.hint_search", locale = locale);
@@ -531,21 +553,59 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
             .map(|flat| flat.is_dir)
             .unwrap_or(false);
 
-        let hints_vec: Vec<(&str, &str)> = if state.preview_open {
-            vec![
+        let selected_is_file = state
+            .table_state
+            .selected()
+            .and_then(|i| state.visible.get(i))
+            .map(|flat| !flat.is_dir && flat.entry_idx.is_some())
+            .unwrap_or(false);
+
+        // Files stored with CompressionMethod::None (NoneCompressor: images, archives,
+        // video, …) or LeptonJpeg are always binary — content preview is pointless.
+        let selected_is_binary = state
+            .table_state
+            .selected()
+            .and_then(|i| state.visible.get(i))
+            .and_then(|flat| flat.entry_idx)
+            .map(|ei| {
+                matches!(
+                    state.entries[ei].entry.compression_method,
+                    CompressionMethod::None | CompressionMethod::LeptonJpeg
+                )
+            })
+            .unwrap_or(false);
+
+        let hints_vec: Vec<(&str, &str)> = match state.preview_mode {
+            PreviewMode::Metadata => {
+                let mut hints = vec![("↑↓/PgUp/PgDn", scroll_hint.as_ref())];
+                if !selected_is_binary {
+                    hints.push(("c", content_hint.as_ref()));
+                }
+                hints.push(("Esc", close_hint.as_ref()));
+                hints.push(("q", quit_hint.as_ref()));
+                hints
+            }
+            PreviewMode::Content => vec![
                 ("↑↓/PgUp/PgDn", scroll_hint.as_ref()),
+                ("m", metadata_hint.as_ref()),
                 ("Esc", close_hint.as_ref()),
                 ("q", quit_hint.as_ref()),
-            ]
-        } else {
-            let mut hints = vec![("↑↓/jk", nav_hint.as_ref())];
-            if selected_is_dir {
-                hints.push(("Enter/Space", toggle_hint.as_ref()));
+            ],
+            PreviewMode::Closed => {
+                let mut hints = vec![("↑↓/jk", nav_hint.as_ref())];
+                if selected_is_dir {
+                    hints.push(("Enter/Space", toggle_hint.as_ref()));
+                }
+                if selected_is_file {
+                    hints.push(("m", metadata_hint.as_ref()));
+                    if !selected_is_binary {
+                        hints.push(("c", content_hint.as_ref()));
+                    }
+                }
+                hints.push(("/", search_hint.as_ref()));
+                hints.push(("q", quit_hint.as_ref()));
+                hints
             }
-            hints.push(("Tab", preview_hint.as_ref()));
-            hints.push(("/", search_hint.as_ref()));
-            hints.push(("q", quit_hint.as_ref()));
-            hints
         };
 
         let mut hint_spans: Vec<Span> = vec![Span::raw(" ")];
@@ -578,28 +638,22 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 // Preview panel rendering
 // ---------------------------------------------------------------------------
 
-fn render_preview_panel(
+/// Render the **metadata** floating window (compression stats + extra tags).
+fn render_metadata_panel(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
     state: &mut AppState,
 ) {
-    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::style::{Color, Style};
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
     let locale = state.locale.as_str();
-    let focused = state.focus == Focus::Preview;
-
-    let border_style = if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
 
     let block = Block::default()
-        .title(" Preview ")
+        .title(" Metadata ")
         .borders(Borders::ALL)
-        .border_style(border_style);
+        .border_style(Style::default().fg(Color::Cyan));
 
     let Some((_, ref entry_preview)) = state.preview_cache else {
         frame.render_widget(
@@ -613,18 +667,13 @@ fn render_preview_panel(
         return;
     };
 
-    let mut lines: Vec<Line> = Vec::new();
-
-    let section_style = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
     let key_style = Style::default().fg(Color::Cyan);
     let val_style = Style::default().fg(Color::White);
     let dim_style = Style::default().fg(Color::DarkGray);
 
     let meta = &entry_preview.metadata;
 
-    // Extract encoding upfront so it can be placed in the compression section.
+    // Extract encoding upfront to show in the compression section.
     let encoding_opt = match &entry_preview.content {
         PreviewContent::Text { encoding, .. } => Some(*encoding),
         PreviewContent::HighlightedText { encoding, .. } => Some(*encoding),
@@ -632,7 +681,6 @@ fn render_preview_panel(
     };
 
     // ── Compression metadata ──────────────────────────────────────────────
-    // Collect all key-value rows first so we can compute uniform key width.
     let label_method =
         rust_i18n::t!("tui.inspect.preview.label_method", locale = locale).into_owned();
     let label_original =
@@ -641,7 +689,8 @@ fn render_preview_panel(
         rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
 
     let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        let label =
+            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
         (label, human_size(meta.original_size))
     } else {
         let label =
@@ -653,12 +702,10 @@ fn render_preview_panel(
         )
     };
 
-    // (key, value, use_dim_style)
     let mut comp_rows: Vec<(String, String, bool)> = vec![
         (label_method, meta.compression_method.clone(), false),
         (label_original, human_size(meta.original_size), false),
         (size_row.0, size_row.1, false),
-        // Show only the first 16 hex chars (8 bytes) to keep it readable.
         (
             label_checksum,
             format!("{}…", &meta.checksum_hex[..16]),
@@ -678,12 +725,7 @@ fn render_preview_panel(
         .max()
         .unwrap_or(0);
 
-    let section_compression =
-        rust_i18n::t!("tui.inspect.preview.section_compression", locale = locale);
-    lines.push(Line::from(Span::styled(
-        format!(" {}", section_compression),
-        section_style,
-    )));
+    let mut lines: Vec<Line> = Vec::new();
 
     for (key, value, is_dim) in &comp_rows {
         lines.push(Line::from(vec![
@@ -705,12 +747,6 @@ fn render_preview_panel(
             .unwrap_or(0);
 
         lines.push(Line::from(""));
-        let section_metadata =
-            rust_i18n::t!("tui.inspect.preview.section_metadata", locale = locale);
-        lines.push(Line::from(Span::styled(
-            format!(" {}", section_metadata),
-            section_style,
-        )));
         for (name, value) in &meta.extra_tags {
             lines.push(Line::from(vec![
                 Span::styled(
@@ -722,13 +758,55 @@ fn render_preview_panel(
         }
     }
 
-    // ── Content ───────────────────────────────────────────────────────────
-    lines.push(Line::from(""));
-    let section_content = rust_i18n::t!("tui.inspect.preview.section_content", locale = locale);
-    lines.push(Line::from(Span::styled(
-        format!(" {}", section_content),
-        section_style,
-    )));
+    let viewport_width = area.width.saturating_sub(2);
+    let viewport_height = area.height.saturating_sub(2);
+    let line_count = count_rendered_lines(&lines, viewport_width);
+    state.preview_line_count = line_count;
+    state.preview_viewport_height = viewport_height;
+    let max_scroll = line_count.saturating_sub(viewport_height);
+    state.preview_scroll = state.preview_scroll.min(max_scroll);
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((state.preview_scroll, 0)),
+        area,
+    );
+}
+
+/// Render the **content** floating window (file text / binary / encrypted message).
+fn render_content_panel(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &mut AppState,
+) {
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+
+    let locale = state.locale.as_str();
+
+    let block = Block::default()
+        .title(" Content ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let Some((_, ref entry_preview)) = state.preview_cache else {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                " No entry selected",
+                Style::default().fg(Color::DarkGray),
+            ))
+            .block(block),
+            area,
+        );
+        return;
+    };
+
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let mut lines: Vec<Line> = Vec::new();
 
     match &entry_preview.content {
         PreviewContent::EncryptedNoPassphrase => {
@@ -756,7 +834,6 @@ fn render_preview_panel(
             text,
             truncated,
         } => {
-            // Encoding is shown in the compression metadata section above.
             lines.push(Line::from(""));
             for line in text.lines() {
                 lines.push(Line::from(Span::raw(line.to_string())));
@@ -775,7 +852,6 @@ fn render_preview_panel(
             lines: highlighted_lines,
             truncated,
         } => {
-            // Encoding is shown in the compression metadata section above.
             lines.push(Line::from(""));
             for hl_line in highlighted_lines {
                 lines.push(hl_line.clone());
@@ -791,23 +867,21 @@ fn render_preview_panel(
         }
     }
 
-    // Keep counters current so scroll clamping in the event loop is accurate.
-    // Subtract 2 for the top/bottom borders.
     let viewport_width = area.width.saturating_sub(2);
     let viewport_height = area.height.saturating_sub(2);
     let line_count = count_rendered_lines(&lines, viewport_width);
     state.preview_line_count = line_count;
     state.preview_viewport_height = viewport_height;
-    // Clamp the scroll offset in case the viewport grew or content shrank.
     let max_scroll = line_count.saturating_sub(viewport_height);
     state.preview_scroll = state.preview_scroll.min(max_scroll);
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((state.preview_scroll, 0));
-
-    frame.render_widget(paragraph, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((state.preview_scroll, 0)),
+        area,
+    );
 }
 
 // ---------------------------------------------------------------------------

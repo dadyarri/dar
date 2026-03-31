@@ -2,7 +2,7 @@ use crate::i18n::Locale;
 use crate::reader;
 use crate::tui::{
     App,
-    state::{AppState, Focus},
+    state::{AppState, Focus, PreviewMode},
     tree,
 };
 use clap::ArgMatches;
@@ -44,7 +44,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         tree_root,
         visible,
         table_state,
-        preview_open: false,
+        preview_mode: PreviewMode::Closed,
         focus: Focus::List,
         preview_scroll: 0,
         preview_line_count: 0,

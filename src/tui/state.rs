@@ -12,6 +12,17 @@ pub enum Focus {
     Preview,
 }
 
+/// Which floating preview window (if any) is currently open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewMode {
+    /// No preview window is open.
+    Closed,
+    /// Compression + extra-tag metadata window (opened with `m`).
+    Metadata,
+    /// File content window (opened with `c`).
+    Content,
+}
+
 /// Application state passed into `App::run` for the inspect TUI.
 pub struct AppState {
     /// Path to the `.dar` file being inspected (used for the title bar).
@@ -29,7 +40,7 @@ pub struct AppState {
     /// Drives the ratatui `Table` widget; cursor indexes into `visible`.
     pub table_state: TableState,
     /// Whether the preview panel is currently open.
-    pub preview_open: bool,
+    pub preview_mode: PreviewMode,
     /// Which panel currently receives key input.
     pub focus: Focus,
     /// Vertical scroll offset (in lines) for the preview panel.
