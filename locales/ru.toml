@@ -122,7 +122,7 @@ extracting_archive = "Извлечение файлов из архива %{file
 [cli.extract.errors]
 extract_failed = "Не удалось извлечь файлы из архива"
 open_failed = "Не удалось открыть архив %{file}"
-archive_missing = "Архивный файл %{file} не существует"
+archive_missing = "Архив %{file} не существует"
 
 [tui.inspect]
 status_total_one = "%{total} файл"
