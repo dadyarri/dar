@@ -1,7 +1,3 @@
-// Functions in this module are part of the extraction API that will be wired to a CLI command
-// once the `extract` subcommand is added. Suppress dead-code lints in the meantime.
-#![allow(dead_code)]
-
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, INDEX_FLAG_LINKED_DATA};
 use crate::traits::decompress_bytes;

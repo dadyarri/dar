@@ -188,6 +188,41 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("extract")
+                .short_flag('x')
+                .about(translate("cli.extract.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.extract.args.file")),
+                    Arg::new("output-dir")
+                        .short('d')
+                        .long("output-dir")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help(translate("cli.extract.args.output_dir")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .help(translate("cli.extract.args.encrypt_passphrase")),
+                    Arg::new("paths")
+                        .num_args(0..)
+                        .required(false)
+                        .action(ArgAction::Append)
+                        .help(translate("cli.extract.args.paths")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
         ])
 }
 
