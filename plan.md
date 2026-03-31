@@ -168,3 +168,9 @@ skipping the serial write/build phase.
 
 Files: `src/cli.rs`, `src/commands/create.rs`, `src/commands/append.rs`,
 `locales/en.toml`, `locales/ru.toml`
+
+## Step 15. Add extract functionality to the TUI (inspect command)
+
+TUI should be capable of extracting single hovered file or entire directory to chosen path by pressing `x` key. This
+should open small floating window with path input field, by default filled with PWD of current process (ensure this is
+cross-platform between linux/macos and windows) 

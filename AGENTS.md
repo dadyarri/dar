@@ -16,12 +16,16 @@ CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
                   → commands/append.rs  → reader.rs (parse header/footer/index)
                                         → walker.rs (collect files)
                                         → archive_builder.rs (reuse pipeline, rebuild index)
+                  → commands/extract.rs → reader.rs (parse header/footer/index)
+                                        → extractor.rs (decrypt + decompress + write to disk)
                   → commands/inspect.rs → reader.rs (parse header/footer/index)
                                         → tui/ (ratatui TUI event loop)
                                             → tui/tree.rs (collapsible dir tree)
                                             → tui/preview.rs (file preview; uses extractor.rs)
                                             → tui/search.rs (nucleo_matcher fuzzy search)
-                                            → tui/state.rs (AppState, Focus)
+                                            → tui/meta_search.rs (tag:value metadata filter)
+                                            → tui/icons.rs (Powerline/Nerd Font glyph detection)
+                                            → tui/state.rs (AppState, Focus, PreviewMode)
 ```
 
 - **`src/cli.rs`** — also `include!`'d by `build.rs` to generate shell completions at build time; any CLI change must
@@ -30,6 +34,9 @@ CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
   entries, ensures encryption mode consistency (encrypted archives demand the original passphrase; unencrypted archives
   reject new encryption), truncates back to `index_offset`, seeds `ArchiveBuilder::import_existing_entries`, then reruns
   `walker::scan_files` + the pipeline before rebuilding the index/footer.
+- **`src/commands/extract.rs`** — extracts entries from a `.dar` to an output directory (`-d`, default `.`); accepts
+  an optional list of archive-relative paths to extract selectively; dispatches to `extractor::extract_entry` (single)
+  or `extractor::extract_entries` (multiple); supports `--encrypt-passphrase` for encrypted archives.
 - **`src/commands/inspect.rs`** — parses the archive via `reader::load_archive`, builds the directory tree, and launches
   `App::run(AppState)` for the ratatui TUI. Accepts `--encrypt-passphrase` to enable preview of encrypted entries.
 - **`src/pipeline.rs`** — active processing stage used by `ArchiveBuilder`: BLAKE3 checksum, extension-based compressor
@@ -39,20 +46,31 @@ CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
   `import_existing_entries` so append can preload the dedup map/offsets before writing new data.
 - **`src/reader.rs`** — shared archive parser used by both `append` and `inspect`; reads header, footer, and full index
   from a `.dar` file and returns `ArchiveState` (`entries`, `index_offset`, `encryption_mode`, `encryption_probe`).
-- **`src/extractor.rs`** — extraction API (marked `#![allow(dead_code)]` pending the `extract` subcommand):
+- **`src/extractor.rs`** — extraction API used by both `commands/extract.rs` and the TUI preview:
   `extract_entry`/`extract_entries` decrypt + decompress + write files to disk; `read_raw_entry_bytes` returns raw bytes
   for the TUI preview; `try_decrypt_bytes` is a best-effort decrypt returning `None` on failure.
 - **`src/i18n.rs`** — `Locale` newtype wrapping a `String` + `detect_locale()` (via `sys-locale`). Locale is resolved
   once in `main` and forwarded as `&Locale` to every command `call(matches, locale)` and `scan_files(paths, locale)`.
 - **`src/tui/`** — ratatui/crossterm interactive inspector launched by `inspect`:
   - `mod.rs` — `App::run(AppState)` drives the event loop; keybindings: `↑/↓`/`j/k` navigate, `Enter`/`Space` toggle
-    directories, `Tab` opens/closes/focuses the preview panel, `/` activates fuzzy search, `q`/`Ctrl-C` quit.
-  - `state.rs` — `AppState` (entries, tree, visible rows, preview cache, search state) and `Focus` enum.
+    directories, `m` opens/switches to/closes the **Metadata** floating window, `c` opens/switches to/closes the
+    **Content** floating window, `Esc` closes the active preview window, `↑/↓`/`PageUp`/`PageDown` scroll the preview
+    when it has focus, `/` activates fuzzy filename search, `s` activates metadata search (`tag:value` syntax),
+    `q`/`Ctrl-C` quit.
+  - `state.rs` — `AppState` (entries, tree, visible rows, preview cache, search state, powerline flag),
+    `Focus` enum (`List`/`Preview`), and `PreviewMode` enum (`Closed`/`Metadata`/`Content`).
   - `tree.rs` — `build_tree`, `flatten_visible`, `toggle_expanded`; `TreeNode`/`FlatNode` types.
   - `preview.rs` — `build_preview` decodes raw bytes (decrypt → decompress → charset-detect via `encoding_rs` →
-    syntax-highlight via `syntect`); `PreviewContent` variants: `HighlightedText`, `Text`, `Binary`,
-    `EncryptedNoPassphrase`, `EncryptedWrongPassphrase`.
+    syntax-highlight via `syntect`); returns `EntryPreview { metadata: EntryMetadata, content: PreviewContent }`.
+    `PreviewContent` variants: `HighlightedText`, `Text`, `Binary`, `EncryptedNoPassphrase`,
+    `EncryptedWrongPassphrase`. `KNOWN_TAGS` maps short extra-field keys (e.g. `"aar"`) to i18n key paths.
   - `search.rs` — `apply_fuzzy_filter` scores file paths with `nucleo_matcher`; returns flat list sorted by score.
+  - `meta_search.rs` — `parse_meta_query` / `apply_meta_filter` implement `tag:value` AND-logic metadata filtering.
+    `TAG_ALIASES` / `TAG_ALIASES_FULL` map user-facing aliases (`artist`, `album`, `make`, …) to internal extra-field
+    keys (`aar`, `aal`, `imk`, …). `resolve_alias` resolves an alias case-insensitively.
+  - `icons.rs` — `detect_powerline()` auto-detects Powerline/Nerd Font support via env vars (`DARI_ICONS`,
+    `WEZTERM_EXECUTABLE`, `KITTY_WINDOW_ID`, `TERM_PROGRAM`, `TERM`); `folder_icon(expanded, powerline)` returns
+    the appropriate glyph string.
 - **`src/main.rs` + `locales/*.toml`** — `rust-i18n` is initialized in `main`; CLI text and user-facing runtime errors are
   translated via `t!(...)` keys from `locales/en.toml` and `locales/ru.toml`.
 
@@ -131,6 +149,10 @@ cargo run -- append -f out.dar assets/  # append directories/files into an exist
 cargo run -- append -f out.dar --encrypt-passphrase "secret" new-data/  # passphrase must match prior encryption
 cargo run -- inspect -f out.dar                                # browse archive in the ratatui TUI
 cargo run -- inspect -f out.dar --encrypt-passphrase "secret"  # inspect an encrypted archive
+cargo run -- extract -f out.dar                                # extract all files to current directory
+cargo run -- extract -f out.dar -d /tmp/out                    # extract to a specific output directory
+cargo run -- extract -f out.dar src/main.rs src/lib.rs         # extract specific archive-relative paths
+cargo run -- extract -f out.dar --encrypt-passphrase "secret"  # extract from an encrypted archive
 ```
 
 Shell completions are written to `completions/` by `build.rs` at build time. That directory is not committed.
