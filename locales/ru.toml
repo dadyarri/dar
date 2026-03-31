@@ -107,6 +107,23 @@ encrypt_passphrase = "Парольная фраза для расшифровк�
 inspect_failed = "Не удалось открыть архив для просмотра"
 open_failed = "Не удалось открыть архив %{file}"
 
+[cli.extract]
+about = "Извлекает файлы из архива"
+
+[cli.extract.args]
+file = "Путь к архивному файлу для извлечения"
+output_dir = "Каталог для извлечения файлов (по умолчанию — текущий каталог)"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+paths = "Конкретные пути для извлечения (если не указано, извлекаются все файлы)"
+
+[cli.extract.messages]
+extracting_archive = "Извлечение файлов из архива %{file} (создан: %{timestamp})"
+
+[cli.extract.errors]
+extract_failed = "Не удалось извлечь файлы из архива"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архивный файл %{file} не существует"
+
 [tui.inspect]
 status_total_one = "%{total} файл"
 status_total_few = "%{total} файла"

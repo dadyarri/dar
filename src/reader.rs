@@ -12,8 +12,6 @@ use std::mem::size_of;
 /// Parsed state of an existing `.dar` archive.
 pub struct ArchiveState {
     pub entries: Vec<ArchiveIndexEntryWrapper>,
-    /// Archive header; reserved for the forthcoming `extract` command.
-    #[allow(dead_code)]
     pub header: ArchiveHeader,
     pub encryption_mode: Option<bool>,
     /// Byte offset where the index section starts; used by `append` to truncate before rewriting.

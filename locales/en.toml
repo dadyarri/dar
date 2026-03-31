@@ -107,6 +107,23 @@ encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
 inspect_failed = "Failed to inspect archive"
 open_failed = "Failed to open archive %{file}"
 
+[cli.extract]
+about = "Extracts files from an archive"
+
+[cli.extract.args]
+file = "The path to the archive file to extract from"
+output_dir = "Directory to extract files into (defaults to current directory)"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+paths = "Specific paths to extract (if omitted, all files are extracted)"
+
+[cli.extract.messages]
+extracting_archive = "Extracting from archive %{file} (created: %{timestamp})"
+
+[cli.extract.errors]
+extract_failed = "Failed to extract from archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+
 [tui.inspect]
 status_total_one = "1 file"
 status_total_other = "%{total} files"
