@@ -6,14 +6,22 @@ selection by file extension, while respecting `.gitignore` and `.darignore` rule
 ## Architecture Overview
 
 ```
-CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
-                  → commands/append.rs (load archive, enforce encryption, reuse walker)
-                                       → archive_builder.rs (stateful writer)
-                                           → pipeline.rs (checksum, compression, optional encryption, extra metadata)
-                                           → models/archive.rs (binary structs)
-                                           → traits.rs (Compressor dispatch + image-specific optimizers)
-                                           → extra.rs (encoded key/value metadata for index extra field)
-                                           → counting_writer.rs (byte counter)
+CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
+                                        → archive_builder.rs (stateful writer)
+                                            → pipeline.rs (checksum, compression, optional encryption, extra metadata)
+                                            → models/archive.rs (binary structs)
+                                            → traits.rs (Compressor dispatch + image-specific optimizers)
+                                            → extra.rs (encoded key/value metadata for index extra field)
+                                            → counting_writer.rs (byte counter)
+                  → commands/append.rs  → reader.rs (parse header/footer/index)
+                                        → walker.rs (collect files)
+                                        → archive_builder.rs (reuse pipeline, rebuild index)
+                  → commands/inspect.rs → reader.rs (parse header/footer/index)
+                                        → tui/ (ratatui TUI event loop)
+                                            → tui/tree.rs (collapsible dir tree)
+                                            → tui/preview.rs (file preview; uses extractor.rs)
+                                            → tui/search.rs (nucleo_matcher fuzzy search)
+                                            → tui/state.rs (AppState, Focus)
 ```
 
 - **`src/cli.rs`** — also `include!`'d by `build.rs` to generate shell completions at build time; any CLI change must
@@ -22,11 +30,29 @@ CLI args (cli.rs) → commands/create.rs → walker.rs (collect files)
   entries, ensures encryption mode consistency (encrypted archives demand the original passphrase; unencrypted archives
   reject new encryption), truncates back to `index_offset`, seeds `ArchiveBuilder::import_existing_entries`, then reruns
   `walker::scan_files` + the pipeline before rebuilding the index/footer.
+- **`src/commands/inspect.rs`** — parses the archive via `reader::load_archive`, builds the directory tree, and launches
+  `App::run(AppState)` for the ratatui TUI. Accepts `--encrypt-passphrase` to enable preview of encrypted entries.
 - **`src/pipeline.rs`** — active processing stage used by `ArchiveBuilder`: BLAKE3 checksum, extension-based compressor
   selection, optional ChaCha20-Poly1305 encryption, and `extra` metadata population (image/audio tags + encryption
   metadata).
 - **`src/archive_builder.rs`** — generic over `W: Write + Seek`; tests pass `Cursor<Vec<u8>>` directly. Provides
   `import_existing_entries` so append can preload the dedup map/offsets before writing new data.
+- **`src/reader.rs`** — shared archive parser used by both `append` and `inspect`; reads header, footer, and full index
+  from a `.dar` file and returns `ArchiveState` (`entries`, `index_offset`, `encryption_mode`, `encryption_probe`).
+- **`src/extractor.rs`** — extraction API (marked `#![allow(dead_code)]` pending the `extract` subcommand):
+  `extract_entry`/`extract_entries` decrypt + decompress + write files to disk; `read_raw_entry_bytes` returns raw bytes
+  for the TUI preview; `try_decrypt_bytes` is a best-effort decrypt returning `None` on failure.
+- **`src/i18n.rs`** — `Locale` newtype wrapping a `String` + `detect_locale()` (via `sys-locale`). Locale is resolved
+  once in `main` and forwarded as `&Locale` to every command `call(matches, locale)` and `scan_files(paths, locale)`.
+- **`src/tui/`** — ratatui/crossterm interactive inspector launched by `inspect`:
+  - `mod.rs` — `App::run(AppState)` drives the event loop; keybindings: `↑/↓`/`j/k` navigate, `Enter`/`Space` toggle
+    directories, `Tab` opens/closes/focuses the preview panel, `/` activates fuzzy search, `q`/`Ctrl-C` quit.
+  - `state.rs` — `AppState` (entries, tree, visible rows, preview cache, search state) and `Focus` enum.
+  - `tree.rs` — `build_tree`, `flatten_visible`, `toggle_expanded`; `TreeNode`/`FlatNode` types.
+  - `preview.rs` — `build_preview` decodes raw bytes (decrypt → decompress → charset-detect via `encoding_rs` →
+    syntax-highlight via `syntect`); `PreviewContent` variants: `HighlightedText`, `Text`, `Binary`,
+    `EncryptedNoPassphrase`, `EncryptedWrongPassphrase`.
+  - `search.rs` — `apply_fuzzy_filter` scores file paths with `nucleo_matcher`; returns flat list sorted by score.
 - **`src/main.rs` + `locales/*.toml`** — `rust-i18n` is initialized in `main`; CLI text and user-facing runtime errors are
   translated via `t!(...)` keys from `locales/en.toml` and `locales/ru.toml`.
 
@@ -103,6 +129,8 @@ cargo run -- create -f out.dar --encrypt src/  # prompt for passphrase interacti
 cargo run -- create -f out.dar --encrypt-passphrase "secret" src/  # encrypt stored file data
 cargo run -- append -f out.dar assets/  # append directories/files into an existing archive
 cargo run -- append -f out.dar --encrypt-passphrase "secret" new-data/  # passphrase must match prior encryption
+cargo run -- inspect -f out.dar                                # browse archive in the ratatui TUI
+cargo run -- inspect -f out.dar --encrypt-passphrase "secret"  # inspect an encrypted archive
 ```
 
 Shell completions are written to `completions/` by `build.rs` at build time. That directory is not committed.
@@ -112,6 +140,6 @@ Program executions should be run in /tmp/test_dari. Make sure the directory exis
 ## Adding a New Command
 
 1. Add `Command::new("name")` block in `src/cli.rs`.
-2. Create `src/commands/name.rs` with a `pub fn call(matches: &ArgMatches) -> Result<()>`.
+2. Create `src/commands/name.rs` with a `pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()>`.
 3. Export it in `src/commands/mod.rs`.
 4. Add the `Some(("name", sub_matches))` arm in `src/main.rs`.
