@@ -175,8 +175,11 @@ impl Compressor for LzmaCompressor {
         let mut counter = CountingWriter::new(output);
         {
             let mut encoder = xz2::write::XzEncoder::new(&mut counter, 9);
-            std::io::copy(input, &mut encoder)?;
-            encoder.finish()?;
+            std::io::copy(input, &mut encoder)
+                .map_err(|e| eyre!(t!("cli.common.errors.lzma_compression_failed", error = e)))?;
+            encoder
+                .finish()
+                .map_err(|e| eyre!(t!("cli.common.errors.lzma_compression_failed", error = e)))?;
         }
         Ok(CompressionOutcome {
             bytes_written: counter.bytes_written,

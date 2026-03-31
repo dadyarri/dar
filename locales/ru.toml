@@ -34,6 +34,7 @@ footer_write_failed = "Не удалось записать футер архи�
 flush_archive_failed = "Не удалось завершить запись архива"
 brotli_compression_failed = "Ошибка сжатия Brotli: %{error}"
 zstd_compression_failed = "Ошибка сжатия ZStandard: %{error}"
+lzma_compression_failed = "Ошибка сжатия LZMA: %{error}"
 invalid_compression_method = "Некорректное значение CompressionMethod: %{value}"
 time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
 encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
