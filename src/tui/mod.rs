@@ -1,3 +1,4 @@
+pub mod icons;
 pub mod meta_search;
 pub mod preview;
 pub mod search;
@@ -436,9 +437,13 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         .iter()
         .map(|flat| {
             let icon = if flat.is_dir {
-                if flat.expanded { "▼ " } else { "▶ " }
+                icons::folder_icon(flat.expanded, state.powerline)
             } else {
-                "  "
+                let ext = std::path::Path::new(&flat.full_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                icons::file_icon(ext, state.powerline)
             };
             let indent = "  ".repeat(flat.depth);
 
@@ -807,7 +812,6 @@ fn render_meta_search_help_panel(
     if let Some(err) = error {
         // Wrap error text to fit inside the panel (content width = area - 2 borders - 2 padding).
         let wrap_width = area.width.saturating_sub(4) as usize;
-        let mut word_buf = String::new();
         let mut row = String::new();
         for word in err.split_whitespace() {
             if !row.is_empty() && row.len() + 1 + word.len() > wrap_width {
@@ -818,8 +822,6 @@ fn render_meta_search_help_panel(
                 row.push(' ');
             }
             row.push_str(word);
-            word_buf.clear();
-            let _ = word_buf;
         }
         if !row.is_empty() {
             lines.push(Line::from(Span::styled(format!(" {row}"), error_style)));

@@ -55,6 +55,8 @@ pub struct AppState {
     pub search_query: String,
     /// Whether the `/` search input box is currently open and receiving input.
     pub search_active: bool,
+    /// Whether the terminal supports Powerline / Nerd Font glyphs (detected once at startup).
+    pub powerline: bool,
     /// Current text typed into the metadata search bar; empty when inactive.
     pub meta_search_query: String,
     /// Whether the `s` metadata search input box is currently open and receiving input.
