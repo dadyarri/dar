@@ -39,17 +39,6 @@ Files: `src/commands/create.rs`, `src/tui/mod.rs`, `src/tui/meta_search.rs`,
 
 ---
 
-## Step 4. Fix LZMA compression error wrapping inconsistency
-
-`src/traits.rs` wraps Brotli and ZStd errors with `t!()` + `map_err`, but `LzmaCompressor::compress`
-propagates raw `?` I/O errors without any translated message. Add a `map_err` with a new
-`cli.common.errors.lzma_compression_failed` key (and matching `ru.toml` translation) to make
-error reporting consistent across all compressors.
-
-Files: `src/traits.rs`, `locales/en.toml`, `locales/ru.toml`
-
----
-
 ## Step 5. Deduplicate ChaCha20-Poly1305 decryption logic
 
 `verify_passphrase_matches` in `src/commands/append.rs` re-implements the exact same key
@@ -68,49 +57,6 @@ uses `rayon::par_iter` + `prepare_file_from_disk` / `commit_prepared`. Apply the
 prepare/commit split to `append` so large appends also benefit from parallel I/O and compression.
 
 Files: `src/commands/append.rs`, `src/archive_builder.rs`
-
----
-
-## Step 7. Align verbose output between `create` and `append`
-
-In verbose mode, `append` prints only `file_entry.source_path.display()`, while `create` shows
-compression method, original size, stored size, and ratio via `print_verbose_outcome`. Extract
-`print_verbose_outcome` into a shared helper (e.g. `src/commands/shared.rs`) and call it from
-both commands.
-
-Files: `src/commands/create.rs`, `src/commands/append.rs`, `src/commands/shared.rs` (new),
-`src/commands/mod.rs`
-
----
-
-## Step 8. Expand unit-test coverage
-
-Modules with zero or minimal tests:
-
-- `src/walker.rs` — no tests at all
-- `src/encryption.rs` — no tests
-- `src/counting_writer.rs` — no tests
-- `src/tui/preview.rs` — no tests for `classify_bytes`, `build_metadata`, `try_highlight`
-- `src/utils.rs` — `plural_suffix`, `plural_key`, `calculate_archive_path`, `sanitize_path` all
-  lack tests
-
-Add inline `#[cfg(test)]` modules with representative unit tests for each.
-
-Add GitHub actions workflow to run `cargo test` on all pushes and pull requests, if not already present.
-
-Files: `src/walker.rs`, `src/encryption.rs`, `src/counting_writer.rs`, `src/tui/preview.rs`,
-`src/utils.rs`
-
----
-
-## Step 9. Fix documentation vs. code discrepancy in compression levels
-
-AGENTS.md and the README claim `BrotliCompressor` uses quality 11 and `ZStandardCompressor` uses
-level 19, but `src/traits.rs` actually uses quality 6 and level 3. Either raise the levels to
-match the documented values (better compression, slower builds) or update the documentation to
-reflect the actual values.
-
-Files: `src/traits.rs` or `AGENTS.md` + `README.md` (whichever direction is chosen)
 
 ---
 
