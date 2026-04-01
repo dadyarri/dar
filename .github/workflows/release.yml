@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - v5
 
 jobs:
   create-release:
@@ -24,6 +25,15 @@ jobs:
           echo "VERSION=v$VERSION" >> $GITHUB_ENV
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Set prerelease flag
+        id: prerelease
+        run: |
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            echo "PRERELEASE=false" >> $GITHUB_ENV
+          else
+            echo "PRERELEASE=true" >> $GITHUB_ENV
+          fi
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -33,24 +43,31 @@ jobs:
           tag_name: ${{ env.VERSION }}
           release_name: Release ${{ env.VERSION }}
           draft: false
-          prerelease: true
+          prerelease: ${{ env.PRERELEASE }}
 
   build:
     name: Build ${{ matrix.target }}
     needs: create-release
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: dari
             asset_name: dari-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact_name: dari
+            asset_name: dari-linux-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: dari.exe
             asset_name: dari-windows-x86_64.exe
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact_name: dari
             asset_name: dari-macos-x86_64
@@ -82,3 +99,4 @@ jobs:
           asset_path: ./target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
+

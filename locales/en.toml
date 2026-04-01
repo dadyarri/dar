@@ -18,6 +18,14 @@ commands = "Commands"
 arguments = "Arguments"
 options = "Options"
 
+[cli.common.methods]
+stored = "stored"
+brotli = "brotli"
+zstd = "zstd"
+lzma = "lzma"
+lepton = "lepton"
+dedup = "dedup"
+
 [cli.common.errors]
 file_required = "File required"
 content_required = "At least one input directory is required"
@@ -52,6 +60,9 @@ brotli_decompression_failed = "Brotli decompression error: %{error}"
 zstd_decompression_failed = "ZStandard decompression error: %{error}"
 lzma_decompression_failed = "LZMA decompression error: %{error}"
 lepton_decompression_failed = "Lepton JPEG decompression error: %{error}"
+
+[cli.common.messages]
+summary = "Done: %{count} file(s), %{original} original → %{stored} stored (%{ratio}%), elapsed: %{elapsed}"
 
 [cli.create]
 about = "Creates new archive"
@@ -152,6 +163,17 @@ col_file = "File"
 col_size = "Size"
 col_compression = "Compression"
 
+[tui.inspect.panels]
+tag_search = " Tag Search "
+metadata = " Metadata "
+content = " Content "
+no_entry_selected = " No entry selected"
+
+[tui.inspect.ratio]
+no_change = "no change"
+saved = "%{pct}% saved"
+larger = "%{pct}% larger"
+
 [tui.inspect.preview]
 label_method = "Method"
 label_original = "Original"
@@ -173,6 +195,11 @@ atl = "Audio Title"
 aar = "Audio Artist"
 aal = "Audio Album"
 agn = "Audio Genre"
+
+[tui.meta_search.errors]
+unknown_tag = "Unknown tag '%{tag}'. Known tags: %{known}"
+missing_value = "Tag '%{tag}' requires a value (e.g. %{tag}:example)"
+bare_word = "Expected 'tag:value', got '%{token}' — use format like 'artist:beatles'"
 
 [cli.extractor.errors]
 open_failed = "Failed to open archive %{file}"

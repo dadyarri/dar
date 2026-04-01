@@ -65,17 +65,19 @@ pub(crate) fn human_size(bytes: u64) -> String {
     }
 }
 
-fn ratio_label(compressed: u64, original: u64) -> String {
+fn ratio_label(compressed: u64, original: u64, locale: &str) -> String {
     if original == 0 {
         return String::from("—");
     }
     let ratio = compressed as f64 / original as f64;
     if compressed < original {
-        format!("{:.1}% saved", (1.0 - ratio) * 100.0)
+        let pct = format!("{:.1}", (1.0 - ratio) * 100.0);
+        rust_i18n::t!("tui.inspect.ratio.saved", locale = locale, pct = pct.as_str()).into_owned()
     } else if compressed == original {
-        String::from("no change")
+        rust_i18n::t!("tui.inspect.ratio.no_change", locale = locale).into_owned()
     } else {
-        format!("{:.1}% larger", (ratio - 1.0) * 100.0)
+        let pct = format!("{:.1}", (ratio - 1.0) * 100.0);
+        rust_i18n::t!("tui.inspect.ratio.larger", locale = locale, pct = pct.as_str()).into_owned()
     }
 }
 
@@ -87,7 +89,7 @@ pub(crate) fn render_meta_search_help_panel(
     locale: &str,
 ) {
     let block = Block::default()
-        .title(" Tag Search ")
+        .title(rust_i18n::t!("tui.inspect.panels.tag_search", locale = locale).into_owned())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta));
 
@@ -162,14 +164,14 @@ pub(crate) fn render_metadata_panel(
     let locale = state.locale.as_str();
 
     let block = Block::default()
-        .title(" Metadata ")
+        .title(rust_i18n::t!("tui.inspect.panels.metadata", locale = locale).into_owned())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     let Some((_, ref entry_preview)) = state.preview_cache else {
         frame.render_widget(
             Paragraph::new(Span::styled(
-                " No entry selected",
+                rust_i18n::t!("tui.inspect.panels.no_entry_selected", locale = locale).into_owned(),
                 Style::default().fg(Color::DarkGray),
             ))
             .block(block),
@@ -204,7 +206,7 @@ pub(crate) fn render_metadata_panel(
     } else {
         let label =
             rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale).into_owned();
-        let ratio = ratio_label(meta.compressed_size, meta.original_size);
+        let ratio = ratio_label(meta.compressed_size, meta.original_size, locale);
         (
             label,
             format!("{} ({})", human_size(meta.compressed_size), ratio),
@@ -292,14 +294,14 @@ pub(crate) fn render_content_panel(
     let locale = state.locale.as_str();
 
     let block = Block::default()
-        .title(" Content ")
+        .title(rust_i18n::t!("tui.inspect.panels.content", locale = locale).into_owned())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     let Some((_, ref entry_preview)) = state.preview_cache else {
         frame.render_widget(
             Paragraph::new(Span::styled(
-                " No entry selected",
+                rust_i18n::t!("tui.inspect.panels.no_entry_selected", locale = locale).into_owned(),
                 Style::default().fg(Color::DarkGray),
             ))
             .block(block),

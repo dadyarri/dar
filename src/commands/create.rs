@@ -2,7 +2,7 @@ use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
-use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
+use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome};
 use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
@@ -11,6 +11,7 @@ use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
+use std::time::Instant;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches.get_one::<String>("file").ok_or_else(|| {
@@ -54,7 +55,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             )
         );
         for p in &prepared {
-            print_dry_run_prepared(p);
+            print_dry_run_prepared(p, locale.as_str());
         }
         println!(
             "{}",
@@ -99,15 +100,28 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let mut builder = ArchiveBuilder::with_config(writer, config);
     builder.write_header()?;
 
+    let start = Instant::now();
+    let mut count = 0usize;
+    let mut total_original = 0u64;
+    let mut total_stored = 0u64;
+
     for prepared_file in prepared {
         let outcome = builder.commit_prepared(prepared_file)?;
 
         if verbose {
-            print_verbose_outcome(&outcome);
+            print_verbose_outcome(&outcome, locale.as_str());
+        }
+        count += 1;
+        total_original += outcome.original_size;
+        if !outcome.is_dedup {
+            total_stored += outcome.stored_size;
         }
     }
 
     builder.build()?;
+
+    let elapsed = start.elapsed();
+    print_summary(count, total_original, total_stored, elapsed.as_secs_f64(), locale.as_str());
 
     Ok(())
 }

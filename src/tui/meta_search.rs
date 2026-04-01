@@ -81,7 +81,7 @@ pub struct MetadataPredicate {
 /// - A token without `:` is encountered (not a valid `tag:value` pair).
 /// - An unknown tag alias is used.
 /// - A tag is supplied without a value.
-pub fn parse_meta_query(input: &str) -> Result<Vec<MetadataPredicate>, String> {
+pub fn parse_meta_query(input: &str, locale: &str) -> Result<Vec<MetadataPredicate>, String> {
     if input.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -100,7 +100,13 @@ pub fn parse_meta_query(input: &str) -> Result<Vec<MetadataPredicate>, String> {
             let internal_key = resolve_alias(alias).ok_or_else(|| {
                 let known: Vec<&str> = TAG_ALIASES.iter().map(|(a, _)| *a).collect();
                 let known_str = known.join(", ");
-                format!("Unknown tag '{}'. Known tags: {}", alias, known_str)
+                rust_i18n::t!(
+                    "tui.meta_search.errors.unknown_tag",
+                    locale = locale,
+                    tag = alias.as_str(),
+                    known = known_str.as_str()
+                )
+                .into_owned()
             })?;
 
             // Greedily collect following tokens that do not look like `key:…`.
@@ -117,10 +123,12 @@ pub fn parse_meta_query(input: &str) -> Result<Vec<MetadataPredicate>, String> {
 
             let value = value_parts.join(" ").trim().to_string();
             if value.is_empty() {
-                return Err(format!(
-                    "Tag '{}' requires a value (e.g. {}:example)",
-                    alias, alias
-                ));
+                return Err(rust_i18n::t!(
+                    "tui.meta_search.errors.missing_value",
+                    locale = locale,
+                    tag = alias.as_str()
+                )
+                .into_owned());
             }
 
             predicates.push(MetadataPredicate {
@@ -129,10 +137,12 @@ pub fn parse_meta_query(input: &str) -> Result<Vec<MetadataPredicate>, String> {
             });
         } else {
             // A bare word without ':' is not a valid predicate.
-            return Err(format!(
-                "Expected 'tag:value', got '{}' — use format like 'artist:beatles'",
-                token
-            ));
+            return Err(rust_i18n::t!(
+                "tui.meta_search.errors.bare_word",
+                locale = locale,
+                token = token
+            )
+            .into_owned());
         }
     }
 
@@ -215,13 +225,13 @@ mod tests {
 
     #[test]
     fn empty_query_returns_empty() {
-        assert!(parse_meta_query("").unwrap().is_empty());
-        assert!(parse_meta_query("   ").unwrap().is_empty());
+        assert!(parse_meta_query("", "en").unwrap().is_empty());
+        assert!(parse_meta_query("   ", "en").unwrap().is_empty());
     }
 
     #[test]
     fn single_predicate() {
-        let preds = parse_meta_query("artist:beatles").unwrap();
+        let preds = parse_meta_query("artist:beatles", "en").unwrap();
         assert_eq!(preds.len(), 1);
         assert_eq!(preds[0].internal_key, "aar");
         assert_eq!(preds[0].value, "beatles");
@@ -229,7 +239,7 @@ mod tests {
 
     #[test]
     fn multi_word_value() {
-        let preds = parse_meta_query("album:abbey road").unwrap();
+        let preds = parse_meta_query("album:abbey road", "en").unwrap();
         assert_eq!(preds.len(), 1);
         assert_eq!(preds[0].internal_key, "aal");
         assert_eq!(preds[0].value, "abbey road");
@@ -237,7 +247,7 @@ mod tests {
 
     #[test]
     fn multiple_predicates() {
-        let preds = parse_meta_query("artist:beatles album:abbey road").unwrap();
+        let preds = parse_meta_query("artist:beatles album:abbey road", "en").unwrap();
         assert_eq!(preds.len(), 2);
         assert_eq!(preds[0].value, "beatles");
         assert_eq!(preds[1].internal_key, "aal");
@@ -246,30 +256,30 @@ mod tests {
 
     #[test]
     fn camera_and_make_alias() {
-        assert_eq!(parse_meta_query("make:nikon").unwrap()[0].internal_key, "imk");
+        assert_eq!(parse_meta_query("make:nikon", "en").unwrap()[0].internal_key, "imk");
     }
 
     #[test]
     fn model_resolves_to_imd() {
-        let preds = parse_meta_query("model:5D").unwrap();
+        let preds = parse_meta_query("model:5D", "en").unwrap();
         assert_eq!(preds[0].internal_key, "imd");
     }
 
     #[test]
     fn unknown_tag_returns_error() {
-        let err = parse_meta_query("foo:bar").unwrap_err();
+        let err = parse_meta_query("foo:bar", "en").unwrap_err();
         assert!(err.contains("foo"), "error should mention the bad tag");
     }
 
     #[test]
     fn missing_value_returns_error() {
-        let err = parse_meta_query("artist:").unwrap_err();
+        let err = parse_meta_query("artist:", "en").unwrap_err();
         assert!(err.contains("artist"));
     }
 
     #[test]
     fn bare_word_returns_error() {
-        let err = parse_meta_query("beatles").unwrap_err();
+        let err = parse_meta_query("beatles", "en").unwrap_err();
         assert!(err.contains("beatles"));
     }
 
@@ -295,7 +305,7 @@ mod tests {
             make_entry_with_extra("photo.jpg", &[("imk", "Canon")]),
         ];
         let root = build_tree(&entries);
-        let preds = parse_meta_query("artist:beatles").unwrap();
+        let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].full_path, "song1.mp3");
@@ -309,7 +319,7 @@ mod tests {
             make_entry_with_extra("c.mp3", &[("aar", "Zeppelin"), ("aal", "Abbey Road")]),
         ];
         let root = build_tree(&entries);
-        let preds = parse_meta_query("artist:beatles album:abbey").unwrap();
+        let preds = parse_meta_query("artist:beatles album:abbey", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].full_path, "a.mp3");
@@ -319,7 +329,7 @@ mod tests {
     fn filter_case_insensitive() {
         let entries = vec![make_entry_with_extra("x.mp3", &[("aar", "The BEATLES")])];
         let root = build_tree(&entries);
-        let preds = parse_meta_query("artist:beatles").unwrap();
+        let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
     }
@@ -328,7 +338,7 @@ mod tests {
     fn filter_no_match_returns_empty() {
         let entries = vec![make_entry_with_extra("x.mp3", &[("aar", "Zeppelin")])];
         let root = build_tree(&entries);
-        let preds = parse_meta_query("artist:beatles").unwrap();
+        let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert!(results.is_empty());
     }

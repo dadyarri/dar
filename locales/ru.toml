@@ -18,6 +18,14 @@ commands = "Команды"
 arguments = "Аргументы"
 options = "Параметры"
 
+[cli.common.methods]
+stored = "без сжатия"
+brotli = "brotli"
+zstd = "zstd"
+lzma = "lzma"
+lepton = "lepton"
+dedup = "дубликат"
+
 [cli.common.errors]
 file_required = "Не указан файл архива"
 content_required = "Нужно указать как минимум один каталог для архивации"
@@ -52,6 +60,9 @@ brotli_decompression_failed = "Ошибка распаковки Brotli: %{error
 zstd_decompression_failed = "Ошибка распаковки ZStandard: %{error}"
 lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
 lepton_decompression_failed = "Ошибка распаковки Lepton JPEG: %{error}"
+
+[cli.common.messages]
+summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
 
 [cli.create]
 about = "Создает новый архив"
@@ -153,6 +164,17 @@ col_file = "Файл"
 col_size = "Размер"
 col_compression = "Сжатие"
 
+[tui.inspect.panels]
+tag_search = " Поиск по тегам "
+metadata = " Метаданные "
+content = " Содержимое "
+no_entry_selected = " Файл не выбран"
+
+[tui.inspect.ratio]
+no_change = "без изменений"
+saved = "%{pct}% сохранено"
+larger = "на %{pct}% больше"
+
 [tui.inspect.preview]
 label_method = "Метод"
 label_original = "Исходный размер"
@@ -174,6 +196,11 @@ atl = "Название трека"
 aar = "Исполнитель"
 aal = "Альбом"
 agn = "Жанр"
+
+[tui.meta_search.errors]
+unknown_tag = "Неизвестный тег '%{tag}'. Известные теги: %{known}"
+missing_value = "Тег '%{tag}' требует значения (например, %{tag}:пример)"
+bare_word = "Ожидалось 'тег:значение', получено '%{token}' — используйте формат 'artist:beatles'"
 
 [cli.extractor.errors]
 open_failed = "Не удалось открыть архив %{file}"

@@ -1,40 +1,12 @@
 # DARI cleanup roadmap
 
-## Step 3. Localize remaining hard-coded English user-facing strings
-
-Several user-visible strings bypass `t!()`:
-
-- Compression method labels in `src/commands/create.rs` verbose mode ("stored", "brotli", "zstd", …)
-- Ratio labels in `src/tui/mod.rs` ("no change", "N% saved", "N% larger")
-- Panel header strings in `src/tui/mod.rs` (" No entry selected", " Tag Search ", " Metadata ", " Content ")
-- Error messages in `src/tui/meta_search.rs` from `parse_meta_query`
-
-Add required keys to `locales/en.toml` and `locales/ru.toml`, then replace the literals with
-`t!(...)` calls.
-
-Files: `src/commands/create.rs`, `src/tui/mod.rs`, `src/tui/meta_search.rs`,
-`locales/en.toml`, `locales/ru.toml`
-
----
-
-## Step 11. Add creation/append completion summary
-
-After `create` or `append` succeeds, print a summary line: files added, total original size,
-total stored size, overall ratio, and time elapsed. Requires accumulating `FileAddOutcome` values
-during the serial commit phase.
-
-Files: `src/commands/create.rs`, `src/commands/append.rs`, `src/archive_builder.rs`,
-`locales/en.toml`, `locales/ru.toml`
-
----
-
 ## Step 15. Add extract functionality to the TUI (inspect command)
 
 TUI should be capable of extracting single hovered file or entire directory to chosen path by pressing `x` key. This
 should open small floating window with path input field, by default filled with PWD of current process (ensure this is
 cross-platform between linux/macos and windows)
 
----
+--
 
 ## Step 18. Handle path conflicts on `append`
 
@@ -55,11 +27,3 @@ be under `rename` mode.
 
 Files: `src/cli.rs`, `src/commands/append.rs`, `src/archive_builder.rs`,
 `locales/en.toml`, `locales/ru.toml`
-
---
-
-## Step 19. Add github actions workflow
-
-It should automatically build app, run tests and publish release (while in v5 branch - as prerelease, after merging to master - as latest)
-
-running tests and building binaries should be in matrix for windows, linux and macos (both intel and arm)

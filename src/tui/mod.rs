@@ -318,7 +318,7 @@ fn rebuild_visible_from_search(state: &mut AppState) {
 
 /// Parse `meta_search_query` and rebuild `visible`; store any parse error.
 fn rebuild_visible_from_meta_search(state: &mut AppState) {
-    match parse_meta_query(&state.meta_search_query) {
+    match parse_meta_query(&state.meta_search_query, state.locale.as_str()) {
         Ok(predicates) => {
             state.meta_search_error = None;
             state.visible = apply_meta_filter(&predicates, &state.entries, &state.tree_root);
