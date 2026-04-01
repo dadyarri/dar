@@ -410,6 +410,8 @@ fn build_and_cache_preview(state: &mut AppState, entry_idx: usize) {
 }
 
 /// Validate the currently typed extract path and update `extract_error` accordingly.
+/// When the path is valid and relative, `extract_path_resolved` is set to the
+/// canonicalized absolute path so the dialog can show a gray hint.
 /// Returns `true` when the path is valid (non-empty and the directory exists).
 fn validate_extract_path(state: &mut AppState) -> bool {
     let locale = state.locale.as_str().to_owned();
@@ -419,6 +421,7 @@ fn validate_extract_path(state: &mut AppState) -> bool {
             rust_i18n::t!("tui.inspect.extract.error_empty", locale = locale.as_str())
                 .into_owned(),
         );
+        state.extract_path_resolved = None;
         return false;
     }
     let p = std::path::Path::new(&trimmed);
@@ -431,7 +434,16 @@ fn validate_extract_path(state: &mut AppState) -> bool {
             )
             .into_owned(),
         );
+        state.extract_path_resolved = None;
         return false;
+    }
+    // Compute and store the absolute path when the user typed a relative path.
+    if p.is_absolute() {
+        state.extract_path_resolved = None;
+    } else {
+        // `p.exists()` passed above, so canonicalize should succeed; if it
+        // somehow fails we clear the hint rather than showing a misleading path.
+        state.extract_path_resolved = p.canonicalize().ok();
     }
     state.extract_error = None;
     true
@@ -462,7 +474,14 @@ fn do_extract(state: &mut AppState) {
         return;
     };
 
-    let dest = std::path::Path::new(&state.extract_path);
+    // Use the canonicalized absolute path when one was computed from a relative input;
+    // otherwise fall back to the trimmed typed path.
+    let dest_buf = if let Some(resolved) = state.extract_path_resolved.clone() {
+        resolved
+    } else {
+        std::path::PathBuf::from(state.extract_path.trim())
+    };
+    let dest = dest_buf.as_path();
     let passphrase = state.passphrase.as_deref();
     let archive_path = state.archive_path.clone();
     let locale = state.locale.as_str();

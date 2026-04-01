@@ -76,8 +76,24 @@ pub(crate) fn render_extract_dialog(
             Span::styled(format!("  {display_path}"), input_style),
             Span::styled("█", cursor_style),
         ]),
-        Line::from(""),
     ];
+
+    // When the user typed a relative path that resolves to a known directory, show the
+    // absolute path as a gray hint so they can confirm the destination.
+    if let Some(resolved) = &state.extract_path_resolved {
+        let hint_style = Style::default().fg(Color::DarkGray);
+        let resolved_str = resolved.display().to_string();
+        let resolved_char_count = resolved_str.chars().count();
+        let display_resolved = if resolved_char_count > inner_width.saturating_sub(6) {
+            let skip = resolved_char_count - inner_width.saturating_sub(6);
+            format!("  → {}", resolved_str.chars().skip(skip).collect::<String>())
+        } else {
+            format!("  → {resolved_str}")
+        };
+        lines.push(Line::from(Span::styled(display_resolved, hint_style)));
+    }
+
+    lines.push(Line::from(""));
 
     if let Some(err) = &state.extract_error {
         // Wrap the error text to the inner width.

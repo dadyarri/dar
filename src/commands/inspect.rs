@@ -65,6 +65,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         extract_path: std::env::current_dir()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| String::from(".")),
+        extract_path_resolved: None,
         extract_error: None,
     };
 

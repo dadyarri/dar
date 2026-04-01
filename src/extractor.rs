@@ -1,6 +1,7 @@
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, INDEX_FLAG_LINKED_DATA};
 use crate::traits::decompress_bytes;
+use crate::utils::sanitize_path;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use eyre::{Result, eyre};
@@ -118,7 +119,9 @@ fn extract_one(
     })?;
 
     // Write the recovered bytes to dest_dir / entry.path, creating dirs as needed.
-    let dest_path = dest_dir.join(&entry.path);
+    // Sanitize the stored path to prevent path traversal (strips `..`, `/`, Windows prefixes).
+    let safe_path = sanitize_path(&entry.path);
+    let dest_path = dest_dir.join(&safe_path);
     if let Some(parent) = dest_path.parent() {
         fs::create_dir_all(parent).map_err(|_| {
             eyre!(t!(
