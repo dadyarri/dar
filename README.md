@@ -13,7 +13,7 @@ CLI archiver that combines multiple compression algorithms with useful utilities
 
 ## Installation
 
-Requires Rust 1.70+ and Cargo:
+Requires Rust 1.85+ and Cargo:
 
 ```sh
 git clone https://github.com/dadyarri/dar
