@@ -159,6 +159,53 @@ Shell completions are written to `completions/` by `build.rs` at build time. Tha
 
 Program executions should be run in /tmp/test_dari. Make sure the directory exists.
 
+## Release Process
+
+Releases are driven by `cargo-release` locally; the CI workflow fires only when a version tag is
+pushed. **Never push a tag manually** — always go through `cargo release` to keep the tag and
+`Cargo.toml` version in sync.
+
+Install `cargo-release` once:
+
+```sh
+cargo install cargo-release
+```
+
+> **Note:** `cargo release` defaults to a **dry-run**. Pass `-x` / `--execute` to actually perform
+> the release.
+
+### Stable release (on `master`)
+
+```sh
+cargo release patch -x   # 5.0.0 → 5.0.1 — bug fixes
+cargo release minor -x   # 5.0.1 → 5.1.0 — new features
+cargo release major -x   # 5.1.0 → 6.0.0 — breaking changes
+```
+
+Each command:
+1. Bumps the version in `Cargo.toml` and commits `chore: Release`.
+2. Creates an annotated tag `vX.Y.Z`.
+3. Pushes both the commit and the tag.
+4. The `release.yml` workflow triggers on the new tag, verifies `Cargo.toml` matches the tag, and
+   publishes a **stable** GitHub release (no `-` in the tag name → `prerelease: false`).
+
+### Pre-release (on any feature/dev branch)
+
+```sh
+cargo release beta -x   # first run:  5.0.0 → 5.0.1-beta.1
+cargo release beta -x   # second run: 5.0.1-beta.1 → 5.0.1-beta.2
+```
+
+`beta` (also `alpha`, `rc`) is a valid bump level that adds or increments the pre-release suffix.
+The `release.yml` workflow detects the `-` in the tag name and marks the GitHub release as
+`prerelease: true`.
+
+### How `release.yml` enforces consistency
+
+The workflow now triggers on `push: tags: 'v[0-9]*'` (tag-push, not branch-push). A guard step
+aborts the workflow with a clear error when the pushed tag does not match the `version` field in
+`Cargo.toml`, preventing accidentally published releases from manual tags.
+
 ## Adding a New Command
 
 1. Add `Command::new("name")` block in `src/cli.rs`.
