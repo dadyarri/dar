@@ -238,6 +238,27 @@ The workflow now triggers on `push: tags: 'v[0-9]*'` (tag-push, not branch-push)
 aborts the workflow with a clear error when the pushed tag does not match the `version` field in
 `Cargo.toml`, preventing accidentally published releases from manual tags.
 
+### Automatic release after approved reviews
+
+When a PR has received all required approvals and is ready to be merged, **automatically start the
+release process** without waiting for an explicit instruction. The steps are:
+
+1. Determine the appropriate bump level from the PR content:
+   - Bug fixes → `patch`
+   - New features → `minor`
+   - Breaking changes → `major`
+   - Pre-release on a feature/dev branch → `beta` (or `alpha`/`rc`)
+2. Merge the PR into the target branch first, then switch to that branch.
+3. Run the full release sequence (see the relevant stable/pre-release section above):
+   ```sh
+   git config --local commit.gpgsign false && git config --local tag.gpgSign false
+   cargo release <level> --execute --no-push --no-publish
+   git add Cargo.toml Cargo.lock
+   git commit -m "chore: Release X.Y.Z(-pre.N)"
+   git tag -a vX.Y.Z(-pre.N) -m "Release X.Y.Z(-pre.N)"
+   # then call report_progress to push the branch + tag
+   ```
+
 ## Adding a New Command
 
 1. Add `Command::new("name")` block in `src/cli.rs`.
