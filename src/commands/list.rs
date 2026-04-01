@@ -25,10 +25,6 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     }
 
     let json = matches.get_flag("json");
-    let _passphrase = matches
-        .get_one::<String>("encrypt-passphrase")
-        .map(|s| s.as_str());
-    // TODO: use passphrase to decrypt and display entry metadata for encrypted archives
 
     let mut file_handle = File::open(file).wrap_err_with(|| {
         t!(

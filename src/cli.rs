@@ -248,12 +248,6 @@ where
                         .long("json")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.list.args.json")),
-                    Arg::new("encrypt-passphrase")
-                        .long("encrypt-passphrase")
-                        .action(ArgAction::Set)
-                        .num_args(1)
-                        .value_name(passphrase_value)
-                        .help(translate("cli.list.args.encrypt_passphrase")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
