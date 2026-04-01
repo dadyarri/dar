@@ -35,3 +35,8 @@ Introduce `dari completions <SHELL>` subcommand, that will write completion scri
 1. Change logic to save file from in-place by default to `<basename>.enc.dar`
 2. Add `-o` argument to specify custom filename to save encrypted archive as
 3. Add `-i` argument to save in-place
+
+## Step 21. Github workflow improvements
+
+1. Fix error building x86_64-apple-darwin: `The configuration 'macos-13-us-default' is not supported`
+2. This should be planned in details before implementation: Deal with duplication of tags in `release` workflow. Mark all pushes to non-master branches as beta with number after dot (i. e. 5.0.0-beta.1) and master as regular releases. There is need of some system to work with tags.
