@@ -61,6 +61,9 @@ zstd_decompression_failed = "Ошибка распаковки ZStandard: %{erro
 lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
 lepton_decompression_failed = "Ошибка распаковки Lepton JPEG: %{error}"
 
+[cli.common.messages]
+summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
+
 [cli.create]
 about = "Создает новый архив"
 
@@ -77,7 +80,6 @@ dry_run = "Предварительный просмотр добавляемы�
 creating_archive = "Создание архива %{file}"
 dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
 dry_run_footer = "(пробный запуск — файл не записан)"
-summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
 
 [cli.create.errors]
 file_exists = "Файл %{file} уже существует"
@@ -99,7 +101,6 @@ dry_run = "Предварительный просмотр добавляемы�
 appending_archive = "Добавление файлов в архив %{file}"
 dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
 dry_run_footer = "(пробный запуск — файл не изменён)"
-summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
 
 [cli.append.errors]
 append_failed = "Не удалось добавить данные в архив"

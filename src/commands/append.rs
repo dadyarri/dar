@@ -5,7 +5,7 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
-use super::shared::{format_size, prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
+use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome};
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
@@ -145,44 +145,26 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     builder.import_existing_entries(entries);
 
     let start = Instant::now();
-    let mut outcomes = Vec::new();
+    let mut count = 0usize;
+    let mut total_original = 0u64;
+    let mut total_stored = 0u64;
 
     for prepared_file in prepared {
         let outcome = builder.commit_prepared(prepared_file)?;
         if verbose {
             print_verbose_outcome(&outcome, locale.as_str());
         }
-        outcomes.push(outcome);
+        count += 1;
+        total_original += outcome.original_size;
+        if !outcome.is_dedup {
+            total_stored += outcome.stored_size;
+        }
     }
 
     builder.build()?;
 
     let elapsed = start.elapsed();
-    let elapsed_str = format!("{:.2}s", elapsed.as_secs_f64());
-    let count = outcomes.len();
-    let total_original: u64 = outcomes.iter().map(|o| o.original_size).sum();
-    let total_stored: u64 = outcomes
-        .iter()
-        .filter(|o| !o.is_dedup)
-        .map(|o| o.stored_size)
-        .sum();
-    let ratio = if total_original > 0 {
-        format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)
-    } else {
-        "100.0".to_string()
-    };
-    println!(
-        "{}",
-        t!(
-            "cli.append.messages.summary",
-            locale = locale.as_str(),
-            count = count.to_string().as_str(),
-            original = format_size(total_original).as_str(),
-            stored = format_size(total_stored).as_str(),
-            ratio = ratio.as_str(),
-            elapsed = elapsed_str.as_str(),
-        )
-    );
+    print_summary(count, total_original, total_stored, elapsed.as_secs_f64(), locale.as_str());
 
     Ok(())
 }

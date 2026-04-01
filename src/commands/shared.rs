@@ -46,6 +46,27 @@ pub fn compression_method_label(method: CompressionMethod, locale: &str) -> Stri
     }
 }
 
+pub fn print_summary(count: usize, total_original: u64, total_stored: u64, elapsed_secs: f64, locale: &str) {
+    let ratio = if total_original > 0 {
+        format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)
+    } else {
+        "100.0".to_string()
+    };
+    let elapsed_str = format!("{:.2}s", elapsed_secs);
+    println!(
+        "{}",
+        t!(
+            "cli.common.messages.summary",
+            locale = locale,
+            count = count.to_string().as_str(),
+            original = format_size(total_original).as_str(),
+            stored = format_size(total_stored).as_str(),
+            ratio = ratio.as_str(),
+            elapsed = elapsed_str.as_str(),
+        )
+    );
+}
+
 pub fn print_verbose_outcome(outcome: &FileAddOutcome, locale: &str) {
     let orig = format_size(outcome.original_size);
 
