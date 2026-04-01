@@ -159,6 +159,50 @@ Shell completions are written to `completions/` by `build.rs` at build time. Tha
 
 Program executions should be run in /tmp/test_dari. Make sure the directory exists.
 
+## Release Process
+
+Releases are driven by `cargo-release` locally; the CI workflow fires only when a version tag is
+pushed. **Never push a tag manually** — always go through `cargo release` to keep the tag and
+`Cargo.toml` version in sync.
+
+Install `cargo-release` once:
+
+```sh
+cargo install cargo-release
+```
+
+### Stable release (on `master`)
+
+```sh
+cargo release patch   # 5.0.0 → 5.0.1 — bug fixes
+cargo release minor   # 5.0.1 → 5.1.0 — new features
+cargo release major   # 5.1.0 → 6.0.0 — breaking changes
+```
+
+Each command:
+1. Bumps the version in `Cargo.toml` and commits `chore: release vX.Y.Z`.
+2. Creates an annotated tag `vX.Y.Z`.
+3. Pushes both the commit and the tag.
+4. The `release.yml` workflow triggers on the new tag, verifies `Cargo.toml` matches the tag, and
+   publishes a **stable** GitHub release (no `-` in the tag name → `prerelease: false`).
+
+### Pre-release (on any feature/dev branch)
+
+```sh
+cargo release --pre-release-tag beta patch   # first run:  v5.0.1-beta.1
+cargo release --pre-release-tag beta patch   # second run: v5.0.1-beta.2
+```
+
+`cargo release` reads the highest existing `-beta.N` tag for the current base version and
+auto-increments the counter. The `release.yml` workflow detects the `-` in the tag name and marks
+the GitHub release as `prerelease: true`.
+
+### How `release.yml` enforces consistency
+
+The workflow now triggers on `push: tags: 'v[0-9]*'` (tag-push, not branch-push). A guard step
+aborts the workflow with a clear error when the pushed tag does not match the `version` field in
+`Cargo.toml`, preventing accidentally published releases from manual tags.
+
 ## Adding a New Command
 
 1. Add `Command::new("name")` block in `src/cli.rs`.
