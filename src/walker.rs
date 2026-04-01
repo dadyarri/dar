@@ -53,3 +53,70 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
 
     Ok(files)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::scan_files;
+    use crate::cli::build_cli_with_translator;
+    use crate::i18n::Locale;
+    use std::fs;
+
+    fn scan_with_args(paths: &[&str]) -> Vec<super::ScannedFile> {
+        // Build a real ArgMatches via the CLI so we get a proper ValuesRef<String>.
+        let mut args = vec!["dari", "create", "-f", "out.dar"];
+        args.extend_from_slice(paths);
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(&args)
+                .unwrap();
+        let sub = matches.subcommand_matches("create").unwrap();
+        let content = sub.get_many::<String>("content").unwrap();
+        let locale = Locale::new("en");
+        scan_files(content, &locale).unwrap()
+    }
+
+    #[test]
+    fn test_directory_is_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        fs::write(dir.path().join("b.txt"), b"world").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        assert_eq!(files.len(), 2);
+        let mut names: Vec<_> = files.iter().map(|f| f.archive_path.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec!["a.txt", "b.txt"]);
+    }
+
+    #[test]
+    fn test_single_file_path_is_not_added() {
+        // Known gap: bare file paths are silently ignored; only directories are walked.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("only.txt");
+        fs::write(&file_path, b"data").unwrap();
+
+        let path_str = file_path.to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        assert!(
+            files.is_empty(),
+            "scan_files should not add bare file paths (known gap)"
+        );
+    }
+
+    #[test]
+    fn test_nested_directory_is_walked_recursively() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("nested.rs"), b"fn main() {}").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].archive_path, "sub/nested.rs");
+    }
+}

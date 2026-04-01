@@ -4,6 +4,7 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
+use super::shared::print_verbose_outcome;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use clap::ArgMatches;
@@ -117,11 +118,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     builder.import_existing_entries(entries);
 
     for file_entry in scan_files(content, locale)? {
+        let outcome = builder.add_file(&file_entry.source_path, &file_entry.archive_path)?;
         if verbose {
-            println!("{}", file_entry.source_path.display());
+            print_verbose_outcome(&outcome);
         }
-
-        builder.add_file(&file_entry.source_path, &file_entry.archive_path)?;
     }
 
     builder.build()?;

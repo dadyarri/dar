@@ -237,10 +237,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     /// Convenience wrapper: prepare and commit a single file.
     /// Use [`prepare_file_from_disk`] + [`Self::commit_prepared`] for parallel workflows.
-    pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<()> {
+    pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<FileAddOutcome> {
         let prepared = prepare_file_from_disk(&self.pipeline, file_path, archive_path)?;
-        self.commit_prepared(prepared)?;
-        Ok(())
+        self.commit_prepared(prepared)
     }
 
     pub fn build(&mut self) -> Result<()> {

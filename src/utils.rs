@@ -140,3 +140,90 @@ fn sanitize_path(path: &str) -> String {
 
     components.join("/")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{calculate_archive_path, plural_key, plural_suffix};
+    use std::path::Path;
+
+    // --- plural_suffix ---
+
+    #[test]
+    fn test_plural_suffix_english_one() {
+        assert_eq!(plural_suffix(1, "en"), "one");
+    }
+
+    #[test]
+    fn test_plural_suffix_english_other() {
+        assert_eq!(plural_suffix(0, "en"), "other");
+        assert_eq!(plural_suffix(2, "en"), "other");
+        assert_eq!(plural_suffix(42, "en"), "other");
+    }
+
+    #[test]
+    fn test_plural_suffix_russian_one() {
+        assert_eq!(plural_suffix(1, "ru"), "one");
+        assert_eq!(plural_suffix(21, "ru"), "one");
+        assert_eq!(plural_suffix(101, "ru"), "one");
+    }
+
+    #[test]
+    fn test_plural_suffix_russian_few() {
+        assert_eq!(plural_suffix(2, "ru"), "few");
+        assert_eq!(plural_suffix(3, "ru"), "few");
+        assert_eq!(plural_suffix(4, "ru"), "few");
+        assert_eq!(plural_suffix(22, "ru"), "few");
+    }
+
+    #[test]
+    fn test_plural_suffix_russian_many() {
+        assert_eq!(plural_suffix(5, "ru"), "many");
+        assert_eq!(plural_suffix(11, "ru"), "many");
+        assert_eq!(plural_suffix(12, "ru"), "many");
+        assert_eq!(plural_suffix(0, "ru"), "many");
+    }
+
+    // --- plural_key ---
+
+    #[test]
+    fn test_plural_key_combines_prefix_and_suffix() {
+        assert_eq!(plural_key(1, "tui.status", "en"), "tui.status_one");
+        assert_eq!(plural_key(2, "tui.status", "en"), "tui.status_other");
+        assert_eq!(plural_key(5, "tui.status", "ru"), "tui.status_many");
+    }
+
+    // --- calculate_archive_path (and sanitize_path) ---
+
+    #[test]
+    fn test_calculate_archive_path_strips_prefix() {
+        let root = Path::new("/some/dir");
+        let file = Path::new("/some/dir/sub/file.txt");
+        assert_eq!(calculate_archive_path(root, file), "sub/file.txt");
+    }
+
+    #[test]
+    fn test_calculate_archive_path_root_file() {
+        let root = Path::new("/some/dir");
+        let file = Path::new("/some/dir/file.txt");
+        assert_eq!(calculate_archive_path(root, file), "file.txt");
+    }
+
+    #[test]
+    fn test_calculate_archive_path_sanitizes_parent_traversal() {
+        // ".." components must be stripped; the result must be a plain relative path.
+        let root = Path::new("/some/dir");
+        let file = Path::new("/some/dir/../../../etc/passwd");
+        let result = calculate_archive_path(root, file);
+        assert!(!result.contains(".."), "result must not contain '..'");
+        assert!(!result.starts_with('/'), "result must not be absolute");
+    }
+
+    #[test]
+    fn test_calculate_archive_path_sanitizes_absolute_prefix() {
+        // strip_prefix fails here, so the raw path is sanitized instead.
+        let root = Path::new("/other");
+        let file = Path::new("/absolute/path/file.txt");
+        let result = calculate_archive_path(root, file);
+        assert!(!result.starts_with('/'), "result must not be absolute");
+    }
+}

@@ -33,3 +33,43 @@ pub fn resolve_encryption_passphrase(
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_encryption_passphrase;
+    use crate::cli::build_cli_with_translator;
+    use crate::i18n::Locale;
+
+    fn parse(args: &[&str]) -> clap::ArgMatches {
+        build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+            .try_get_matches_from(args)
+            .unwrap()
+            .subcommand_matches("create")
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn test_no_encryption_flags_returns_none() {
+        let matches = parse(&["dari", "create", "-f", "out.dar", "."]);
+        let locale = Locale::new("en");
+        let result = resolve_encryption_passphrase(&matches, &locale).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_encrypt_passphrase_flag_returns_passphrase() {
+        let matches = parse(&[
+            "dari",
+            "create",
+            "-f",
+            "out.dar",
+            "--encrypt-passphrase",
+            "secret",
+            ".",
+        ]);
+        let locale = Locale::new("en");
+        let result = resolve_encryption_passphrase(&matches, &locale).unwrap();
+        assert_eq!(result, Some("secret".to_string()));
+    }
+}
