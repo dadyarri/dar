@@ -24,7 +24,7 @@ pub struct ArchiveState {
 #[derive(Clone, Copy)]
 pub struct EncryptedEntryProbe {
     pub offset: u64,
-    pub size: u32,
+    pub size: u64,
     pub checksum: [u8; 32],
 }
 
@@ -155,7 +155,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
         if entry_encrypted && encryption_probe.is_none() {
             encryption_probe = Some(EncryptedEntryProbe {
-                offset: entry.offset as u64,
+                offset: entry.offset,
                 size: entry.compressed_size,
                 checksum: entry.checksum,
             });

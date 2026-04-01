@@ -46,9 +46,9 @@ pub struct ArchiveBuilder<W: Write + Seek> {
 
 #[derive(Clone, Copy)]
 struct ExistingFileData {
-    offset: u32,
+    offset: u64,
     compression_method: crate::models::archive::CompressionMethod,
-    compressed_size: u32,
+    compressed_size: u64,
     bitflags: u16,
 }
 
@@ -132,7 +132,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     }
 
     pub fn write_header(&mut self) -> Result<()> {
-        ArchiveHeader::new()
+        ArchiveHeader::new()?
             .write(&mut self.writer)
             .wrap_err(t!("cli.common.errors.header_write_failed"))?;
 
@@ -145,7 +145,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let archive_path = prepared.archive_path;
         let pipeline_result = prepared.pipeline_result;
         let mut bitflags = pipeline_result.bitflags;
-        let original_size = pipeline_result.original_size as u64;
+        let original_size = pipeline_result.original_size;
 
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
             bitflags |= INDEX_FLAG_LINKED_DATA;
@@ -172,21 +172,21 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             return Ok(FileAddOutcome {
                 archive_path,
                 original_size,
-                stored_size: existing.compressed_size as u64,
+                stored_size: existing.compressed_size,
                 compression_method: existing.compression_method,
                 is_dedup: true,
             });
         }
 
         // Record byte offset where this file's data block begins
-        let data_offset =
-            self.writer
-                .stream_position()
-                .wrap_err(t!("cli.common.errors.get_write_position_failed"))? as u32;
+        let data_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
 
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
-            Some(compressed) => (compressed.as_slice(), compressed.len() as u32),
+            Some(compressed) => (compressed.as_slice(), compressed.len() as u64),
             None => (
                 pipeline_result.original_content.as_slice(),
                 pipeline_result.original_size,
@@ -229,7 +229,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         Ok(FileAddOutcome {
             archive_path,
             original_size,
-            stored_size: compressed_size as u64,
+            stored_size: compressed_size,
             compression_method: pipeline_result.compression_method,
             is_dedup: false,
         })
@@ -402,8 +402,8 @@ mod tests {
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
-        // compression_method is the 7th byte of ArchiveIndexEntry (after offset u32 + bitflags u16)
-        let cm_byte = data[index_offset + 6];
+        // compression_method is at byte 10 of ArchiveIndexEntry (after offset u64 + bitflags u16)
+        let cm_byte = data[index_offset + 10];
         assert_eq!(
             cm_byte,
             CompressionMethod::Brotli as u8,
@@ -424,7 +424,7 @@ mod tests {
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
-        let cm_byte = data[index_offset + 6];
+        let cm_byte = data[index_offset + 10];
         assert_eq!(
             cm_byte,
             CompressionMethod::Zstandard as u8,
@@ -443,7 +443,7 @@ mod tests {
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
-        let cm_byte = data[index_offset + 6];
+        let cm_byte = data[index_offset + 10];
         assert_eq!(
             cm_byte,
             CompressionMethod::None as u8,
@@ -475,7 +475,7 @@ mod tests {
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
-        let cm_byte = data[index_offset + 6];
+        let cm_byte = data[index_offset + 10];
         assert_eq!(
             cm_byte,
             CompressionMethod::None as u8,
@@ -503,13 +503,13 @@ mod tests {
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
         let entry_size = size_of::<crate::models::archive::ArchiveIndexEntry>();
 
-        let first_offset = read_bytes_as::<u32>(&data, index_offset).unwrap();
-        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 65).unwrap() as usize;
-        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 69).unwrap() as usize;
+        let first_offset = read_bytes_as::<u64>(&data, index_offset).unwrap();
+        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 77).unwrap() as usize;
+        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 81).unwrap() as usize;
 
         let second_entry_offset = index_offset + entry_size + first_path_len + first_extra_len;
-        let second_offset = read_bytes_as::<u32>(&data, second_entry_offset).unwrap();
-        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 4).unwrap();
+        let second_offset = read_bytes_as::<u64>(&data, second_entry_offset).unwrap();
+        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 8).unwrap();
 
         assert_eq!(
             first_offset, second_offset,
@@ -542,13 +542,13 @@ mod tests {
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
         let entry_size = size_of::<crate::models::archive::ArchiveIndexEntry>();
 
-        let first_offset = read_bytes_as::<u32>(&data, index_offset).unwrap();
-        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 65).unwrap() as usize;
-        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 69).unwrap() as usize;
+        let first_offset = read_bytes_as::<u64>(&data, index_offset).unwrap();
+        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 77).unwrap() as usize;
+        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 81).unwrap() as usize;
 
         let second_entry_offset = index_offset + entry_size + first_path_len + first_extra_len;
-        let second_offset = read_bytes_as::<u32>(&data, second_entry_offset).unwrap();
-        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 4).unwrap();
+        let second_offset = read_bytes_as::<u64>(&data, second_entry_offset).unwrap();
+        let second_flags = read_bytes_as::<u16>(&data, second_entry_offset + 8).unwrap();
 
         assert_ne!(
             first_offset, second_offset,
@@ -627,7 +627,7 @@ mod tests {
         let footer_base = data.len() - size_of::<ArchiveFooter>();
         let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
 
-        let cm_byte = data[index_offset + 6];
+        let cm_byte = data[index_offset + 10];
         assert_eq!(
             cm_byte,
             CompressionMethod::None as u8,
@@ -635,8 +635,8 @@ mod tests {
         );
 
         // Verify the stored size equals the original size (no compression applied)
-        let original_size = read_bytes_as::<u32>(&data, index_offset + 57).unwrap();
-        let compressed_size = read_bytes_as::<u32>(&data, index_offset + 61).unwrap();
+        let original_size = read_bytes_as::<u64>(&data, index_offset + 61).unwrap();
+        let compressed_size = read_bytes_as::<u64>(&data, index_offset + 69).unwrap();
         assert_eq!(
             original_size, compressed_size,
             "stored size must equal original size for an uncompressed entry"

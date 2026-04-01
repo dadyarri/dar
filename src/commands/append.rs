@@ -1,12 +1,11 @@
 use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
+use crate::extractor::try_decrypt_bytes;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
-use super::shared::print_verbose_outcome;
-use chacha20poly1305::aead::{AeadInPlace, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
+use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
@@ -31,6 +30,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     }
 
     let verbose = matches.get_flag("verbose");
+    let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
     let content = matches.get_many::<String>("content").ok_or_else(|| {
@@ -39,6 +39,37 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             locale = locale.as_str()
         ))
     })?;
+
+    let config = PipelineConfig {
+        compress_images,
+        encryption_passphrase,
+    };
+
+    // Collect all files first so we can process them in parallel.
+    let file_entries = scan_files(content, locale)?;
+
+    // ── Parallel phase: read + checksum + compress ──────────────────────────
+    let prepared = prepare_files_parallel(&file_entries, &config)?;
+
+    // ── Dry-run short-circuit ────────────────────────────────────────────────
+    if dry_run {
+        println!(
+            "{}",
+            t!(
+                "cli.append.messages.dry_run_header",
+                locale = locale.as_str(),
+                file = file
+            )
+        );
+        for p in &prepared {
+            print_dry_run_prepared(p);
+        }
+        println!(
+            "{}",
+            t!("cli.append.messages.dry_run_footer", locale = locale.as_str())
+        );
+        return Ok(());
+    }
 
     println!(
         "{}",
@@ -66,12 +97,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     ensure_encryption_mode(
         existing_archive.encryption_mode,
-        encryption_passphrase.is_some(),
+        config.encryption_passphrase.is_some(),
         locale,
     )?;
 
     if let Some(true) = existing_archive.encryption_mode {
-        let passphrase = encryption_passphrase.as_deref().ok_or_else(|| {
+        let passphrase = config.encryption_passphrase.as_deref().ok_or_else(|| {
             eyre!(t!(
                 "cli.append.errors.append_requires_encryption",
                 locale = locale.as_str()
@@ -109,16 +140,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .to_string(),
     )?;
 
-    let config = PipelineConfig {
-        compress_images,
-        encryption_passphrase,
-    };
-
     let mut builder = ArchiveBuilder::with_config(BufWriter::new(file_handle), config);
     builder.import_existing_entries(entries);
 
-    for file_entry in scan_files(content, locale)? {
-        let outcome = builder.add_file(&file_entry.source_path, &file_entry.archive_path)?;
+    for prepared_file in prepared {
+        let outcome = builder.commit_prepared(prepared_file)?;
         if verbose {
             print_verbose_outcome(&outcome);
         }
@@ -154,13 +180,6 @@ fn verify_passphrase_matches(
     file_path: &str,
     locale: &Locale,
 ) -> Result<()> {
-    if probe.size < 16 {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_encryption_probe_missing",
-            locale = locale.as_str()
-        )));
-    }
-
     file.seek(SeekFrom::Start(probe.offset)).wrap_err(
         t!(
             "cli.append.errors.append_seek_failed",
@@ -180,35 +199,12 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    if data.len() < 16 {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_encryption_probe_missing",
+    try_decrypt_bytes(&data, &probe.checksum, passphrase).ok_or_else(|| {
+        eyre!(t!(
+            "cli.append.errors.append_passphrase_invalid",
             locale = locale.as_str()
-        )));
-    }
-
-    let tag_bytes: Vec<u8> = data[data.len() - 16..].to_vec();
-    data.truncate(data.len() - 16);
-    let mut ciphertext = data;
-
-    let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&probe.checksum[..12]);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
-
-    cipher
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&nonce),
-            b"",
-            &mut ciphertext,
-            Tag::from_slice(&tag_bytes),
-        )
-        .map_err(|_| {
-            eyre!(t!(
-                "cli.append.errors.append_passphrase_invalid",
-                locale = locale.as_str()
-            ))
-        })?;
+        ))
+    })?;
 
     Ok(())
 }

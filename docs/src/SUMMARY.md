@@ -1,4 +1,15 @@
 # Summary
 
 - [Введение](./introduction.md)
+- [Установка](./installation.md)
+- [Команды](./commands/index.md)
+  - [create](./commands/create.md)
+  - [append](./commands/append.md)
+  - [extract](./commands/extract.md)
+  - [inspect](./commands/inspect.md)
 - [Структура архива](archive_structure.md)
+- [Алгоритмы сжатия](./compression.md)
+- [Шифрование](./encryption.md)
+- [Дедупликация](./deduplication.md)
+- [Правила игнорирования](./ignore_rules.md)
+- [Дополнительные поля](./extra_fields.md)
