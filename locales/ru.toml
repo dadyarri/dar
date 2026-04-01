@@ -96,11 +96,15 @@ compress_images = "Без потерь оптимизировать PNG/JPEG с 
 encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
 encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
 dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"
+on_conflict = "Поведение при конфликте путей с существующими записями архива: error (по умолчанию), rename, overwrite"
 
 [cli.append.messages]
 appending_archive = "Добавление файлов в архив %{file}"
 dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
 dry_run_footer = "(пробный запуск — файл не изменён)"
+dry_run_conflict_rename = "(конфликт → переименован в %{new_path})"
+dry_run_conflict_overwrite = "(конфликт → перезапишет существующую запись)"
+dry_run_conflict_error = "(конфликт — будет прерван)"
 
 [cli.append.errors]
 append_failed = "Не удалось добавить данные в архив"
@@ -113,6 +117,8 @@ append_requires_encryption = "Архив был создан с шифрован
 append_disallows_encryption = "Архив был создан без шифрования: отключите шифрование для добавления файлов"
 append_passphrase_invalid = "Неверная парольная фраза для этого зашифрованного архива"
 append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
+append_conflict_error = "Добавление прервано: следующие пути уже существуют в архиве:\n  %{paths}"
+append_invalid_conflict_mode = "Недопустимое значение --on-conflict '%{value}': ожидается 'error', 'rename' или 'overwrite'"
 
 [cli.inspect]
 about = "Интерактивный просмотр содержимого архива"
