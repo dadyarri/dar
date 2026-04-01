@@ -54,4 +54,12 @@ entry. `--dry-run` should also report which files would conflict and what the re
 be under `rename` mode.
 
 Files: `src/cli.rs`, `src/commands/append.rs`, `src/archive_builder.rs`,
-`locales/en.toml`, `locales/ru.toml` 
+`locales/en.toml`, `locales/ru.toml`
+
+--
+
+## Step 19. Add github actions workflow
+
+It should automatically build app, run tests and publish release (while in v5 branch - as prerelease, after merging to master - as latest)
+
+running tests and building binaries should be in matrix for windows, linux and macos (both intel and arm)
