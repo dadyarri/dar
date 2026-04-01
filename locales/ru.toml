@@ -18,6 +18,14 @@ commands = "Команды"
 arguments = "Аргументы"
 options = "Параметры"
 
+[cli.common.methods]
+stored = "без сжатия"
+brotli = "brotli"
+zstd = "zstd"
+lzma = "lzma"
+lepton = "lepton"
+dedup = "дубликат"
+
 [cli.common.errors]
 file_required = "Не указан файл архива"
 content_required = "Нужно указать как минимум один каталог для архивации"
@@ -69,6 +77,7 @@ dry_run = "Предварительный просмотр добавляемы�
 creating_archive = "Создание архива %{file}"
 dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
 dry_run_footer = "(пробный запуск — файл не записан)"
+summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
 
 [cli.create.errors]
 file_exists = "Файл %{file} уже существует"
@@ -90,6 +99,7 @@ dry_run = "Предварительный просмотр добавляемы�
 appending_archive = "Добавление файлов в архив %{file}"
 dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
 dry_run_footer = "(пробный запуск — файл не изменён)"
+summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
 
 [cli.append.errors]
 append_failed = "Не удалось добавить данные в архив"
@@ -153,6 +163,17 @@ col_file = "Файл"
 col_size = "Размер"
 col_compression = "Сжатие"
 
+[tui.inspect.panels]
+tag_search = " Поиск по тегам "
+metadata = " Метаданные "
+content = " Содержимое "
+no_entry_selected = " Файл не выбран"
+
+[tui.inspect.ratio]
+no_change = "без изменений"
+saved = "%{pct}% сохранено"
+larger = "на %{pct}% больше"
+
 [tui.inspect.preview]
 label_method = "Метод"
 label_original = "Исходный размер"
@@ -174,6 +195,11 @@ atl = "Название трека"
 aar = "Исполнитель"
 aal = "Альбом"
 agn = "Жанр"
+
+[tui.meta_search.errors]
+unknown_tag = "Неизвестный тег '%{tag}'. Известные теги: %{known}"
+missing_value = "Тег '%{tag}' требует значения (например, %{tag}:пример)"
+bare_word = "Ожидалось 'тег:значение', получено '%{token}' — используйте формат 'artist:beatles'"
 
 [cli.extractor.errors]
 open_failed = "Не удалось открыть архив %{file}"

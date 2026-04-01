@@ -4,6 +4,7 @@ use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::walker::ScannedFile;
 use eyre::Result;
 use rayon::prelude::*;
+use rust_i18n::t;
 
 /// Prepare all files in parallel: read + checksum + compress.
 ///
@@ -35,27 +36,29 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn compression_method_label(method: CompressionMethod) -> &'static str {
+pub fn compression_method_label(method: CompressionMethod, locale: &str) -> String {
     match method {
-        CompressionMethod::None => "stored",
-        CompressionMethod::Brotli => "brotli",
-        CompressionMethod::Zstandard => "zstd",
-        CompressionMethod::Lzma => "lzma",
-        CompressionMethod::LeptonJpeg => "lepton",
+        CompressionMethod::None => t!("cli.common.methods.stored", locale = locale).into_owned(),
+        CompressionMethod::Brotli => t!("cli.common.methods.brotli", locale = locale).into_owned(),
+        CompressionMethod::Zstandard => t!("cli.common.methods.zstd", locale = locale).into_owned(),
+        CompressionMethod::Lzma => t!("cli.common.methods.lzma", locale = locale).into_owned(),
+        CompressionMethod::LeptonJpeg => t!("cli.common.methods.lepton", locale = locale).into_owned(),
     }
 }
 
-pub fn print_verbose_outcome(outcome: &FileAddOutcome) {
+pub fn print_verbose_outcome(outcome: &FileAddOutcome, locale: &str) {
     let orig = format_size(outcome.original_size);
 
     if outcome.is_dedup {
-        println!("  {:<60} {:>10}  [dedup]", outcome.archive_path, orig);
+        let dedup_label = t!("cli.common.methods.dedup", locale = locale);
+        println!("  {:<60} {:>10}  [{}]", outcome.archive_path, orig, dedup_label);
         return;
     }
 
     match outcome.compression_method {
         CompressionMethod::None => {
-            println!("  {:<60} {:>10}  [stored]", outcome.archive_path, orig);
+            let stored_label = compression_method_label(CompressionMethod::None, locale);
+            println!("  {:<60} {:>10}  [{}]", outcome.archive_path, orig, stored_label);
         }
         method => {
             let ratio = if outcome.original_size > 0 {
@@ -69,19 +72,20 @@ pub fn print_verbose_outcome(outcome: &FileAddOutcome) {
                 outcome.archive_path,
                 orig,
                 stored,
-                compression_method_label(method),
+                compression_method_label(method, locale),
                 ratio,
             );
         }
     }
 }
 
-pub fn print_dry_run_prepared(prepared: &PreparedFile) {
+pub fn print_dry_run_prepared(prepared: &PreparedFile, locale: &str) {
     let orig = format_size(prepared.pipeline_result.original_size);
 
     match prepared.pipeline_result.compression_method {
         CompressionMethod::None => {
-            println!("  {:<60} {:>10}  [stored]", prepared.archive_path, orig);
+            let stored_label = compression_method_label(CompressionMethod::None, locale);
+            println!("  {:<60} {:>10}  [{}]", prepared.archive_path, orig, stored_label);
         }
         method => {
             let stored_size = if prepared.pipeline_result.compressed_content.is_some() {
@@ -100,7 +104,7 @@ pub fn print_dry_run_prepared(prepared: &PreparedFile) {
                 prepared.archive_path,
                 orig,
                 stored,
-                compression_method_label(method),
+                compression_method_label(method, locale),
                 ratio,
             );
         }

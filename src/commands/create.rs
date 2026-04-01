@@ -2,7 +2,7 @@ use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
-use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
+use super::shared::{format_size, prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
 use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
@@ -11,6 +11,7 @@ use std::fs;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
+use std::time::Instant;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches.get_one::<String>("file").ok_or_else(|| {
@@ -54,7 +55,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             )
         );
         for p in &prepared {
-            print_dry_run_prepared(p);
+            print_dry_run_prepared(p, locale.as_str());
         }
         println!(
             "{}",
@@ -99,15 +100,46 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let mut builder = ArchiveBuilder::with_config(writer, config);
     builder.write_header()?;
 
+    let start = Instant::now();
+    let mut outcomes = Vec::new();
+
     for prepared_file in prepared {
         let outcome = builder.commit_prepared(prepared_file)?;
 
         if verbose {
-            print_verbose_outcome(&outcome);
+            print_verbose_outcome(&outcome, locale.as_str());
         }
+        outcomes.push(outcome);
     }
 
     builder.build()?;
+
+    let elapsed = start.elapsed();
+    let elapsed_str = format!("{:.2}s", elapsed.as_secs_f64());
+    let count = outcomes.len();
+    let total_original: u64 = outcomes.iter().map(|o| o.original_size).sum();
+    let total_stored: u64 = outcomes
+        .iter()
+        .filter(|o| !o.is_dedup)
+        .map(|o| o.stored_size)
+        .sum();
+    let ratio = if total_original > 0 {
+        format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)
+    } else {
+        "100.0".to_string()
+    };
+    println!(
+        "{}",
+        t!(
+            "cli.create.messages.summary",
+            locale = locale.as_str(),
+            count = count.to_string().as_str(),
+            original = format_size(total_original).as_str(),
+            stored = format_size(total_stored).as_str(),
+            ratio = ratio.as_str(),
+            elapsed = elapsed_str.as_str(),
+        )
+    );
 
     Ok(())
 }

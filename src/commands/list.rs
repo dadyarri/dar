@@ -95,7 +95,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
             let orig_human = format_size(original_size);
             let stored_human = format_size(compressed_size);
-            let method_label = compression_method_label(method);
+            let method_label = compression_method_label(method, locale.as_str());
             let checksum_prefix = &hex_string(checksum)[..8];
 
             println!(
