@@ -279,3 +279,6 @@ about = "Generates shell completion script and writes it to stdout"
 
 [cli.completions.args]
 shell = "Shell to generate completions for (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Failed to generate shell completions"

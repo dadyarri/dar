@@ -391,4 +391,30 @@ mod tests {
         assert!(help.contains(&usage));
         assert!(help.contains(&commands));
     }
+
+    #[test]
+    fn test_completions_bash_is_accepted() {
+        use clap_complete::Shell;
+
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec!["dari", "completions", "bash"])
+                .unwrap();
+
+        let completions = matches.subcommand_matches("completions").unwrap();
+        assert_eq!(
+            completions.get_one::<Shell>("shell").copied(),
+            Some(Shell::Bash)
+        );
+    }
+
+    #[test]
+    fn test_completions_invalid_shell_produces_error() {
+        let result =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec!["dari", "completions", "invalidshell"]);
+
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidValue);
+    }
 }

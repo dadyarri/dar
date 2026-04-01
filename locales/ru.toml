@@ -279,3 +279,6 @@ about = "Генерирует скрипт автодополнения для �
 
 [cli.completions.args]
 shell = "Оболочка для генерации автодополнения (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Не удалось сгенерировать скрипт автодополнения"
