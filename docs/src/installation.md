@@ -20,32 +20,39 @@ cp target/release/dari ~/.local/bin/dari
 
 ## Автодополнение командной строки
 
-При каждой сборке (`cargo build`) файлы автодополнения для оболочек автоматически
-записываются в директорию `completions/`:
+Скрипты автодополнения генерируются во время выполнения с помощью подкоманды `dari completions <SHELL>`.
 
-| Файл                          | Оболочка    |
-|-------------------------------|-------------|
-| `completions/dari.bash`       | Bash        |
-| `completions/dari.fish`       | Fish        |
-| `completions/dari.zsh`        | Zsh         |
-| `completions/_dari` (PowerShell) | PowerShell |
+Поддерживаемые оболочки: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
 
 ### Bash
 
 ```sh
-source completions/dari.bash
-# или скопируйте в /etc/bash_completion.d/dari
+dari completions bash > ~/.bash_completion.d/dari
+# или подключите напрямую:
+source <(dari completions bash)
 ```
 
 ### Fish
 
 ```sh
-cp completions/dari.fish ~/.config/fish/completions/
+dari completions fish > ~/.config/fish/completions/dari.fish
 ```
 
 ### Zsh
 
 ```sh
-# Добавьте директорию completions/ в fpath или скопируйте файл:
-cp completions/dari.zsh ~/.zsh/completions/_dari
+dari completions zsh > ~/.zsh/completions/_dari
+# Убедитесь, что директория находится в fpath
+```
+
+### PowerShell
+
+```sh
+dari completions powershell | Out-String | Invoke-Expression
+```
+
+### Elvish
+
+```sh
+dari completions elvish >> ~/.config/elvish/rc.elv
 ```
