@@ -89,9 +89,11 @@ fn run_loop<B: ratatui::backend::Backend>(
                     }
                     KeyCode::Backspace => {
                         state.extract_path.pop();
+                        validate_extract_path(state);
                     }
                     KeyCode::Char(c) => {
                         state.extract_path.push(c);
+                        validate_extract_path(state);
                     }
                     _ => {}
                 }
@@ -407,6 +409,34 @@ fn build_and_cache_preview(state: &mut AppState, entry_idx: usize) {
     state.preview_viewport_height = 0;
 }
 
+/// Validate the currently typed extract path and update `extract_error` accordingly.
+/// Returns `true` when the path is valid (non-empty and the directory exists).
+fn validate_extract_path(state: &mut AppState) -> bool {
+    let locale = state.locale.as_str().to_owned();
+    let trimmed = state.extract_path.trim().to_owned();
+    if trimmed.is_empty() {
+        state.extract_error = Some(
+            rust_i18n::t!("tui.inspect.extract.error_empty", locale = locale.as_str())
+                .into_owned(),
+        );
+        return false;
+    }
+    let p = std::path::Path::new(&trimmed);
+    if !p.exists() {
+        state.extract_error = Some(
+            rust_i18n::t!(
+                "tui.inspect.extract.error_not_found",
+                locale = locale.as_str(),
+                path = trimmed.as_str()
+            )
+            .into_owned(),
+        );
+        return false;
+    }
+    state.extract_error = None;
+    true
+}
+
 /// Open the extract dialog for the currently selected item (file or directory).
 fn open_extract_dialog(state: &mut AppState) {
     let Some(idx) = state.table_state.selected() else {
@@ -422,6 +452,9 @@ fn open_extract_dialog(state: &mut AppState) {
 /// Perform the actual extraction using the path currently typed in the dialog.
 /// On success the dialog is closed; on failure the error is stored in `extract_error`.
 fn do_extract(state: &mut AppState) {
+    if !validate_extract_path(state) {
+        return;
+    }
     let Some(idx) = state.table_state.selected() else {
         return;
     };

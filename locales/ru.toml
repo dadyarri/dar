@@ -172,6 +172,8 @@ bar_label = "x"
 hint_confirm = "извлечь"
 hint_cancel = "отмена"
 error = "Ошибка извлечения: %{error}"
+error_empty = "Путь не может быть пустым"
+error_not_found = "Путь не существует: %{path}"
 
 [tui.inspect.panels]
 tag_search = " Поиск по тегам "

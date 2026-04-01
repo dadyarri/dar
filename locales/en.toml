@@ -171,6 +171,8 @@ bar_label = "x"
 hint_confirm = "extract"
 hint_cancel = "cancel"
 error = "Extraction failed: %{error}"
+error_empty = "Path must not be empty"
+error_not_found = "Path does not exist: %{path}"
 
 [tui.inspect.panels]
 tag_search = " Tag Search "
