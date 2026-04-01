@@ -1,27 +1,5 @@
 # DARI cleanup roadmap
 
-## Step 1. Handle bare file paths in `walker::scan_files`
-
-AGENTS.md explicitly flags this as a known gap: passing a single file path is silently ignored
-because `src/walker.rs` only branches on `absolute_path.is_dir()`. Add an
-`else if absolute_path.is_file()` branch that adds the file directly, so
-`dari create -f out.dar somefile.rs` works as expected.
-
-Files: `src/walker.rs`
-
----
-
-## Step 2. Eliminate `unwrap` / `expect` in non-test code
-
-`src/models/archive.rs` calls `get_unix_timestamp().unwrap()` inside `ArchiveHeader::new()`, and
-`src/commands/inspect.rs` calls `.expect("--file is required")` — both violate the project's own
-rule. Change `ArchiveHeader::new()` to return `Result<Self>`, propagate the error with `?`, and
-replace the `expect` in `inspect.rs` with a proper `eyre::bail!` or `?`.
-
-Files: `src/models/archive.rs`, `src/commands/inspect.rs`, `src/archive_builder.rs` (call site)
-
----
-
 ## Step 3. Localize remaining hard-coded English user-facing strings
 
 Several user-visible strings bypass `t!()`:
@@ -82,18 +60,6 @@ Files: `src/commands/create.rs`, `src/commands/append.rs`, `src/archive_builder.
 
 ---
 
-## Step 12. Address the 4 GiB per-file and per-archive limit
-
-`ArchiveIndexEntry::offset`, `original_size`, and `compressed_size` are all `u32` in
-`src/models/archive.rs`, capping both individual file sizes and the entire data section at 4 GiB.
-Upgrade to `u64`, bump the format version is not required, since the software is not used anywhere, and update all
-read/write sites.
-
-Files: `src/models/archive.rs`, `src/archive_builder.rs`, `src/reader.rs`, `src/extractor.rs`,
-`src/pipeline.rs`, `src/commands/create.rs`, `src/commands/append.rs`
-
----
-
 ## Step 13. Decompose `tui/mod.rs` into focused render sub-modules
 
 At ~1 200 lines, `src/tui/mod.rs` mixes the event loop, state-mutation functions, and all
@@ -105,15 +71,6 @@ Files: `src/tui/mod.rs`, `src/tui/render_list.rs` (new), `src/tui/render_preview
 `src/tui/render_status.rs` (new)
 
 ---
-
-## Step 14. Add `--dry-run` flag to `create` and `append`
-
-Allow users to preview which files would be added and what compression would be applied, without
-writing any output file. Implement by short-circuiting after the parallel prepare phase and
-skipping the serial write/build phase.
-
-Files: `src/cli.rs`, `src/commands/create.rs`, `src/commands/append.rs`,
-`locales/en.toml`, `locales/ru.toml`
 
 ## Step 15. Add extract functionality to the TUI (inspect command)
 
