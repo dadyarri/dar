@@ -262,6 +262,8 @@ about = "Encrypts an existing unencrypted archive"
 file = "The path to the archive file to encrypt"
 encrypt = "Prompt for passphrase interactively"
 encrypt_passphrase = "Encrypt using the provided passphrase argument"
+output = "Save the encrypted archive to this path (default: <basename>.enc.dar)"
+in_place = "Overwrite the original archive in-place"
 
 [cli.encrypt.messages]
 encrypting_archive = "Encrypting archive %{file}"
