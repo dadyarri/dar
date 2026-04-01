@@ -115,7 +115,7 @@ pub fn plural_key(n: usize, prefix: &str, locale: &str) -> String {
 }
 
 /// Cleanup path
-fn sanitize_path(path: &str) -> String {
+pub(crate) fn sanitize_path(path: &str) -> String {
     let mut components = Vec::new();
     let path_obj = PathBuf::from(path);
 

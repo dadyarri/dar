@@ -1,11 +1,5 @@
 # DARI cleanup roadmap
 
-## Step 15. Add extract functionality to the TUI (inspect command)
-
-TUI should be capable of extracting single hovered file or entire directory to chosen path by pressing `x` key. This
-should open small floating window with path input field, by default filled with PWD of current process (ensure this is
-cross-platform between linux/macos and windows)
-
 ## Step 18. Handle path conflicts on `append`
 
 When `dari append` is called and one or more of the new files would produce an archive-relative

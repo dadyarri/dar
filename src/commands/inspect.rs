@@ -61,6 +61,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         meta_search_query: String::new(),
         meta_search_active: false,
         meta_search_error: None,
+        extract_active: false,
+        extract_path: std::env::current_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| String::from(".")),
+        extract_path_resolved: None,
+        extract_error: None,
     };
 
     App::run(app_state)

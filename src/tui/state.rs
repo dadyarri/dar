@@ -63,4 +63,13 @@ pub struct AppState {
     pub meta_search_active: bool,
     /// Parse error from the last metadata search input attempt, if any.
     pub meta_search_error: Option<String>,
+    /// Whether the extract-to-path dialog is currently open.
+    pub extract_active: bool,
+    /// Destination path typed in the extract dialog.
+    pub extract_path: String,
+    /// Resolved absolute version of `extract_path` (set when the user types a relative path
+    /// that exists on disk; `None` when the path is already absolute or is invalid).
+    pub extract_path_resolved: Option<std::path::PathBuf>,
+    /// Error produced by the last extraction attempt (displayed inside the dialog).
+    pub extract_error: Option<String>,
 }

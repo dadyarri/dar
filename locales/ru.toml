@@ -160,9 +160,20 @@ hint_search_keep = "сохранить фильтр"
 hint_search_restore = "восстановить"
 hint_meta_search_keep = "сохранить фильтр"
 hint_meta_search_restore = "сбросить"
+hint_extract = "извлечь"
 col_file = "Файл"
 col_size = "Размер"
 col_compression = "Сжатие"
+
+[tui.inspect.extract]
+title = " Извлечь "
+prompt = "Путь назначения:"
+bar_label = "x"
+hint_confirm = "извлечь"
+hint_cancel = "отмена"
+error = "Ошибка извлечения: %{error}"
+error_empty = "Путь не может быть пустым"
+error_not_found = "Путь не существует: %{path}"
 
 [tui.inspect.panels]
 tag_search = " Поиск по тегам "
