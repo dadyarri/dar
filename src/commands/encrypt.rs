@@ -9,7 +9,7 @@ use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches.get_one::<String>("file").ok_or_else(|| {
@@ -70,6 +70,30 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .parent()
         .unwrap_or_else(|| Path::new("."));
 
+    let in_place = matches.get_flag("in-place");
+    let output_path: PathBuf = if in_place {
+        archive_path.to_path_buf()
+    } else if let Some(output) = matches.get_one::<String>("output") {
+        PathBuf::from(output)
+    } else {
+        // `file_name()` only returns None for paths that end in `..`, which
+        // cannot exist on disk, so the fallback here is unreachable in practice.
+        let file_name = archive_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("archive");
+        let new_name = if let Some(stripped) = file_name.strip_suffix(".dar") {
+            format!("{}.enc.dar", stripped)
+        } else {
+            format!("{}.enc.dar", file_name)
+        };
+        parent.join(new_name)
+    };
+
+    let output_dir = output_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+
     // Extract all entries from the unencrypted archive to a temp directory.
     let temp_extract_dir = tempfile::tempdir().wrap_err(
         t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
@@ -94,7 +118,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     // Note: this re-runs the full pipeline (including compression) on the extracted
     // data. Files are recompressed with the default settings (compress_images: false)
     // since the original pipeline settings are not stored in the archive format.
-    let temp_out = tempfile::NamedTempFile::new_in(parent).wrap_err(
+    let temp_out = tempfile::NamedTempFile::new_in(output_dir).wrap_err(
         t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
     )?;
     let (temp_file, temp_path) = temp_out.keep().wrap_err(
@@ -124,8 +148,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     builder.build()?;
 
-    // Atomically replace the original archive.
-    std::fs::rename(&temp_path, archive_path).wrap_err(
+    // Move the temp file to the output path. Since temp_out was created inside
+    // output_dir (the same directory as output_path), both paths are on the
+    // same filesystem and the rename is effectively atomic.
+    std::fs::rename(&temp_path, &output_path).wrap_err(
         t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
     )?;
 

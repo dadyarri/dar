@@ -286,6 +286,19 @@ where
                         .value_name(passphrase_value)
                         .conflicts_with("encrypt")
                         .help(translate("cli.encrypt.args.encrypt_passphrase")),
+                    Arg::new("output")
+                        .short('o')
+                        .long("output")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .conflicts_with("in-place")
+                        .help(translate("cli.encrypt.args.output")),
+                    Arg::new("in-place")
+                        .short('i')
+                        .long("in-place")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("output")
+                        .help(translate("cli.encrypt.args.in_place")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
