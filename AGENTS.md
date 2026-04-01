@@ -171,16 +171,19 @@ Install `cargo-release` once:
 cargo install cargo-release
 ```
 
+> **Note:** `cargo release` defaults to a **dry-run**. Pass `-x` / `--execute` to actually perform
+> the release.
+
 ### Stable release (on `master`)
 
 ```sh
-cargo release patch   # 5.0.0 → 5.0.1 — bug fixes
-cargo release minor   # 5.0.1 → 5.1.0 — new features
-cargo release major   # 5.1.0 → 6.0.0 — breaking changes
+cargo release patch -x   # 5.0.0 → 5.0.1 — bug fixes
+cargo release minor -x   # 5.0.1 → 5.1.0 — new features
+cargo release major -x   # 5.1.0 → 6.0.0 — breaking changes
 ```
 
 Each command:
-1. Bumps the version in `Cargo.toml` and commits `chore: release vX.Y.Z`.
+1. Bumps the version in `Cargo.toml` and commits `chore: Release`.
 2. Creates an annotated tag `vX.Y.Z`.
 3. Pushes both the commit and the tag.
 4. The `release.yml` workflow triggers on the new tag, verifies `Cargo.toml` matches the tag, and
@@ -189,13 +192,13 @@ Each command:
 ### Pre-release (on any feature/dev branch)
 
 ```sh
-cargo release --pre-release-tag beta patch   # first run:  v5.0.1-beta.1
-cargo release --pre-release-tag beta patch   # second run: v5.0.1-beta.2
+cargo release beta -x   # first run:  5.0.0 → 5.0.1-beta.1
+cargo release beta -x   # second run: 5.0.1-beta.1 → 5.0.1-beta.2
 ```
 
-`cargo release` reads the highest existing `-beta.N` tag for the current base version and
-auto-increments the counter. The `release.yml` workflow detects the `-` in the tag name and marks
-the GitHub release as `prerelease: true`.
+`beta` (also `alpha`, `rc`) is a valid bump level that adds or increments the pre-release suffix.
+The `release.yml` workflow detects the `-` in the tag name and marks the GitHub release as
+`prerelease: true`.
 
 ### How `release.yml` enforces consistency
 
