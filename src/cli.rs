@@ -1,5 +1,6 @@
 use clap::{Arg, ArgAction, Command};
 use clap::{crate_authors, crate_version};
+use clap_complete::Shell;
 
 fn root_help_template<T>(translate: &T) -> String
 where
@@ -285,6 +286,20 @@ where
                         .value_name(passphrase_value)
                         .conflicts_with("encrypt")
                         .help(translate("cli.encrypt.args.encrypt_passphrase")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
+            Command::new("completions")
+                .about(translate("cli.completions.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("shell")
+                        .required(true)
+                        .value_parser(clap::value_parser!(Shell))
+                        .help(translate("cli.completions.args.shell")),
                     Arg::new("help")
                         .short('h')
                         .long("help")

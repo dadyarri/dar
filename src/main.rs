@@ -77,6 +77,9 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("completions", sub_matches)) => {
+            commands::completions::call(sub_matches, &locale)?;
+        }
         _ => unreachable!(),
     }
 
