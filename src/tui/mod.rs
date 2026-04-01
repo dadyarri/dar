@@ -1,6 +1,7 @@
 pub mod icons;
 pub mod meta_search;
 pub mod preview;
+pub mod render_extract;
 pub mod render_list;
 pub mod render_preview;
 pub mod render_status;
@@ -14,6 +15,10 @@ use crate::tui::{
     search::apply_fuzzy_filter,
     state::{AppState, Focus, PreviewMode},
     tree as tui_tree,
+};
+use crate::{
+    extractor::{extract_entries, extract_entry},
+    models::archive::ArchiveIndexEntryWrapper,
 };
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -69,6 +74,27 @@ fn run_loop<B: ratatui::backend::Backend>(
         if let Event::Key(key) = event::read()? {
             // Only react to key-press events; ignore repeat/release.
             if key.kind != KeyEventKind::Press {
+                continue;
+            }
+
+            // ── Extract dialog mode ────────────────────────────────────────
+            if state.extract_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        state.extract_active = false;
+                        state.extract_error = None;
+                    }
+                    KeyCode::Enter => {
+                        do_extract(state);
+                    }
+                    KeyCode::Backspace => {
+                        state.extract_path.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        state.extract_path.push(c);
+                    }
+                    _ => {}
+                }
                 continue;
             }
 
@@ -189,6 +215,11 @@ fn run_loop<B: ratatui::backend::Backend>(
                     state.search_active = false;
                     state.meta_search_active = true;
                     state.meta_search_error = None;
+                }
+
+                // 'x': open the extract-to-path dialog.
+                (KeyCode::Char('x'), _) => {
+                    open_extract_dialog(state);
                 }
 
                 _ => {}
@@ -376,6 +407,75 @@ fn build_and_cache_preview(state: &mut AppState, entry_idx: usize) {
     state.preview_viewport_height = 0;
 }
 
+/// Open the extract dialog for the currently selected item (file or directory).
+fn open_extract_dialog(state: &mut AppState) {
+    let Some(idx) = state.table_state.selected() else {
+        return;
+    };
+    if state.visible.get(idx).is_none() {
+        return;
+    }
+    state.extract_active = true;
+    state.extract_error = None;
+}
+
+/// Perform the actual extraction using the path currently typed in the dialog.
+/// On success the dialog is closed; on failure the error is stored in `extract_error`.
+fn do_extract(state: &mut AppState) {
+    let Some(idx) = state.table_state.selected() else {
+        return;
+    };
+    let Some(flat) = state.visible.get(idx).cloned() else {
+        return;
+    };
+
+    let dest = std::path::Path::new(&state.extract_path);
+    let passphrase = state.passphrase.as_deref();
+    let archive_path = state.archive_path.clone();
+    let locale = state.locale.as_str();
+
+    let result = if flat.is_dir {
+        // Collect every archive entry whose path is under this directory.
+        let prefix = format!("{}/", flat.full_path);
+        let matching: Vec<&ArchiveIndexEntryWrapper> = state
+            .entries
+            .iter()
+            .filter(|e| e.path.starts_with(&prefix))
+            .collect();
+        if matching.is_empty() {
+            Ok(())
+        } else {
+            extract_entries(&archive_path, &matching, &state.entries, dest, passphrase)
+        }
+    } else if let Some(entry_idx) = flat.entry_idx {
+        extract_entry(
+            &archive_path,
+            &state.entries[entry_idx],
+            &state.entries,
+            dest,
+            passphrase,
+        )
+    } else {
+        return;
+    };
+
+    match result {
+        Ok(()) => {
+            state.extract_active = false;
+            state.extract_error = None;
+        }
+        Err(e) => {
+            let msg = rust_i18n::t!(
+                "tui.inspect.extract.error",
+                locale = locale,
+                error = e.to_string().as_str()
+            )
+            .into_owned();
+            state.extract_error = Some(msg);
+        }
+    }
+}
+
 fn scroll_preview_up(state: &mut AppState, lines: u16) {
     state.preview_scroll = state.preview_scroll.saturating_sub(lines);
 }
@@ -441,4 +541,9 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     // ── Status bar ─────────────────────────────────────────────────────────
     render_status::draw_status_bar(frame, status_area, state);
+
+    // ── Extract dialog (floats above everything) ───────────────────────────
+    if state.extract_active {
+        render_extract::render_extract_dialog(frame, state);
+    }
 }

@@ -63,4 +63,10 @@ pub struct AppState {
     pub meta_search_active: bool,
     /// Parse error from the last metadata search input attempt, if any.
     pub meta_search_error: Option<String>,
+    /// Whether the extract-to-path dialog is currently open.
+    pub extract_active: bool,
+    /// Destination path typed in the extract dialog.
+    pub extract_path: String,
+    /// Error produced by the last extraction attempt (displayed inside the dialog).
+    pub extract_error: Option<String>,
 }

@@ -159,9 +159,18 @@ hint_search_keep = "keep filter"
 hint_search_restore = "restore"
 hint_meta_search_keep = "keep filter"
 hint_meta_search_restore = "restore"
+hint_extract = "extract"
 col_file = "File"
 col_size = "Size"
 col_compression = "Compression"
+
+[tui.inspect.extract]
+title = " Extract "
+prompt = "Destination path:"
+bar_label = "x"
+hint_confirm = "extract"
+hint_cancel = "cancel"
+error = "Extraction failed: %{error}"
 
 [tui.inspect.panels]
 tag_search = " Tag Search "

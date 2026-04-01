@@ -7,12 +7,17 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-/// Render the status bar (or active search input box) into `area`.
+/// Render the status bar (or active search / extract input box) into `area`.
 pub(crate) fn draw_status_bar(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
     state: &mut AppState,
 ) {
+    // Extract dialog owns the status bar while it is open.
+    if state.extract_active {
+        crate::tui::render_extract::draw_extract_status_bar(frame, area, state);
+        return;
+    }
     let locale = state.locale.as_str().to_owned();
 
     let total = state.entries.len();
@@ -35,6 +40,7 @@ pub(crate) fn draw_status_bar(
     let scroll_hint = rust_i18n::t!("tui.inspect.hint_scroll", locale = locale);
     let search_hint = rust_i18n::t!("tui.inspect.hint_search", locale = locale);
     let meta_search_hint = rust_i18n::t!("tui.inspect.hint_meta_search", locale = locale);
+    let extract_hint = rust_i18n::t!("tui.inspect.hint_extract", locale = locale);
     let search_type_hint = rust_i18n::t!("tui.inspect.hint_search_type", locale = locale);
     let search_keep_hint = rust_i18n::t!("tui.inspect.hint_search_keep", locale = locale);
     let search_restore_hint = rust_i18n::t!("tui.inspect.hint_search_restore", locale = locale);
@@ -188,6 +194,9 @@ pub(crate) fn draw_status_bar(
                     if !selected_is_binary {
                         hints.push(("c", content_hint.as_ref()));
                     }
+                }
+                if selected_is_file || selected_is_dir {
+                    hints.push(("x", extract_hint.as_ref()));
                 }
                 hints.push(("/", search_hint.as_ref()));
                 hints.push(("s", meta_search_hint.as_ref()));
