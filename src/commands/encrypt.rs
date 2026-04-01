@@ -76,6 +76,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     } else if let Some(output) = matches.get_one::<String>("output") {
         PathBuf::from(output)
     } else {
+        // `file_name()` only returns None for paths that end in `..`, which
+        // cannot exist on disk, so the fallback here is unreachable in practice.
         let file_name = archive_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -146,7 +148,9 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     builder.build()?;
 
-    // Atomically move the temp file to the output path.
+    // Move the temp file to the output path. Since temp_out was created inside
+    // output_dir (the same directory as output_path), both paths are on the
+    // same filesystem and the rename is effectively atomic.
     std::fs::rename(&temp_path, &output_path).wrap_err(
         t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
     )?;
