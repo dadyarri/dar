@@ -7,6 +7,7 @@
   - [append](./commands/append.md)
   - [extract](./commands/extract.md)
   - [inspect](./commands/inspect.md)
+  - [completions](./commands/completions.md)
 - [Структура архива](archive_structure.md)
 - [Алгоритмы сжатия](./compression.md)
 - [Шифрование](./encryption.md)

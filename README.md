@@ -22,7 +22,7 @@ cargo build --release
 # binary is at target/release/dari
 ```
 
-Shell completions (Bash, Fish, Zsh, PowerShell) are written to `completions/` on every build.
+Shell completions (Bash, Fish, Zsh, PowerShell, Elvish) can be generated at runtime using `dari completions <SHELL>`.
 
 ## Commands
 
@@ -71,7 +71,17 @@ dari inspect -f out.dar --encrypt-passphrase "secret"
 
 Keybindings: `↑/↓` or `j/k` navigate · `Enter/Space` toggle dirs · `m` metadata · `c` content · `Esc` close preview · `/` fuzzy search · `s` tag search · `q` quit
 
-### `encrypt` — encrypt an existing unencrypted archive
+### `completions` — generate shell completions
+
+```sh
+dari completions bash    # Bash
+dari completions zsh     # Zsh
+dari completions fish    # Fish
+dari completions powershell  # PowerShell
+dari completions elvish  # Elvish
+```
+
+The completion script is written to stdout; redirect it or pipe it to your shell's completion setup.
 
 ```sh
 dari encrypt -f out.dar --encrypt

@@ -1,5 +1,6 @@
 use clap::{Arg, ArgAction, Command};
 use clap::{crate_authors, crate_version};
+use clap_complete::Shell;
 
 fn root_help_template<T>(translate: &T) -> String
 where
@@ -304,6 +305,20 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("completions")
+                .about(translate("cli.completions.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("shell")
+                        .required(true)
+                        .value_parser(clap::value_parser!(Shell))
+                        .help(translate("cli.completions.args.shell")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
         ])
 }
 
@@ -388,5 +403,31 @@ mod tests {
         let commands = rust_i18n::t!("cli.common.headings.commands", locale = "ru").to_string();
         assert!(help.contains(&usage));
         assert!(help.contains(&commands));
+    }
+
+    #[test]
+    fn test_completions_bash_is_accepted() {
+        use clap_complete::Shell;
+
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec!["dari", "completions", "bash"])
+                .unwrap();
+
+        let completions = matches.subcommand_matches("completions").unwrap();
+        assert_eq!(
+            completions.get_one::<Shell>("shell").copied(),
+            Some(Shell::Bash)
+        );
+    }
+
+    #[test]
+    fn test_completions_invalid_shell_produces_error() {
+        let result =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec!["dari", "completions", "invalidshell"]);
+
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidValue);
     }
 }

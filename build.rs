@@ -1,5 +1,3 @@
-use clap::ValueEnum;
-use clap_complete::{generate_to, Shell};
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::fs;
@@ -7,8 +5,6 @@ use std::path::Path;
 use toml::{Table, Value};
 
 rust_i18n::i18n!("locales", fallback = "en");
-
-include!("src/cli.rs");
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<String>) {
     let entries = fs::read_dir(dir)
@@ -273,9 +269,4 @@ fn main() {
         &source_strings,
         &plural_prefixes,
     );
-
-    let mut app = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string());
-    for &shell in Shell::value_variants() {
-        generate_to(shell, &mut app, "dari", "completions/").ok();
-    }
 }

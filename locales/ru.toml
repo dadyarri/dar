@@ -275,3 +275,12 @@ open_failed = "Не удалось открыть архив %{file}"
 archive_missing = "Архив %{file} не существует"
 already_encrypted = "Архив %{file} уже зашифрован"
 passphrase_required = "Для шифрования необходима парольная фраза (используйте --encrypt или --encrypt-passphrase)"
+
+[cli.completions]
+about = "Генерирует скрипт автодополнения для оболочки и выводит его в stdout"
+
+[cli.completions.args]
+shell = "Оболочка для генерации автодополнения (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Не удалось сгенерировать скрипт автодополнения"

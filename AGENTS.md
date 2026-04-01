@@ -28,8 +28,8 @@ CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
                                             → tui/state.rs (AppState, Focus, PreviewMode)
 ```
 
-- **`src/cli.rs`** — also `include!`'d by `build.rs` to generate shell completions at build time; any CLI change must
-  stay compilable in both contexts.
+- **`src/cli.rs`** — defines the full CLI with `build_cli_with_translator`; any CLI change must also have
+  corresponding i18n keys added to `locales/en.toml` and `locales/ru.toml`.
 - **`src/commands/append.rs`** — opens an existing `.dar` with read/write access, parses header/footer/index to recover
   entries, ensures encryption mode consistency (encrypted archives demand the original passphrase; unencrypted archives
   reject new encryption), truncates back to `index_offset`, seeds `ArchiveBuilder::import_existing_entries`, then reruns
@@ -39,6 +39,8 @@ CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
   or `extractor::extract_entries` (multiple); supports `--encrypt-passphrase` for encrypted archives.
 - **`src/commands/inspect.rs`** — parses the archive via `reader::load_archive`, builds the directory tree, and launches
   `App::run(AppState)` for the ratatui TUI. Accepts `--encrypt-passphrase` to enable preview of encrypted entries.
+- **`src/commands/completions.rs`** — implements `dari completions <SHELL>`; calls `build_cli_with_translator` and
+  `clap_complete::generate` to write the shell completion script for the requested shell to stdout.
 - **`src/pipeline.rs`** — active processing stage used by `ArchiveBuilder`: BLAKE3 checksum, extension-based compressor
   selection, optional ChaCha20-Poly1305 encryption, and `extra` metadata population (image/audio tags + encryption
   metadata).
@@ -137,7 +139,7 @@ code.
 ## Developer Workflows
 
 ```sh
-cargo build                          # build; also generates shell completions into completions/
+cargo build                          # build
 cargo test                           # run all tests (unit tests are inline in the same file)
 cargo run -- create -f out.dar src/  # create archive from src/ directory
 cargo run -- create -f out.dar -o src/  # overwrite if out.dar exists
@@ -153,9 +155,10 @@ cargo run -- extract -f out.dar                                # extract all fil
 cargo run -- extract -f out.dar -d /tmp/out                    # extract to a specific output directory
 cargo run -- extract -f out.dar src/main.rs src/lib.rs         # extract specific archive-relative paths
 cargo run -- extract -f out.dar --encrypt-passphrase "secret"  # extract from an encrypted archive
+cargo run -- completions bash                                  # print Bash completion script to stdout
+cargo run -- completions zsh                                   # print Zsh completion script to stdout
+cargo run -- completions fish                                  # print Fish completion script to stdout
 ```
-
-Shell completions are written to `completions/` by `build.rs` at build time. That directory is not committed.
 
 Program executions should be run in /tmp/test_dari. Make sure the directory exists.
 
@@ -163,101 +166,6 @@ Program executions should be run in /tmp/test_dari. Make sure the directory exis
 
 **Do NOT run `codeql_checker`** — it always times out in this environment and never completes
 successfully.
-
-## Release Process
-
-Releases are driven by `cargo-release` locally; the CI workflow fires only when a version tag is
-pushed. **Never push a tag manually** — always go through `cargo release` to keep the tag and
-`Cargo.toml` version in sync.
-
-Install `cargo-release` once:
-
-```sh
-cargo install cargo-release
-```
-
-> **Note:** `cargo release` defaults to a **dry-run**. Pass `-x` / `--execute` to actually perform
-> the release.
-
-### Environment constraints
-
-The sandbox environment has two constraints that require extra flags:
-
-1. **GPG signing is broken** — disable it before running `cargo release`:
-   ```sh
-   git config --local commit.gpgsign false
-   git config --local tag.gpgSign false
-   ```
-
-2. **`cargo release` cannot push or publish** — the package lacks `license`/`repository` fields
-   required by crates.io, and `git push` is not available directly. Always pass:
-   ```sh
-   --no-push --no-publish
-   ```
-   After `cargo release` exits, `Cargo.toml` and `Cargo.lock` will have the new version but will be
-   left as uncommitted changes. Commit them and create the annotated tag manually, then push via
-   `report_progress`:
-   ```sh
-   git add Cargo.toml Cargo.lock
-   git commit -m "chore: Release X.Y.Z(-pre.N)"
-   git tag -a vX.Y.Z(-pre.N) -m "Release X.Y.Z(-pre.N)"
-   # then call report_progress to push the branch + tag
-   ```
-
-### Stable release (on `master`)
-
-```sh
-git config --local commit.gpgsign false && git config --local tag.gpgSign false
-cargo release patch --execute --no-push --no-publish   # 5.0.0 → 5.0.1 — bug fixes
-cargo release minor --execute --no-push --no-publish   # 5.0.1 → 5.1.0 — new features
-cargo release major --execute --no-push --no-publish   # 5.1.0 → 6.0.0 — breaking changes
-# then manually commit + tag + report_progress (see above)
-```
-
-Each command:
-1. Bumps the version in `Cargo.toml` and `Cargo.lock` (leaves them uncommitted).
-2. The CI `release.yml` workflow triggers on the pushed tag, verifies `Cargo.toml` matches the tag,
-   and publishes a **stable** GitHub release (no `-` in the tag name → `prerelease: false`).
-
-### Pre-release (on any feature/dev branch)
-
-```sh
-git config --local commit.gpgsign false && git config --local tag.gpgSign false
-cargo release beta --execute --no-push --no-publish   # first run:  5.0.0 → 5.0.1-beta.1
-cargo release beta --execute --no-push --no-publish   # second run: 5.0.1-beta.1 → 5.0.1-beta.2
-# then manually commit + tag + report_progress (see above)
-```
-
-`beta` (also `alpha`, `rc`) is a valid bump level that adds or increments the pre-release suffix.
-The `release.yml` workflow detects the `-` in the tag name and marks the GitHub release as
-`prerelease: true`.
-
-### How `release.yml` enforces consistency
-
-The workflow now triggers on `push: tags: 'v[0-9]*'` (tag-push, not branch-push). A guard step
-aborts the workflow with a clear error when the pushed tag does not match the `version` field in
-`Cargo.toml`, preventing accidentally published releases from manual tags.
-
-### Automatic release after approved reviews
-
-When a PR has received all required approvals and is ready to be merged, **automatically start the
-release process** without waiting for an explicit instruction. The steps are:
-
-1. Determine the appropriate bump level from the PR content:
-   - Bug fixes → `patch`
-   - New features → `minor`
-   - Breaking changes → `major`
-   - Pre-release on a feature/dev branch → `beta` (or `alpha`/`rc`)
-2. Merge the PR into the target branch first, then switch to that branch.
-3. Run the full release sequence (see the relevant stable/pre-release section above):
-   ```sh
-   git config --local commit.gpgsign false && git config --local tag.gpgSign false
-   cargo release <level> --execute --no-push --no-publish
-   git add Cargo.toml Cargo.lock
-   git commit -m "chore: Release X.Y.Z(-pre.N)"
-   git tag -a vX.Y.Z(-pre.N) -m "Release X.Y.Z(-pre.N)"
-   # then call report_progress to push the branch + tag
-   ```
 
 ## Adding a New Command
 

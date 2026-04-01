@@ -77,6 +77,15 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("completions", sub_matches)) => {
+            commands::completions::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.completions.errors.completions_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
+            )?;
+        }
         _ => unreachable!(),
     }
 

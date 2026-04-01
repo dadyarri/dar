@@ -275,3 +275,12 @@ open_failed = "Failed to open archive %{file}"
 archive_missing = "Archive file %{file} does not exist"
 already_encrypted = "Archive %{file} is already encrypted"
 passphrase_required = "A passphrase is required for encryption (use --encrypt or --encrypt-passphrase)"
+
+[cli.completions]
+about = "Generates shell completion script and writes it to stdout"
+
+[cli.completions.args]
+shell = "Shell to generate completions for (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Failed to generate shell completions"
