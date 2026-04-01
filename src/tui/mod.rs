@@ -217,8 +217,8 @@ fn run_loop<B: ratatui::backend::Backend>(
                     state.meta_search_error = None;
                 }
 
-                // 'x': open the extract-to-path dialog.
-                (KeyCode::Char('x'), _) => {
+                // 'x': open the extract-to-path dialog (only when no preview is open).
+                (KeyCode::Char('x'), _) if state.preview_mode == PreviewMode::Closed => {
                     open_extract_dialog(state);
                 }
 
