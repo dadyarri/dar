@@ -28,16 +28,6 @@ Files: `src/commands/append.rs`, `src/extractor.rs`
 
 ---
 
-## Step 6. Parallelise file preparation in `append`
-
-`src/commands/append.rs` uses a serial `builder.add_file()` loop, while `src/commands/create.rs`
-uses `rayon::par_iter` + `prepare_file_from_disk` / `commit_prepared`. Apply the same
-prepare/commit split to `append` so large appends also benefit from parallel I/O and compression.
-
-Files: `src/commands/append.rs`, `src/archive_builder.rs`
-
----
-
 ## Step 10. Add a non-interactive `list` subcommand
 
 Add a scriptable `dari list -f archive.dar` (alias `ls`) that prints archive contents — path,
