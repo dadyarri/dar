@@ -6,7 +6,7 @@ use crate::tui::{
     tree,
 };
 use clap::ArgMatches;
-use eyre::{Context, Result};
+use eyre::{Context, Result, eyre};
 use ratatui::widgets::TableState;
 use std::fs::File;
 use std::path::PathBuf;
@@ -14,7 +14,12 @@ use std::path::PathBuf;
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file_path = matches
         .get_one::<String>("file")
-        .expect("--file is required");
+        .ok_or_else(|| {
+            eyre!(rust_i18n::t!(
+                "cli.common.errors.file_required",
+                locale = locale.as_str()
+            ))
+        })?;
     let passphrase = matches.get_one::<String>("encrypt-passphrase").cloned();
 
     let mut file = File::open(file_path).wrap_err_with(|| {

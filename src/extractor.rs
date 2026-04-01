@@ -79,7 +79,7 @@ fn extract_one(
             ))
         })?
     } else {
-        entry.entry.offset as u64
+        entry.entry.offset
     };
 
     // Seek to the data block and read all compressed bytes.
@@ -145,7 +145,7 @@ pub fn resolve_primary_offset(
     all_entries
         .iter()
         .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & INDEX_FLAG_LINKED_DATA) == 0)
-        .map(|e| e.entry.offset as u64)
+        .map(|e| e.entry.offset)
 }
 
 /// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
@@ -161,7 +161,7 @@ pub fn read_raw_entry_bytes(
     let offset = if entry.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0 {
         resolve_primary_offset(&entry.entry.checksum, all_entries)?
     } else {
-        entry.entry.offset as u64
+        entry.entry.offset
     };
     let mut file = File::open(archive_path).ok()?;
     file.seek(SeekFrom::Start(offset)).ok()?;

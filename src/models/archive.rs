@@ -1,6 +1,6 @@
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
-use eyre::{Error, eyre};
+use eyre::{Error, Result, eyre};
 use rust_i18n::t;
 use std::io::Write;
 
@@ -16,12 +16,12 @@ unsafe impl Pod for ArchiveHeader {}
 unsafe impl Zeroable for ArchiveHeader {}
 
 impl ArchiveHeader {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
             signature: *b"DARI",
             version: 5,
-            timestamp: get_unix_timestamp().unwrap(),
-        }
+            timestamp: get_unix_timestamp()?,
+        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
@@ -110,7 +110,7 @@ impl CompressionMethod {
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
 pub struct ArchiveIndexEntry {
-    pub offset: u32,
+    pub offset: u64,
     pub bitflags: u16,
     pub compression_method: CompressionMethod,
     pub modification_timestamp: u64,
@@ -118,8 +118,8 @@ pub struct ArchiveIndexEntry {
     pub gid: u32,
     pub perm: u16,
     pub checksum: [u8; 32],
-    pub original_size: u32,
-    pub compressed_size: u32,
+    pub original_size: u64,
+    pub compressed_size: u64,
     pub path_length: u32,
     pub extra_length: u32,
 }

@@ -34,8 +34,8 @@ pub struct PipelineFileData {
     pub compressed_content: Option<Vec<u8>>,
     pub compression_method: CompressionMethod,
     pub checksum: [u8; 32],
-    pub original_size: u32,
-    pub compressed_size: u32,
+    pub original_size: u64,
+    pub compressed_size: u64,
     pub bitflags: u16,
     pub extra: String,
     pub encryption_nonce_hex: Option<String>,
@@ -44,7 +44,7 @@ pub struct PipelineFileData {
 
 impl PipelineFileData {
     pub fn new(original_content: Vec<u8>, checksum: [u8; 32]) -> Self {
-        let original_size = original_content.len() as u32;
+        let original_size = original_content.len() as u64;
         Self {
             original_content,
             compressed_content: None,
@@ -131,7 +131,7 @@ impl CompressionPipeline {
             return Ok(());
         }
 
-        file_data.compressed_size = outcome.bytes_written as u32;
+        file_data.compressed_size = outcome.bytes_written as u64;
         file_data.compressed_content = Some(output);
         Ok(())
     }
@@ -156,7 +156,7 @@ impl CompressionPipeline {
             cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
 
         encrypted.extend_from_slice(tag.as_slice());
-        file_data.compressed_size = encrypted.len() as u32;
+        file_data.compressed_size = encrypted.len() as u64;
         file_data.compressed_content = Some(encrypted);
         file_data.bitflags |= INDEX_FLAG_ENCRYPTED_DATA;
         file_data.encryption_nonce_hex = Some(hex_encode(&nonce));
@@ -433,7 +433,7 @@ mod tests {
         let result = pipeline
             .process_file(Path::new("note.txt"), data.clone())
             .unwrap();
-        assert_eq!(result.original_size, data.len() as u32);
+        assert_eq!(result.original_size, data.len() as u64);
     }
 
     #[test]
@@ -446,10 +446,10 @@ mod tests {
             .unwrap();
         let compressed = result.compressed_content.as_ref().unwrap();
         assert!(
-            (compressed.len() as u32) < result.original_size,
+            (compressed.len() as u64) < result.original_size,
             "Compressed size should be smaller than original for repetitive data"
         );
-        assert_eq!(result.compressed_size, compressed.len() as u32);
+        assert_eq!(result.compressed_size, compressed.len() as u64);
     }
 
     #[test]

@@ -48,6 +48,16 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
                     });
                 }
             }
+        } else if absolute_path.is_file() {
+            let archive_path = if let Some(name) = absolute_path.file_name() {
+                name.to_string_lossy().into_owned()
+            } else {
+                absolute_path.to_string_lossy().into_owned()
+            };
+            files.push(ScannedFile {
+                source_path: absolute_path,
+                archive_path,
+            });
         }
     }
 
@@ -91,8 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_file_path_is_not_added() {
-        // Known gap: bare file paths are silently ignored; only directories are walked.
+    fn test_single_file_path_is_added() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("only.txt");
         fs::write(&file_path, b"data").unwrap();
@@ -100,10 +109,8 @@ mod tests {
         let path_str = file_path.to_str().unwrap().to_string();
         let files = scan_with_args(&[&path_str]);
 
-        assert!(
-            files.is_empty(),
-            "scan_files should not add bare file paths (known gap)"
-        );
+        assert_eq!(files.len(), 1, "scan_files should add a bare file path");
+        assert_eq!(files[0].archive_path, "only.txt");
     }
 
     #[test]

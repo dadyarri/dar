@@ -1,12 +1,11 @@
-use crate::archive_builder::{ArchiveBuilder, prepare_file_from_disk};
+use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
-use crate::pipeline::{CompressionPipeline, PipelineConfig};
-use super::shared::print_verbose_outcome;
+use crate::pipeline::PipelineConfig;
+use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
 use crate::walker::scan_files;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
-use rayon::prelude::*;
 use rust_i18n::t;
 use std::fs;
 use std::fs::File;
@@ -23,6 +22,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let verbose = matches.get_flag("verbose");
     let overwrite = matches.get_flag("overwrite");
+    let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
     let content = matches.get_many::<String>("content").ok_or_else(|| {
@@ -31,6 +31,37 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             locale = locale.as_str()
         ))
     })?;
+
+    let config = PipelineConfig {
+        compress_images,
+        encryption_passphrase,
+    };
+
+    // Collect all files first so we can process them in parallel.
+    let file_entries = scan_files(content, locale)?;
+
+    // ── Parallel phase: read + checksum + compress ──────────────────────────
+    let prepared = prepare_files_parallel(&file_entries, &config)?;
+
+    // ── Dry-run short-circuit ────────────────────────────────────────────────
+    if dry_run {
+        println!(
+            "{}",
+            t!(
+                "cli.create.messages.dry_run_header",
+                locale = locale.as_str(),
+                file = file
+            )
+        );
+        for p in &prepared {
+            print_dry_run_prepared(p);
+        }
+        println!(
+            "{}",
+            t!("cli.create.messages.dry_run_footer", locale = locale.as_str())
+        );
+        return Ok(());
+    }
 
     if Path::new(file).exists() && !overwrite {
         return Err(eyre!(t!(
@@ -54,24 +85,6 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             file = file
         )
     );
-
-    // Collect all files first so we can process them in parallel.
-    let file_entries = scan_files(content, locale)?;
-
-    let config = PipelineConfig {
-        compress_images,
-        encryption_passphrase,
-    };
-
-    // Build a shared pipeline used only for the parallel read+compress phase.
-    // `CompressionPipeline` is Sync, so `&pipeline` is safe to share across threads.
-    let pipeline = CompressionPipeline::new(config.clone());
-
-    // ── Parallel phase: read + checksum + compress ──────────────────────────
-    let prepared: Vec<_> = file_entries
-        .par_iter()
-        .map(|entry| prepare_file_from_disk(&pipeline, &entry.source_path, &entry.archive_path))
-        .collect::<Result<_>>()?;
 
     // ── Serial phase: dedup-check + write to archive ─────────────────────────
     let file_handle = File::create(file).wrap_err(

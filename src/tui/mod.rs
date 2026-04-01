@@ -1149,9 +1149,9 @@ fn count_rendered_lines(lines: &[ratatui::text::Line], viewport_width: u16) -> u
         .fold(0u16, |acc, n| acc.saturating_add(n))
 }
 
-fn human_size(bytes: u32) -> String {
-    const KB: u32 = 1024;
-    const MB: u32 = 1024 * 1024;
+fn human_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
     if bytes >= MB {
         format!("{:.1} MB", bytes as f64 / MB as f64)
     } else if bytes >= KB {
@@ -1161,7 +1161,7 @@ fn human_size(bytes: u32) -> String {
     }
 }
 
-fn ratio_label(compressed: u32, original: u32) -> String {
+fn ratio_label(compressed: u64, original: u64) -> String {
     if original == 0 {
         return String::from("—");
     }

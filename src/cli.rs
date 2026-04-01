@@ -109,6 +109,10 @@ where
                         .long("verbose")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.common.args.verbose")),
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.create.args.dry_run")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)
@@ -153,6 +157,10 @@ where
                         .long("verbose")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.common.args.verbose")),
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.append.args.dry_run")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)

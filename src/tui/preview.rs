@@ -40,9 +40,9 @@ const TEXT_PREVIEW_LIMIT: usize = 1024 * 1024; // 1 MiB
 /// Display-ready metadata extracted from an archive index entry.
 pub struct EntryMetadata {
     pub compression_method: String,
-    pub original_size: u32,
+    pub original_size: u64,
     /// Stored/compressed size; 0 means the entry was stored uncompressed.
-    pub compressed_size: u32,
+    pub compressed_size: u64,
     /// Full 64-char lowercase hex of the BLAKE3 checksum.
     pub checksum_hex: String,
     /// Non-encryption tags parsed from the `extra` field: (display_name, value).
