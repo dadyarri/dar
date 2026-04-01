@@ -188,3 +188,45 @@ data_too_short = "Encrypted data is too short to contain a valid authentication 
 decrypt_invalid = "Decryption failed: passphrase is incorrect or data is corrupted"
 
 
+
+[cli.list]
+about = "Lists the contents of an archive"
+
+[cli.list.args]
+file = "The path to the archive file"
+json = "Output in JSON format"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+
+[cli.list.columns]
+path = "Path"
+original_size = "Orig.Size"
+stored_size = "Stored"
+method = "Method"
+checksum = "Checksum"
+
+[cli.list.messages]
+header = "Contents of %{file}:"
+
+[cli.list.errors]
+list_failed = "Failed to list archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+
+[cli.encrypt]
+about = "Encrypts an existing unencrypted archive"
+
+[cli.encrypt.args]
+file = "The path to the archive file to encrypt"
+encrypt = "Prompt for passphrase interactively"
+encrypt_passphrase = "Encrypt using the provided passphrase argument"
+
+[cli.encrypt.messages]
+encrypting_archive = "Encrypting archive %{file}"
+done = "Archive encrypted successfully"
+
+[cli.encrypt.errors]
+encrypt_failed = "Failed to encrypt archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+already_encrypted = "Archive %{file} is already encrypted"
+passphrase_required = "A passphrase is required for encryption (use --encrypt or --encrypt-passphrase)"

@@ -62,6 +62,21 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("list", sub_matches)) => {
+            commands::list::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.list.errors.list_failed", locale = locale.as_str())
+                    .to_string(),
+            )?;
+        }
+        Some(("encrypt", sub_matches)) => {
+            commands::encrypt::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.encrypt.errors.encrypt_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
+            )?;
+        }
         _ => unreachable!(),
     }
 

@@ -231,6 +231,65 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("list")
+                .short_flag('l')
+                .alias("ls")
+                .about(translate("cli.list.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.list.args.file")),
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.list.args.json")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .help(translate("cli.list.args.encrypt_passphrase")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
+            Command::new("encrypt")
+                .short_flag('e')
+                .about(translate("cli.encrypt.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.encrypt.args.file")),
+                    Arg::new("encrypt")
+                        .long("encrypt")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("encrypt-passphrase")
+                        .help(translate("cli.encrypt.args.encrypt")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .conflicts_with("encrypt")
+                        .help(translate("cli.encrypt.args.encrypt_passphrase")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
         ])
 }
 

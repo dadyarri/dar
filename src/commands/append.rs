@@ -1,12 +1,11 @@
 use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
+use crate::extractor::try_decrypt_bytes;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
 use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_verbose_outcome};
-use chacha20poly1305::aead::{AeadInPlace, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
@@ -181,13 +180,6 @@ fn verify_passphrase_matches(
     file_path: &str,
     locale: &Locale,
 ) -> Result<()> {
-    if probe.size < 16 {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_encryption_probe_missing",
-            locale = locale.as_str()
-        )));
-    }
-
     file.seek(SeekFrom::Start(probe.offset)).wrap_err(
         t!(
             "cli.append.errors.append_seek_failed",
@@ -207,35 +199,12 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    if data.len() < 16 {
-        return Err(eyre!(t!(
-            "cli.append.errors.append_encryption_probe_missing",
+    try_decrypt_bytes(&data, &probe.checksum, passphrase).ok_or_else(|| {
+        eyre!(t!(
+            "cli.append.errors.append_passphrase_invalid",
             locale = locale.as_str()
-        )));
-    }
-
-    let tag_bytes: Vec<u8> = data[data.len() - 16..].to_vec();
-    data.truncate(data.len() - 16);
-    let mut ciphertext = data;
-
-    let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&probe.checksum[..12]);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
-
-    cipher
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&nonce),
-            b"",
-            &mut ciphertext,
-            Tag::from_slice(&tag_bytes),
-        )
-        .map_err(|_| {
-            eyre!(t!(
-                "cli.append.errors.append_passphrase_invalid",
-                locale = locale.as_str()
-            ))
-        })?;
+        ))
+    })?;
 
     Ok(())
 }

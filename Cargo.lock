@@ -494,6 +494,7 @@ dependencies = [
  "regex",
  "rpassword",
  "rust-i18n",
+ "serde_json",
  "syntect",
  "sys-locale",
  "tempfile",
