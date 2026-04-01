@@ -161,6 +161,13 @@ where
                         .long("dry-run")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.append.args.dry_run")),
+                    Arg::new("on-conflict")
+                        .long("on-conflict")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .default_value("error")
+                        .value_parser(["error", "rename", "overwrite"])
+                        .help(translate("cli.append.args.on_conflict")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)
