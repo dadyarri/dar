@@ -195,7 +195,6 @@ about = "Lists the contents of an archive"
 [cli.list.args]
 file = "The path to the archive file"
 json = "Output in JSON format"
-encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
 
 [cli.list.columns]
 path = "Path"
