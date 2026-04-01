@@ -6,8 +6,6 @@ TUI should be capable of extracting single hovered file or entire directory to c
 should open small floating window with path input field, by default filled with PWD of current process (ensure this is
 cross-platform between linux/macos and windows)
 
---
-
 ## Step 18. Handle path conflicts on `append`
 
 When `dari append` is called and one or more of the new files would produce an archive-relative
@@ -27,3 +25,13 @@ be under `rename` mode.
 
 Files: `src/cli.rs`, `src/commands/append.rs`, `src/archive_builder.rs`,
 `locales/en.toml`, `locales/ru.toml`
+
+## Step 19. Move generation of completions to separate subcommand
+
+Introduce `dari completions <SHELL>` subcommand, that will write completion script to stdout. Remove this logic from `build.rs`
+
+## Step 20. Encrypt command improvments
+
+1. Change logic to save file from in-place by default to `<basename>.enc.dar`
+2. Add `-o` argument to specify custom filename to save encrypted archive as
+3. Add `-i` argument to save in-place
