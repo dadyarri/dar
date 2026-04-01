@@ -5,6 +5,7 @@ use crate::walker::ScannedFile;
 use eyre::Result;
 use rayon::prelude::*;
 use rust_i18n::t;
+use std::borrow::Cow;
 
 /// Prepare all files in parallel: read + checksum + compress.
 ///
@@ -36,22 +37,29 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn compression_method_label(method: CompressionMethod, locale: &str) -> String {
+pub fn compression_method_label(method: CompressionMethod, locale: &str) -> Cow<'static, str> {
     match method {
-        CompressionMethod::None => t!("cli.common.methods.stored", locale = locale).into_owned(),
-        CompressionMethod::Brotli => t!("cli.common.methods.brotli", locale = locale).into_owned(),
-        CompressionMethod::Zstandard => t!("cli.common.methods.zstd", locale = locale).into_owned(),
-        CompressionMethod::Lzma => t!("cli.common.methods.lzma", locale = locale).into_owned(),
-        CompressionMethod::LeptonJpeg => t!("cli.common.methods.lepton", locale = locale).into_owned(),
+        CompressionMethod::None => t!("cli.common.methods.stored", locale = locale),
+        CompressionMethod::Brotli => t!("cli.common.methods.brotli", locale = locale),
+        CompressionMethod::Zstandard => t!("cli.common.methods.zstd", locale = locale),
+        CompressionMethod::Lzma => t!("cli.common.methods.lzma", locale = locale),
+        CompressionMethod::LeptonJpeg => t!("cli.common.methods.lepton", locale = locale),
+    }
+}
+
+/// Compute the stored-vs-original ratio as a formatted percentage string.
+///
+/// Returns `"100.0"` when `total_original` is zero to avoid division by zero.
+pub fn compute_ratio(total_original: u64, total_stored: u64) -> String {
+    if total_original > 0 {
+        format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)
+    } else {
+        "100.0".to_string()
     }
 }
 
 pub fn print_summary(count: usize, total_original: u64, total_stored: u64, elapsed_secs: f64, locale: &str) {
-    let ratio = if total_original > 0 {
-        format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)
-    } else {
-        "100.0".to_string()
-    };
+    let ratio = compute_ratio(total_original, total_stored);
     let elapsed_str = format!("{:.2}s", elapsed_secs);
     println!(
         "{}",
@@ -129,5 +137,88 @@ pub fn print_dry_run_prepared(prepared: &PreparedFile, locale: &str) {
                 ratio,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_ratio, format_size};
+    use crate::archive_builder::FileAddOutcome;
+    use crate::models::archive::CompressionMethod;
+
+    #[test]
+    fn test_compute_ratio_compressed() {
+        assert_eq!(compute_ratio(1_000, 500), "50.0");
+    }
+
+    #[test]
+    fn test_compute_ratio_no_compression() {
+        assert_eq!(compute_ratio(1_000, 1_000), "100.0");
+    }
+
+    #[test]
+    fn test_compute_ratio_zero_original() {
+        assert_eq!(compute_ratio(0, 0), "100.0");
+    }
+
+    #[test]
+    fn test_dedup_excluded_from_total_stored() {
+        let outcomes = [
+            FileAddOutcome {
+                archive_path: "a.txt".to_string(),
+                original_size: 1_000,
+                stored_size: 400,
+                compression_method: CompressionMethod::Zstandard,
+                is_dedup: false,
+            },
+            FileAddOutcome {
+                archive_path: "b.txt".to_string(),
+                original_size: 800,
+                stored_size: 800,
+                compression_method: CompressionMethod::None,
+                is_dedup: true,
+            },
+        ];
+
+        let mut count = 0usize;
+        let mut total_original = 0u64;
+        let mut total_stored = 0u64;
+        for o in &outcomes {
+            count += 1;
+            total_original += o.original_size;
+            if !o.is_dedup {
+                total_stored += o.stored_size;
+            }
+        }
+
+        assert_eq!(count, 2);
+        assert_eq!(total_original, 1_800);
+        assert_eq!(total_stored, 400, "dedup entry must not contribute to total_stored");
+        assert_eq!(compute_ratio(total_original, total_stored), "22.2");
+    }
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(512), "512 B");
+    }
+
+    #[test]
+    fn test_format_size_kilobytes() {
+        assert_eq!(format_size(2_048), "2.00 KB");
+    }
+
+    #[test]
+    fn test_format_size_megabytes() {
+        assert_eq!(format_size(1_048_576), "1.00 MB");
+    }
+
+    #[test]
+    fn test_compression_method_label_english() {
+        use super::compression_method_label;
+        assert_eq!(compression_method_label(CompressionMethod::None, "en"), "stored");
+        assert_eq!(compression_method_label(CompressionMethod::Brotli, "en"), "brotli");
+        assert_eq!(compression_method_label(CompressionMethod::Zstandard, "en"), "zstd");
+        assert_eq!(compression_method_label(CompressionMethod::Lzma, "en"), "lzma");
+        assert_eq!(compression_method_label(CompressionMethod::LeptonJpeg, "en"), "lepton");
     }
 }
