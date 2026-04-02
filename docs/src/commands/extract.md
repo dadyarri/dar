@@ -1,54 +1,56 @@
-# Команда extract
+# extract
 
-Извлекает файлы из архива `.dar` в указанную директорию.
+Extracts files from a `.dar` archive to a specified directory.
 
-## Синтаксис
+## Synopsis
 
 ```
-dari extract -f <файл> [опции] [пути...]
-dari -x -f <файл> [опции] [пути...]
+dari extract -f <file> [options] [paths...]
+dari -x -f <file> [options] [paths...]
 ```
 
-## Аргументы
+## Arguments
 
-| Аргумент | Описание                                                                |
-|----------|-------------------------------------------------------------------------|
-| `пути`   | Необязательный список путей внутри архива для избирательного извлечения |
+| Argument | Description                                                              |
+|----------|--------------------------------------------------------------------------|
+| `paths`  | Optional list of archive-relative paths to extract selectively           |
 
-Если пути не указаны, извлекаются все файлы из архива.
+If no paths are given, all files in the archive are extracted.
 
-## Опции
+## Options
 
-| Флаг                                | Описание                                                                  |
-|-------------------------------------|---------------------------------------------------------------------------|
-| `-f`, `--file <файл>`               | Путь к архиву (обязательно)                                               |
-| `-d`, `--output-dir <директория>`   | Директория назначения (по умолчанию — текущая директория)                 |
-| `--encrypt-passphrase <PASSPHRASE>` | Парольная фраза для расшифровки зашифрованных данных                      |
-| `-h`, `--help`                      | Показать справку                                                          |
+| Flag                                | Description                                                        |
+|-------------------------------------|--------------------------------------------------------------------|
+| `-f`, `--file <file>`               | Path to the archive (required)                                     |
+| `-d`, `--output-dir <directory>`    | Destination directory (default: current directory)                 |
+| `--encrypt-passphrase <PASSPHRASE>` | Passphrase for decrypting encrypted entries                        |
+| `-h`, `--help`                      | Show help                                                          |
 
-## Поведение
+## Behaviour
 
-- Пути к директориям создаются автоматически при извлечении файлов с вложенными путями.
-- При извлечении зашифрованного архива необходимо передать парольную фразу через
-  `--encrypt-passphrase`. Без неё команда завершится с ошибкой.
-- Файлы с флагом дедупликации (`INDEX_FLAG_LINKED_DATA`) корректно восстанавливаются:
-  их данные берутся из первичной записи.
+- Parent directories are created automatically when extracting files with nested paths.
+- When extracting an encrypted archive the passphrase must be supplied via
+  `--encrypt-passphrase`. Without it the command exits with an error.
+- Deduplicated entries (with `INDEX_FLAG_LINKED_DATA`) are extracted correctly: their
+  data is read from the primary entry's data block.
 
-## Примеры
+## Examples
 
 ```sh
-# Извлечь все файлы в текущую директорию
+# Extract all files to the current directory
 dari extract -f out.dar
 
-# Извлечь все файлы в /tmp/out
+# Extract all files to /tmp/out
 dari extract -f out.dar -d /tmp/out
 
-# Извлечь только отдельные файлы
+# Extract specific files only
 dari extract -f out.dar src/main.rs src/lib.rs
 
-# Извлечь из зашифрованного архива
+# Extract from an encrypted archive
 dari extract -f out.dar --encrypt-passphrase "secret"
 
-# Комбинация: избирательное извлечение из зашифрованного архива
+# Selective extraction from an encrypted archive
 dari extract -f out.dar -d /tmp/out --encrypt-passphrase "secret" src/main.rs
 ```
+
+

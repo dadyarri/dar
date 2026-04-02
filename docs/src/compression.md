@@ -1,74 +1,75 @@
-# Алгоритмы сжатия
+# Compression Algorithms
 
-**dari** автоматически выбирает алгоритм сжатия на основе расширения файла. Выбор
-алгоритма происходит при создании архива и при добавлении файлов командой `append`.
+**dari** automatically selects a compression algorithm based on the file extension. The
+selection happens at archive creation time and when adding files with `append`.
 
-## Алгоритмы
+## Algorithms
 
-### Без сжатия (None)
+### None (store raw)
 
-Файл сохраняется без изменений. Используется для форматов, которые уже содержат
-встроенное сжатие или имеют высокую энтропию.
+The file is stored without modification. Used for formats that already contain built-in
+compression or have high entropy.
 
-Расширения: `jpg`, `jpeg`, `png`, `webp`, `gif`, `mp4`, `mp3`, `aac`, `ogg`, `flac`,
+Extensions: `jpg`, `jpeg`, `png`, `webp`, `gif`, `mp4`, `mp3`, `aac`, `ogg`, `flac`,
 `wav`, `mkv`, `avi`, `mov`, `m4a`, `m4v`, `zip`, `gz`, `rar`, `7z`, `bz2`, `zst`,
 `tar`, `bz`, `xz`, `lzma`, `lz4`, `lz`, `zlib`, `jar`, `war`, `ear`, `apk`, `ipa`,
 `aab`, `whl`, `egg`, `nupkg`, `gem`, `pdf`, `docx`, `xlsx`, `pptx`, `odt`, `ods`,
 `odp`, `epub`, `cbz`, `wasm`
 
-### Brotli (качество 6)
+### Brotli (quality 6)
 
-Оптимален для текстовых веб-форматов.
+Optimal for text-based web formats.
 
-Расширения: `html`, `htm`, `xhtml`, `css`, `scss`, `sass`, `less`, `stylus`, `js`,
+Extensions: `html`, `htm`, `xhtml`, `css`, `scss`, `sass`, `less`, `stylus`, `js`,
 `mjs`, `json`, `svg`, `xml`, `xsl`, `xsd`, `txt`, `md`, `markdown`, `rst`, `toml`,
 `yaml`, `yml`, `woff2`, `jsx`, `ts`, `tsx`, `mts`
 
-### Zstandard (уровень 3)
+### Zstandard (level 3)
 
-Оптимален для исходного кода и структурированных данных. Используется по умолчанию
-для неизвестных расширений.
+Optimal for source code and structured data. Also used as the **default** for any
+extension not listed elsewhere.
 
-Расширения: `log`, `tar`, `csv`, `tsv`, `db`, `sql`, `bak`, `rs`, `go`, `java`, `kt`,
+Extensions: `log`, `tar`, `csv`, `tsv`, `db`, `sql`, `bak`, `rs`, `go`, `java`, `kt`,
 `py`, `rb`, `php`, `pl`, `pas`, `c`, `cpp`, `c++`, `h`, `hpp`, `cs`, `fs`, `vb`,
 `vba`, `sh`, `bat`, `ps1`, `fish`, `proto`, `thrift`
 
-### LZMA (уровень 9)
+### LZMA (level 9)
 
-Высокая степень сжатия. Оптимален для бинарных и специализированных форматов.
+High compression ratio. Optimal for binary and specialised formats.
 
-Расширения: `iso`, `img`, `bin`, `deb`, `rpm`, `pkg`, `vmdk`, `patch`, `diff`,
+Extensions: `iso`, `img`, `bin`, `deb`, `rpm`, `pkg`, `vmdk`, `patch`, `diff`,
 `fortran`, `f90`, `ada`, `lisp`, `scm`, `hs`, `erl`, `cmake`, `makefile`, `mk`,
 `tex`, `bib`
 
-## Оптимизация изображений (--compress-images)
+## Image Optimisation (--compress-images)
 
-Флаг `--compress-images` включает дополнительные алгоритмы сжатия для изображений.
-Без этого флага изображения сохраняются без сжатия.
+The `--compress-images` flag enables additional compression for image files.
+Without this flag images are stored without compression.
 
 ### PngOxipng
 
-Оптимизирует PNG-файлы с использованием библиотеки [oxipng](https://github.com/shssoichiro/oxipng).
-Оптимизированный файл сохраняется только если он меньше оригинала; в противном случае
-сохраняется оригинал.
+Optimises PNG files using the [oxipng](https://github.com/shssoichiro/oxipng) library.
+The optimised file is stored only if it is smaller than the original; otherwise the
+original bytes are kept. The stored `compression_method` is always `None` (PNG is its
+own container format).
 
-Расширения: `png`
+Extensions: `png`
 
 ### JpegLepton
 
-Сжимает JPEG-файлы с использованием кодека [Lepton](https://github.com/dropbox/lepton).
-Метод сохраняется в индексе как `LeptonJpeg`; при декомпрессии применяется обратный
-алгоритм. Если оптимизация не даёт выигрыша или завершается ошибкой, сохраняется
-оригинал без сжатия.
+Compresses JPEG files using the [Lepton](https://github.com/dropbox/lepton) codec.
+The index entry uses `compression_method = LeptonJpeg` only when the Lepton output is
+smaller than the original. If optimisation fails or produces a larger file, the original
+bytes are stored uncompressed.
 
-Расширения: `jpg`, `jpeg`
+Extensions: `jpg`, `jpeg`
 
-## Резервный вариант
+## Fallback Rule
 
-Если алгоритм не уменьшает размер данных (например, для коротких или уже плотных
-файлов), **dari** автоматически сохраняет оригинальные байты с методом `None`.
-Это гарантирует, что архив никогда не будет больше суммы оригинальных файлов.
+If the selected algorithm does not reduce the file size (e.g. for short or already-dense
+files), **dari** automatically stores the original bytes with `compression_method = None`.
+This guarantees the archive is never larger than the sum of the original files.
 
-## Выбор алгоритма по умолчанию
+## Default Algorithm
 
-Для расширений, не вошедших ни в один список, применяется **Zstandard** (уровень 3).
+For extensions not matched by any list, **Zstandard** (level 3) is used.

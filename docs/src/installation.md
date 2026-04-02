@@ -1,8 +1,8 @@
-# Установка
+# Installation
 
-## Сборка из исходного кода
+## Building from Source
 
-Для сборки **dari** необходим компилятор Rust (версия 1.70 или выше) и пакетный менеджер Cargo.
+Building **dari** requires the Rust compiler (version 1.70 or higher) and Cargo.
 
 ```sh
 git clone https://github.com/dadyarri/dar
@@ -10,25 +10,25 @@ cd dar
 cargo build --release
 ```
 
-После успешной сборки бинарный файл будет находиться по пути `target/release/dari`.
+After a successful build the binary is located at `target/release/dari`.
 
-Его можно скопировать в директорию, которая входит в `PATH`:
+Copy it to any directory on your `PATH`:
 
 ```sh
 cp target/release/dari ~/.local/bin/dari
 ```
 
-## Автодополнение командной строки
+## Shell Completion Scripts
 
-Скрипты автодополнения генерируются во время выполнения с помощью подкоманды `dari completions <SHELL>`.
+Completion scripts are generated at runtime using the `dari completions <SHELL>` subcommand.
 
-Поддерживаемые оболочки: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
+Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
 
 ### Bash
 
 ```sh
 dari completions bash > ~/.bash_completion.d/dari
-# или подключите напрямую:
+# or source directly in the current session:
 source <(dari completions bash)
 ```
 
@@ -42,7 +42,7 @@ dari completions fish > ~/.config/fish/completions/dari.fish
 
 ```sh
 dari completions zsh > ~/.zsh/completions/_dari
-# Убедитесь, что директория находится в fpath
+# Make sure the directory is listed in fpath
 ```
 
 ### PowerShell

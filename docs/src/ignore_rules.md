@@ -1,54 +1,53 @@
-# Правила игнорирования файлов
+# Ignore Rules
 
-**dari** использует библиотеку [`ignore`](https://docs.rs/ignore) для обхода
-директорий. При этом соблюдаются стандартные правила игнорирования, принятые в
-экосистеме Git.
+**dari** uses the [`ignore`](https://docs.rs/ignore) crate for directory traversal. It
+respects the standard ignore rules used in the Git ecosystem.
 
-## Поддерживаемые источники правил
+## Supported Rule Sources
 
 ### .gitignore
 
-**dari** автоматически читает файлы `.gitignore`, найденные при обходе директорий.
-Файлы и директории, перечисленные в `.gitignore`, исключаются из архива. Это
-гарантирует, что артефакты сборки, директории `node_modules`, кеши и другие
-игнорируемые файлы не попадут в архив.
+**dari** automatically reads `.gitignore` files found during directory traversal. Files
+and directories listed in `.gitignore` are excluded from the archive. This ensures that
+build artifacts, `node_modules` directories, caches, and other ignored files never end up
+in the archive.
 
 ### .darignore
 
-Помимо `.gitignore`, **dari** читает файл `.darignore` — проектный список исключений,
-специфичный для архиватора. Его синтаксис аналогичен `.gitignore`.
+In addition to `.gitignore`, **dari** reads `.darignore` — a project-specific exclusion
+list for the archiver. Its syntax is identical to `.gitignore`.
 
-Пример `.darignore`:
+Example `.darignore`:
 
 ```gitignore
-# Исключить бинарный файл самого архива
+# Exclude the archive file itself
 *.dar
 
-# Исключить папку с временными файлами
+# Exclude temporary directories
 tmp/
 scratch/
 ```
 
-## Скрытые файлы
+## Hidden Files
 
-По умолчанию **dari** **включает** скрытые файлы (начинающиеся с `.`) в архив.
-Это отличается от поведения по умолчанию команды `find` и многих других инструментов.
+By default **dari** **includes** hidden files (those starting with `.`) in the archive.
+This differs from the default behaviour of `find` and many other tools.
 
-Чтобы исключить конкретные скрытые файлы или директории (например, `.git/`),
-добавьте их в `.gitignore` или `.darignore`.
+To exclude specific hidden files or directories (e.g. `.git/`), add them to `.gitignore`
+or `.darignore`.
 
-## Обработка отдельных файлов
+## Individual File Arguments
 
-Если в аргументах команды указан путь к отдельному файлу (а не к директории), он
-добавляется в архив **независимо от правил игнорирования**. Правила `.gitignore`
-и `.darignore` применяются только при рекурсивном обходе директорий.
+If a path to an individual file (rather than a directory) is passed as a command
+argument, it is added to the archive **regardless of ignore rules**. The `.gitignore` and
+`.darignore` rules are applied only during recursive directory traversal.
 
-## Порядок применения правил
+## Rule Application Order
 
-При обходе директорий правила применяются в следующем порядке:
+During directory traversal, rules are applied in the following order:
 
-1. Правила из `.gitignore` (все найденные вдоль пути).
-2. Правила из `.darignore` (все найденные вдоль пути).
+1. Rules from `.gitignore` (all files found along the path).
+2. Rules from `.darignore` (all files found along the path).
 
-Файл считается исключённым, если он соответствует хотя бы одному правилу из любого
-источника.
+A file is excluded if it matches at least one rule from any source.
+

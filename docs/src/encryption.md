@@ -1,81 +1,82 @@
-# Шифрование
+# Encryption
 
-**dari** поддерживает шифрование файловых данных с использованием алгоритма
-ChaCha20-Poly1305 (AEAD).
+**dari** supports file data encryption using the ChaCha20-Poly1305 AEAD algorithm (RFC 8439).
 
-## Алгоритм
+## Algorithm Parameters
 
-| Параметр        | Значение                                |
-|-----------------|-----------------------------------------|
-| Алгоритм        | ChaCha20-Poly1305                       |
-| Размер ключа    | 256 бит                                 |
-| Размер nonce    | 96 бит (12 байт)                        |
-| Размер тега     | 128 бит (16 байт)                       |
-| Вывод ключа     | BLAKE3 `derive_key("dari.v1.chacha20poly1305.key", парольная_фраза)` |
+| Parameter      | Value                                                                |
+|----------------|----------------------------------------------------------------------|
+| Algorithm      | ChaCha20-Poly1305                                                    |
+| Key size       | 256 bits (32 bytes)                                                  |
+| Nonce size     | 96 bits (12 bytes)                                                   |
+| Auth tag size  | 128 bits (16 bytes)                                                  |
+| Key derivation | BLAKE3 `derive_key("dari.v1.chacha20poly1305.key", passphrase_utf8)` |
 
-## Процесс шифрования
+## Encryption Process
 
-1. Из парольной фразы с помощью BLAKE3 `derive_key` выводится 256-битный ключ.
-2. Nonce (96 бит) берётся из первых 12 байт BLAKE3-хеша файла. Это обеспечивает
-   детерминированность: одинаковые файлы с одинаковой парольной фразой получают
-   одинаковый nonce, что позволяет корректно работать дедупликации.
-3. Данные шифруются in-place. Authentication tag (16 байт) добавляется в конец
-   зашифрованного блока.
-4. В поле `compressed_size` записывается полный размер зашифрованного блока (включая
-   16 байт тега).
+1. A 256-bit key is derived from the passphrase using BLAKE3 `derive_key` with the fixed
+   context string `"dari.v1.chacha20poly1305.key"`.
+2. The nonce (12 bytes) is taken from the first 12 bytes of the file's BLAKE3 checksum.
+   This makes the nonce deterministic: identical files encrypted with the same passphrase
+   always produce the same nonce, which allows deduplication to work correctly.
+3. The data (compressed bytes, or raw bytes if compression was skipped) is encrypted
+   in-place. The 16-byte Poly1305 authentication tag is appended to the end of the
+   ciphertext.
+4. The `compressed_size` field in the index entry stores the full length of the encrypted
+   block, including the 16-byte tag.
 
-## Хранение метаданных шифрования
+## Encryption Metadata Storage
 
-Информация о шифровании хранится в дополнительных полях (`extra`) записи индекса:
+Encryption information is stored in the `extra` field of the index entry:
 
-| Ключ | Значение                        |
-|------|---------------------------------|
-| `e`  | Алгоритм: `chacha20poly1305`    |
-| `en` | Nonce в шестнадцатеричном виде  |
-| `et` | Authentication tag в hex        |
+| Key  | Value                                               |
+|------|-----------------------------------------------------|
+| `e`  | Algorithm name: `chacha20poly1305`                  |
+| `en` | Nonce as lowercase hex (24 characters)              |
+| `et` | Authentication tag as lowercase hex (32 characters) |
 
-Установка бит-флага `0x0002` (`INDEX_FLAG_ENCRYPTED_DATA`) в поле `bitflags` записи
-индекса сигнализирует о том, что данный файл зашифрован.
+The bitflag `0x0002` (`INDEX_FLAG_ENCRYPTED_DATA`) is also set in the entry's `bitflags`
+field to signal that the entry is encrypted.
 
-## Использование
+## Usage
 
-### Интерактивный ввод парольной фразы
+### Interactive passphrase prompt
 
 ```sh
 dari create -f out.dar --encrypt src/
 ```
 
-### Передача парольной фразы напрямую
+### Passphrase supplied directly
 
 ```sh
 dari create -f out.dar --encrypt-passphrase "secret" src/
 ```
 
-> ⚠️ Флаги `--encrypt` и `--encrypt-passphrase` взаимно исключают друг друга.
+> ⚠️ `--encrypt` and `--encrypt-passphrase` are mutually exclusive.
 
-### Извлечение зашифрованного архива
+### Extracting an encrypted archive
 
 ```sh
 dari extract -f out.dar --encrypt-passphrase "secret"
 ```
 
-### Просмотр зашифрованного архива в TUI
+### Browsing an encrypted archive in the TUI
 
 ```sh
 dari inspect -f out.dar --encrypt-passphrase "secret"
 ```
 
-## Проверка парольной фразы при append
+## Passphrase Verification on Append
 
-При добавлении файлов в зашифрованный архив **dari** проверяет, что переданная
-парольная фраза совпадает с той, которая использовалась при создании архива. Для этого
-применяется `encryption_probe` — первые несколько байт данных первой зашифрованной
-записи, которые пробно расшифровываются. Если расшифровка не удаётся, команда
-завершается с ошибкой.
+When adding files to an encrypted archive, **dari** verifies that the supplied passphrase
+matches the one used at creation time. It does this via an `encryption_probe` — the first
+encrypted entry's data bytes are trial-decrypted. If decryption fails the command exits
+with an error.
 
-## Ограничения
+## Limitations
 
-- Шифруются **данные файлов**. Пути файлов, метаданные (размеры, хеш) и дополнительные
-  поля (кроме полей шифрования) хранятся в открытом виде в индексе.
-- Если архив был создан **без** шифрования, добавить шифрование командой `append`
-  невозможно.
+- Only **file data** is encrypted. File paths, metadata (sizes, checksums) and extra
+  fields (other than the encryption keys themselves) are stored in plaintext in the index.
+- If an archive was created **without** encryption it is not possible to add encryption
+  later using `append`.
+

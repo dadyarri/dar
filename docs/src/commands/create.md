@@ -1,88 +1,87 @@
-# Команда create
+# create
 
-Создаёт новый архив `.dar` из набора файлов и директорий.
+Creates a new `.dar` archive from a set of files and directories.
 
-## Синтаксис
+## Synopsis
 
 ```
-dari create -f <файл> [опции] [пути...]
-dari -c -f <файл> [опции] [пути...]
+dari create -f <file> [options] [paths...]
+dari -c -f <file> [options] [paths...]
 ```
 
-## Аргументы
+## Arguments
 
-| Аргумент | Описание                                          |
-|----------|---------------------------------------------------|
-| `пути`   | Список файлов и директорий для добавления в архив |
+| Argument | Description                                           |
+|----------|-------------------------------------------------------|
+| `paths`  | Files and directories to add to the archive           |
 
-## Опции
+## Options
 
-| Флаг                                | Описание                                                                                  |
-|-------------------------------------|-------------------------------------------------------------------------------------------|
-| `-f`, `--file <файл>`               | Путь к создаваемому архиву (обязательно)                                                  |
-| `-o`, `--overwrite`                 | Перезаписать архив, если он уже существует                                                |
-| `-v`, `--verbose`                   | Выводить путь каждого добавляемого файла                                                  |
-| `--compress-images`                 | Включить оптимизацию PNG (oxipng) и сжатие JPEG (Lepton)                                  |
-| `--encrypt`                         | Запросить парольную фразу в интерактивном режиме и зашифровать данные                     |
-| `--encrypt-passphrase <PASSPHRASE>` | Передать парольную фразу напрямую (конфликтует с `--encrypt`)                             |
-| `--dry-run`                         | Показать, какие файлы были бы добавлены, не создавая архив                                |
-| `-h`, `--help`                      | Показать справку                                                                          |
+| Flag                                | Description                                                                        |
+|-------------------------------------|------------------------------------------------------------------------------------|
+| `-f`, `--file <file>`               | Path to the archive to create (required)                                           |
+| `-o`, `--overwrite`                 | Overwrite the archive if it already exists                                         |
+| `-v`, `--verbose`                   | Print the path of each file as it is added                                         |
+| `--compress-images`                 | Enable PNG optimisation (oxipng) and JPEG compression (Lepton)                     |
+| `--encrypt`                         | Prompt for a passphrase interactively and encrypt file data                        |
+| `--encrypt-passphrase <PASSPHRASE>` | Supply the passphrase directly (conflicts with `--encrypt`)                        |
+| `--dry-run`                         | Show which files would be added without writing the archive                        |
+| `-h`, `--help`                      | Show help                                                                          |
 
-## Поведение
+## Behaviour
 
-### Обход директорий
+### Directory Traversal
 
-При передаче пути к директории **dari** рекурсивно обходит её содержимое.
-При этом соблюдаются правила игнорирования из `.gitignore` и `.darignore`,
-а скрытые файлы (начинающиеся с `.`) **включаются** в архив.
+When a directory path is given, **dari** recursively walks its contents while respecting
+ignore rules from `.gitignore` and `.darignore`. Hidden files (starting with `.`) are
+**included** by default.
 
-При передаче пути к отдельному файлу он добавляется в архив под именем файла (без
-родительских директорий).
+When a path to an individual file is given, it is added to the archive using just the
+filename (without parent directories).
 
-Подробнее об игнорировании файлов — в разделе [Правила игнорирования](../ignore_rules.md).
+See [Ignore Rules](../ignore_rules.md) for details.
 
-### Дедупликация
+### Deduplication
 
-Если два файла имеют одинаковое содержимое (одинаковый хеш BLAKE3), второй и
-последующие файлы сохраняются как ссылки (`INDEX_FLAG_LINKED_DATA`) без повторного
-хранения байт данных. Подробнее — в разделе [Дедупликация](../deduplication.md).
+If two files have identical content (same BLAKE3 hash), the second and subsequent files
+are stored as links (`INDEX_FLAG_LINKED_DATA`) without writing the data bytes again. See
+[Deduplication](../deduplication.md) for details.
 
-### Параллельная обработка
+### Parallel Processing
 
-Чтение файлов, вычисление контрольных сумм и сжатие выполняются параллельно.
-Запись в архив происходит последовательно, что обеспечивает корректный порядок байт.
+File reading, checksum calculation and compression run in parallel. Writing to the archive
+is sequential to maintain correct byte ordering.
 
-### Шифрование
+### Encryption
 
-Данные шифруются алгоритмом ChaCha20-Poly1305. Подробнее — в разделе
-[Шифрование](../encryption.md).
+Data is encrypted with ChaCha20-Poly1305. See [Encryption](../encryption.md) for details.
 
-## Примеры
+## Examples
 
 ```sh
-# Создать архив из директории src/
+# Create an archive from the src/ directory
 dari create -f out.dar src/
 
-# Перезаписать существующий архив
+# Overwrite an existing archive
 dari create -f out.dar -o src/
 
-# Создать с подробным выводом
+# Create with verbose output
 dari create -f out.dar -v src/
 
-# Включить оптимизацию изображений
+# Enable image optimisation
 dari create -f out.dar --compress-images assets/
 
-# Зашифровать архив (интерактивный ввод парольной фразы)
+# Encrypt the archive (interactive passphrase prompt)
 dari create -f out.dar --encrypt src/
 
-# Зашифровать архив (парольная фраза передаётся напрямую)
+# Encrypt the archive (passphrase supplied directly)
 dari create -f out.dar --encrypt-passphrase "secret" src/
 
-# Предварительный просмотр без записи на диск
+# Preview without writing to disk
 dari create -f out.dar --dry-run src/
 ```
 
-### Вывод --dry-run
+### --dry-run Output
 
 ```
 Dry run — files that would be added to out.dar:
@@ -90,3 +89,5 @@ Dry run — files that would be added to out.dar:
   src/lib.rs           3.10 KB  [stored]
 (dry run — no file written)
 ```
+
+

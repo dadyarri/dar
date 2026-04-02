@@ -1,63 +1,65 @@
-# Команда append
+# append
 
-Добавляет файлы и директории в существующий архив `.dar`.
+Adds files and directories to an existing `.dar` archive.
 
-## Синтаксис
+## Synopsis
 
 ```
-dari append -f <файл> [опции] [пути...]
-dari -a -f <файл> [опции] [пути...]
+dari append -f <file> [options] [paths...]
+dari -a -f <file> [options] [paths...]
 ```
 
-## Аргументы
+## Arguments
 
-| Аргумент | Описание                                           |
-|----------|----------------------------------------------------|
-| `пути`   | Список файлов и директорий для добавления в архив  |
+| Argument | Description                                           |
+|----------|-------------------------------------------------------|
+| `paths`  | Files and directories to add to the archive           |
 
-## Опции
+## Options
 
-| Флаг                                | Описание                                                                                  |
-|-------------------------------------|-------------------------------------------------------------------------------------------|
-| `-f`, `--file <файл>`               | Путь к существующему архиву (обязательно)                                                 |
-| `-v`, `--verbose`                   | Выводить путь каждого добавляемого файла                                                  |
-| `--compress-images`                 | Включить оптимизацию PNG (oxipng) и сжатие JPEG (Lepton)                                  |
-| `--encrypt`                         | Запросить парольную фразу в интерактивном режиме и зашифровать данные                     |
-| `--encrypt-passphrase <PASSPHRASE>` | Передать парольную фразу напрямую (конфликтует с `--encrypt`)                             |
-| `--dry-run`                         | Показать, какие файлы были бы добавлены, не изменяя архив                                 |
-| `-h`, `--help`                      | Показать справку                                                                          |
+| Flag                                | Description                                                                        |
+|-------------------------------------|------------------------------------------------------------------------------------|
+| `-f`, `--file <file>`               | Path to the existing archive (required)                                            |
+| `-v`, `--verbose`                   | Print the path of each file as it is added                                         |
+| `--compress-images`                 | Enable PNG optimisation (oxipng) and JPEG compression (Lepton)                     |
+| `--encrypt`                         | Prompt for a passphrase interactively and encrypt file data                        |
+| `--encrypt-passphrase <PASSPHRASE>` | Supply the passphrase directly (conflicts with `--encrypt`)                        |
+| `--dry-run`                         | Show which files would be added without modifying the archive                      |
+| `-h`, `--help`                      | Show help                                                                          |
 
-## Поведение
+## Behaviour
 
-### Согласованность шифрования
+### Encryption Consistency
 
-- Если исходный архив **зашифрован**, необходимо передать ту же парольную фразу через
-  `--encrypt-passphrase` или `--encrypt`. Без неё команда завершится с ошибкой.
-- Если исходный архив **не зашифрован**, использование флагов шифрования недопустимо.
+- If the existing archive is **encrypted**, the same passphrase must be supplied via
+  `--encrypt-passphrase` or `--encrypt`. Without it the command exits with an error.
+- If the existing archive is **not encrypted**, using encryption flags is not allowed.
 
-### Обход директорий и дедупликация
+### Directory Traversal and Deduplication
 
-Правила обхода директорий, игнорирования файлов и дедупликации — те же, что и для
-команды [`create`](create.md). Файлы, которые уже присутствуют в архиве, дедуплицируются
-на основе BLAKE3-хеша.
+The same directory traversal, ignore rules, and deduplication behaviour as
+[`create`](create.md) applies. Files already present in the archive are deduplicated
+based on their BLAKE3 checksum.
 
-### Параллельная обработка
+### Parallel Processing
 
-Чтение и сжатие новых файлов выполняются параллельно. После проверки архив открывается
-на запись: индекс перестраивается с учётом новых записей.
+Reading and compressing new files runs in parallel. After verification the archive is
+opened for writing and the index is rebuilt to include the new entries.
 
-## Примеры
+## Examples
 
 ```sh
-# Добавить директорию assets/ в существующий архив
+# Add the assets/ directory to an existing archive
 dari append -f out.dar assets/
 
-# Добавить файлы с подробным выводом
+# Add files with verbose output
 dari append -f out.dar -v new-data/
 
-# Добавить в зашифрованный архив
+# Add files to an encrypted archive
 dari append -f out.dar --encrypt-passphrase "secret" new-data/
 
-# Предварительный просмотр без изменения архива
+# Preview without modifying the archive
 dari append -f out.dar --dry-run new-data/
 ```
+
+

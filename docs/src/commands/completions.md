@@ -1,30 +1,31 @@
 # completions
 
-Команда `completions` генерирует скрипт автодополнения для указанной оболочки и выводит его в stdout.
+The `completions` command generates a shell completion script for the specified shell
+and writes it to stdout.
 
-## Использование
+## Usage
 
 ```sh
 dari completions <SHELL>
 ```
 
-## Аргументы
+## Arguments
 
-| Аргумент | Описание                                              |
-|----------|-------------------------------------------------------|
-| `SHELL`  | Оболочка для генерации автодополнения                 |
+| Argument | Description                                    |
+|----------|------------------------------------------------|
+| `SHELL`  | The shell to generate completions for          |
 
-Поддерживаемые значения: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
+Supported values: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
 
-## Примеры
+## Examples
 
 ### Bash
 
 ```sh
-# Подключить напрямую в текущей сессии:
+# Source directly in the current session:
 source <(dari completions bash)
 
-# Сохранить для постоянного использования:
+# Save for permanent use:
 dari completions bash > ~/.bash_completion.d/dari
 ```
 
@@ -51,3 +52,5 @@ dari completions powershell | Out-String | Invoke-Expression
 ```sh
 dari completions elvish >> ~/.config/elvish/rc.elv
 ```
+
+

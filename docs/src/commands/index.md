@@ -1,18 +1,18 @@
-# Команды
+# Commands
 
-**dari** предоставляет следующие команды:
+**dari** provides the following commands:
 
-| Команда               | Короткий флаг | Описание                                            |
-|-----------------------|---------------|-----------------------------------------------------|
-| [`create`](create.md) | `-c`          | Создать новый архив из файлов и директорий          |
-| [`append`](append.md) | `-a`          | Добавить файлы в существующий архив                 |
-| [`extract`](extract.md) | `-x`        | Извлечь файлы из архива                             |
-| [`inspect`](inspect.md) | `-i`        | Просмотреть содержимое архива в интерактивном TUI   |
-| [`completions`](completions.md) | —   | Сгенерировать скрипт автодополнения для оболочки    |
+| Command                         | Short flag | Description                                         |
+|---------------------------------|------------|-----------------------------------------------------|
+| [`create`](create.md)           | `-c`       | Create a new archive from files and directories     |
+| [`append`](append.md)           | `-a`       | Add files to an existing archive                    |
+| [`extract`](extract.md)         | `-x`       | Extract files from an archive                       |
+| [`inspect`](inspect.md)         | `-i`       | Browse archive contents in an interactive TUI       |
+| [`completions`](completions.md) | —          | Generate a shell completion script                  |
 
-## Общие опции
+## Global Options
 
-| Флаг           | Описание                        |
-|----------------|---------------------------------|
-| `-h`, `--help` | Показать справку по команде     |
-| `-V`, `--version` | Показать версию программы    |
+| Flag              | Description                |
+|-------------------|----------------------------|
+| `-h`, `--help`    | Show help for a command    |
+| `-V`, `--version` | Show the program version   |

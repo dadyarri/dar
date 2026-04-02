@@ -1,75 +1,76 @@
-# Дополнительные поля (extra)
+# Extra Fields
 
-Каждая запись в индексе архива может содержать блок дополнительных полей — строку
-пар `ключ=значение`, разделённых точкой с запятой.
+Each index entry in a `.dar` archive can carry an extra fields block — a string of
+`key=value` pairs separated by semicolons.
 
-## Формат
+## Format
 
 ```
-ключ1=значение1;ключ2=значение2;ключ3=значение3
+key1=value1;key2=value2;key3=value3
 ```
 
-### Правила сериализации
+### Serialisation Rules
 
-- Пары с **пустым значением** пропускаются.
-- Если ключ встречается несколько раз, в финальной строке сохраняется только
-  **последнее** значение.
-- Если ключ или значение содержит символ `;`, он заменяется на `%3B`
-  (percent-encoding) перед сериализацией и восстанавливается при чтении.
+- Pairs with an **empty value** are skipped.
+- If the same key appears more than once, only the **last** value is kept in the final
+  string.
+- If a key or value contains the character `;`, it is replaced by `%3B`
+  (percent-encoding) before serialisation and restored when parsing.
 
-### Хранение
+### Storage
 
-Длина блока дополнительных полей (в байтах) записывается в поле `extra_length`
-записи индекса. Само содержимое хранится в блоке INDEX сразу после поля `path`.
+The byte length of the extra block is recorded in the `extra_length` field of the index
+entry. The content itself is stored in the INDEX section immediately after the `path`
+field.
 
-## Известные ключи
+## Known Keys
 
-### Шифрование
+### Encryption
 
-| Ключ | Описание                                    |
-|------|---------------------------------------------|
-| `e`  | Алгоритм шифрования (`chacha20poly1305`)    |
-| `en` | Nonce в шестнадцатеричном виде (24 символа) |
-| `et` | Authentication tag в hex (32 символа)       |
+| Key  | Description                                    |
+|------|------------------------------------------------|
+| `e`  | Encryption algorithm (`chacha20poly1305`)      |
+| `en` | Nonce as lowercase hex (24 characters)         |
+| `et` | Authentication tag as lowercase hex (32 chars) |
 
-Эти поля устанавливаются автоматически при использовании флагов `--encrypt` или
-`--encrypt-passphrase`. Подробнее — в разделе [Шифрование](encryption.md).
+These fields are set automatically when `--encrypt` or `--encrypt-passphrase` is used.
+See [Encryption](encryption.md) for details.
 
-### EXIF (изображения)
+### EXIF (images)
 
-| Ключ  | EXIF-тег             | Описание                     |
-|-------|----------------------|------------------------------|
-| `imk` | `Make`               | Производитель камеры         |
-| `imd` | `Model`              | Модель камеры                |
-| `idt` | `DateTimeOriginal`   | Дата и время создания снимка |
+| Key   | EXIF Tag           | Description                      |
+|-------|--------------------|----------------------------------|
+| `imk` | `Make`             | Camera manufacturer              |
+| `imd` | `Model`            | Camera model                     |
+| `idt` | `DateTimeOriginal` | Original capture timestamp       |
 
-Эти поля извлекаются автоматически из EXIF-данных изображений при добавлении файлов
-в архив.
+These fields are extracted automatically from image EXIF data when files are added.
 
-### Аудио
+### Audio
 
-| Ключ  | ID3/Vorbis-поле | Описание            |
-|-------|-----------------|---------------------|
-| `atl` | `Title`         | Название трека      |
-| `aar` | `Artist`        | Исполнитель         |
-| `aal` | `Album`         | Альбом              |
-| `agn` | `Genre`         | Жанр                |
+| Key   | ID3/Vorbis field | Description  |
+|-------|------------------|--------------|
+| `atl` | `Title`          | Track title  |
+| `aar` | `Artist`         | Artist name  |
+| `aal` | `Album`          | Album name   |
+| `agn` | `Genre`          | Genre        |
 
-Эти поля извлекаются автоматически из тегов аудиофайлов при добавлении в архив.
+These fields are extracted automatically from audio tags when files are added.
 
-## Использование в поиске TUI
+## Use in TUI Search
 
-TUI-команда `inspect` позволяет фильтровать файлы по дополнительным полям с помощью
-команды `s` и синтаксиса `псевдоним:значение`. Доступные псевдонимы:
+The `inspect` TUI allows filtering files by extra fields using the `s` key and the
+`alias:value` syntax. Available aliases:
 
-| Псевдоним | Ключ  |
-|-----------|-------|
-| `artist`  | `aar` |
-| `album`   | `aal` |
-| `title`   | `atl` |
-| `genre`   | `agn` |
-| `make`    | `imk` |
-| `model`   | `imd` |
-| `date`    | `idt` |
+| Alias    | Internal key |
+|----------|--------------|
+| `artist` | `aar`        |
+| `album`  | `aal`        |
+| `title`  | `atl`        |
+| `genre`  | `agn`        |
+| `make`   | `imk`        |
+| `model`  | `imd`        |
+| `date`   | `idt`        |
 
-Подробнее — в разделе [Команда inspect](commands/inspect.md).
+See [inspect command](commands/inspect.md) for details.
+
