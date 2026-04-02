@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "dari"
-version = "5.0.1-beta.5"
+version = "5.0.1-beta.6"
 dependencies = [
  "blake3",
  "brotli",
