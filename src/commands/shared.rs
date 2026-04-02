@@ -43,7 +43,6 @@ pub fn compression_method_label(method: CompressionMethod, locale: &str) -> Cow<
         CompressionMethod::Brotli => t!("cli.common.methods.brotli", locale = locale),
         CompressionMethod::Zstandard => t!("cli.common.methods.zstd", locale = locale),
         CompressionMethod::Lzma => t!("cli.common.methods.lzma", locale = locale),
-        CompressionMethod::LeptonJpeg => t!("cli.common.methods.lepton", locale = locale),
     }
 }
 
@@ -219,6 +218,5 @@ mod tests {
         assert_eq!(compression_method_label(CompressionMethod::Brotli, "en"), "brotli");
         assert_eq!(compression_method_label(CompressionMethod::Zstandard, "en"), "zstd");
         assert_eq!(compression_method_label(CompressionMethod::Lzma, "en"), "lzma");
-        assert_eq!(compression_method_label(CompressionMethod::LeptonJpeg, "en"), "lepton");
     }
 }

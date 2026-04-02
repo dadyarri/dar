@@ -23,7 +23,6 @@ stored = "без сжатия"
 brotli = "brotli"
 zstd = "zstd"
 lzma = "lzma"
-lepton = "lepton"
 dedup = "дубликат"
 
 [cli.common.errors]
@@ -59,7 +58,6 @@ utf8_failed = "Поле %{field} в индексе архива содержит
 brotli_decompression_failed = "Ошибка распаковки Brotli: %{error}"
 zstd_decompression_failed = "Ошибка распаковки ZStandard: %{error}"
 lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
-lepton_decompression_failed = "Ошибка распаковки Lepton JPEG: %{error}"
 
 [cli.common.messages]
 summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
@@ -70,7 +68,7 @@ about = "Создает новый архив"
 [cli.create.args]
 file = "Путь к создаваемому архиву"
 overwrite = "Перезаписать существующий архив"
-compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
+compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
 encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
 passphrase_value = "ПАРОЛЬ"
@@ -92,7 +90,7 @@ about = "Добавляет данные в существующий архив"
 
 [cli.append.args]
 file = "Путь к существующему архивному файлу"
-compress_images = "Без потерь оптимизировать PNG/JPEG с помощью специализированных кодеков"
+compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
 encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
 dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"

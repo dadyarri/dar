@@ -2,7 +2,7 @@ use crate::counting_writer::CountingWriter;
 use crate::models::archive::CompressionMethod;
 use eyre::{Result, eyre};
 use rust_i18n::t;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 
 pub struct CompressionOutcome {
     pub bytes_written: u64,
@@ -228,57 +228,6 @@ impl Compressor for PngOxipngCompressor {
     }
 }
 
-pub struct JpegLeptonCompressor;
-impl Compressor for JpegLeptonCompressor {
-    fn get_best_extensions(&self) -> &[&str] {
-        &["jpg", "jpeg"]
-    }
-
-    fn compress(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<CompressionOutcome> {
-        let mut original = Vec::new();
-        input.read_to_end(&mut original)?;
-
-        let features = lepton_jpeg::EnabledFeatures::compat_lepton_vector_write();
-        let optimized = lepton_jpeg::encode_lepton_verify(
-            &original,
-            &features,
-            &lepton_jpeg::DEFAULT_THREAD_POOL,
-        )
-        .ok()
-        .map(|(bytes, _)| bytes);
-
-        let (chosen, method) = match optimized {
-            Some(bytes) if bytes.len() < original.len() => (bytes, CompressionMethod::LeptonJpeg),
-            _ => (original, CompressionMethod::None),
-        };
-
-        let mut counter = CountingWriter::new(output);
-        counter.write_all(&chosen)?;
-        Ok(CompressionOutcome {
-            bytes_written: counter.bytes_written,
-            method,
-        })
-    }
-
-    fn decompress_bytes(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let mut reader = BufReader::new(std::io::Cursor::new(data));
-        let mut output = Vec::new();
-        lepton_jpeg::decode_lepton(
-            &mut reader,
-            &mut output,
-            &lepton_jpeg::EnabledFeatures::compat_lepton_vector_read(),
-            &lepton_jpeg::DEFAULT_THREAD_POOL,
-        )
-        .map_err(|e| {
-            eyre!(t!(
-                "cli.common.errors.lepton_decompression_failed",
-                error = e.message()
-            ))
-        })?;
-        Ok(output)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Static instances – zero-cost, usable as `&'static dyn Compressor`
 // ---------------------------------------------------------------------------
@@ -288,22 +237,16 @@ pub static BROTLI_COMPRESSOR: BrotliCompressor = BrotliCompressor;
 pub static ZSTANDARD_COMPRESSOR: ZStandardCompressor = ZStandardCompressor;
 pub static LZMA_COMPRESSOR: LzmaCompressor = LzmaCompressor;
 pub static PNG_OXIPNG_COMPRESSOR: PngOxipngCompressor = PngOxipngCompressor;
-pub static JPEG_LEPTON_COMPRESSOR: JpegLeptonCompressor = JpegLeptonCompressor;
 
 /// Returns the best compressor for the given lowercase file extension.
 ///
 /// Compressors are checked in priority order: None → Brotli → ZStandard → Lzma.
 /// Unknown extensions fall back to [`ZSTANDARD_COMPRESSOR`].
 pub fn compressor_for_extension(ext: &str, compress_images: bool) -> &'static dyn Compressor {
-    if compress_images {
-        if ext == "png" {
-            return &PNG_OXIPNG_COMPRESSOR;
-        }
-
-        if ext == "jpg" || ext == "jpeg" {
-            return &JPEG_LEPTON_COMPRESSOR;
-        }
+    if compress_images && ext == "png" {
+        return &PNG_OXIPNG_COMPRESSOR;
     }
+
 
     let candidates: &[&'static dyn Compressor] = &[
         &NONE_COMPRESSOR,
@@ -331,7 +274,6 @@ pub fn decompress_bytes(method: CompressionMethod, data: &[u8]) -> Result<Vec<u8
         CompressionMethod::Brotli => BROTLI_COMPRESSOR.decompress_bytes(data),
         CompressionMethod::Zstandard => ZSTANDARD_COMPRESSOR.decompress_bytes(data),
         CompressionMethod::Lzma => LZMA_COMPRESSOR.decompress_bytes(data),
-        CompressionMethod::LeptonJpeg => JPEG_LEPTON_COMPRESSOR.decompress_bytes(data),
     }
 }
 
@@ -430,14 +372,5 @@ mod decompress_tests {
     #[test]
     fn test_lzma_decompress_rejects_garbage() {
         assert!(LZMA_COMPRESSOR.decompress_bytes(b"not lzma data").is_err());
-    }
-
-    #[test]
-    fn test_lepton_decompress_rejects_garbage() {
-        assert!(
-            JPEG_LEPTON_COMPRESSOR
-                .decompress_bytes(b"not lepton data")
-                .is_err()
-        );
     }
 }

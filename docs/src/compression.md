@@ -55,14 +55,6 @@ own container format).
 
 Extensions: `png`
 
-### JpegLepton
-
-Compresses JPEG files using the [Lepton](https://github.com/dropbox/lepton) codec.
-The index entry uses `compression_method = LeptonJpeg` only when the Lepton output is
-smaller than the original. If optimisation fails or produces a larger file, the original
-bytes are stored uncompressed.
-
-Extensions: `jpg`, `jpeg`
 
 ## Fallback Rule
 

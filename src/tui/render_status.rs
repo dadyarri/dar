@@ -163,7 +163,7 @@ pub(crate) fn draw_status_bar(
             .map(|ei| {
                 matches!(
                     state.entries[ei].entry.compression_method,
-                    CompressionMethod::None | CompressionMethod::LeptonJpeg
+                    CompressionMethod::None
                 )
             })
             .unwrap_or(false);

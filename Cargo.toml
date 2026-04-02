@@ -15,7 +15,6 @@ brotli = "8.0.2"
 zstd = "0.13.3"
 xz2 = "0.1.7"
 oxipng = { version = "10.1.0", default-features = false }
-lepton_jpeg = "0.5.8"
 chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["std"] }
 kamadak-exif = "0.6.1"
 lofty = { version = "0.23.3", default-features = true }

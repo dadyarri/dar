@@ -540,37 +540,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_jpg_entry_with_compress_images_falls_back_for_invalid_data() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("photo.jpg");
-        std::fs::write(&file_path, b"fake jpeg data that compresses aaaaaaaaa").unwrap();
-
-        let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(
-            buffer,
-            PipelineConfig {
-                compress_images: true,
-                encryption_passphrase: None,
-            },
-        );
-        builder.write_header().unwrap();
-        builder
-            .add_file(&file_path.to_path_buf(), &file_path.display().to_string())
-            .unwrap();
-        builder.build().unwrap();
-        let data = builder.writer.into_inner();
-
-        let footer_base = data.len() - size_of::<ArchiveFooter>();
-        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
-
-        let cm_byte = data[index_offset + 10];
-        assert_eq!(
-            cm_byte,
-            CompressionMethod::None as u8,
-            "invalid jpeg bytes should be stored unchanged when optimization fails"
-        );
-    }
 
     #[test]
     fn test_dedup_links_second_file_to_first_offset() {

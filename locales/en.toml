@@ -23,7 +23,6 @@ stored = "stored"
 brotli = "brotli"
 zstd = "zstd"
 lzma = "lzma"
-lepton = "lepton"
 dedup = "dedup"
 
 [cli.common.errors]
@@ -59,7 +58,6 @@ utf8_failed = "Archive index %{field} is not valid UTF-8"
 brotli_decompression_failed = "Brotli decompression error: %{error}"
 zstd_decompression_failed = "ZStandard decompression error: %{error}"
 lzma_decompression_failed = "LZMA decompression error: %{error}"
-lepton_decompression_failed = "Lepton JPEG decompression error: %{error}"
 
 [cli.common.messages]
 summary = "Done: %{count} file(s), %{original} original → %{stored} stored (%{ratio}%), elapsed: %{elapsed}"
@@ -70,7 +68,7 @@ about = "Creates new archive"
 [cli.create.args]
 file = "The path to the resulting archive file"
 overwrite = "Overwrite existing archive file"
-compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
+compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt file data"
 encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
 passphrase_value = "PASSPHRASE"
@@ -92,7 +90,7 @@ about = "Appends data to existing archive"
 
 [cli.append.args]
 file = "The path to the existing archive file"
-compress_images = "Losslessly optimize PNG/JPEG using image-specific codecs"
+compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt appended file data"
 encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
 dry_run = "Preview which files would be added without modifying the archive"
