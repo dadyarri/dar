@@ -5,7 +5,7 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::load_archive;
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs::File;
 use std::io::BufWriter;
@@ -66,9 +66,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     );
 
     let archive_path = Path::new(file);
-    let parent = archive_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let parent = archive_path.parent().unwrap_or_else(|| Path::new("."));
 
     let in_place = matches.get_flag("in-place");
     let output_path: PathBuf = if in_place {
@@ -90,13 +88,15 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         parent.join(new_name)
     };
 
-    let output_dir = output_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let output_dir = output_path.parent().unwrap_or_else(|| Path::new("."));
 
     // Extract all entries from the unencrypted archive to a temp directory.
     let temp_extract_dir = tempfile::tempdir().wrap_err(
-        t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
+        t!(
+            "cli.encrypt.errors.encrypt_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
     )?;
     let all_refs: Vec<&crate::models::archive::ArchiveIndexEntryWrapper> =
         existing_archive.entries.iter().collect();
@@ -110,7 +110,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             None,
         )
         .wrap_err(
-            t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
+            t!(
+                "cli.encrypt.errors.encrypt_failed",
+                locale = locale.as_str()
+            )
+            .to_string(),
         )?;
     }
 
@@ -119,10 +123,18 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     // data. Files are recompressed with the default settings (compress_images: false)
     // since the original pipeline settings are not stored in the archive format.
     let temp_out = tempfile::NamedTempFile::new_in(output_dir).wrap_err(
-        t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
+        t!(
+            "cli.encrypt.errors.encrypt_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
     )?;
     let (temp_file, temp_path) = temp_out.keep().wrap_err(
-        t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
+        t!(
+            "cli.encrypt.errors.encrypt_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
     )?;
 
     let config = PipelineConfig {
@@ -135,15 +147,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     for entry in &existing_archive.entries {
         let source = temp_extract_dir.path().join(&entry.path);
-        builder
-            .add_file(&source, &entry.path)
-            .wrap_err_with(|| {
-                t!(
-                    "cli.encrypt.errors.encrypt_failed",
-                    locale = locale.as_str()
-                )
-                .to_string()
-            })?;
+        builder.add_file(&source, &entry.path).wrap_err_with(|| {
+            t!(
+                "cli.encrypt.errors.encrypt_failed",
+                locale = locale.as_str()
+            )
+            .to_string()
+        })?;
     }
 
     builder.build()?;
@@ -152,7 +162,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     // output_dir (the same directory as output_path), both paths are on the
     // same filesystem and the rename is effectively atomic.
     std::fs::rename(&temp_path, &output_path).wrap_err(
-        t!("cli.encrypt.errors.encrypt_failed", locale = locale.as_str()).to_string(),
+        t!(
+            "cli.encrypt.errors.encrypt_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
     )?;
 
     println!(

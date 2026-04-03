@@ -310,10 +310,12 @@ fn open_or_switch_preview(state: &mut AppState, mode: PreviewMode) {
     let Some(flat) = state.visible.get(idx).cloned() else {
         return;
     };
-    if flat.is_dir || flat.entry_idx.is_none() {
+    if flat.is_dir {
         return;
     }
-    let entry_idx = flat.entry_idx.unwrap();
+    let Some(entry_idx) = flat.entry_idx else {
+        return;
+    };
 
     if state.preview_mode == PreviewMode::Closed {
         // Opening fresh: build cache and reset scroll.
@@ -377,13 +379,15 @@ fn refresh_preview(state: &mut AppState) {
     let Some(flat) = state.visible.get(idx).cloned() else {
         return;
     };
-    if flat.is_dir || flat.entry_idx.is_none() {
+    if flat.is_dir {
         // Directories have no preview — close the floating window.
         close_preview(state);
         state.preview_cache = None;
         return;
     }
-    let entry_idx = flat.entry_idx.unwrap();
+    let Some(entry_idx) = flat.entry_idx else {
+        return;
+    };
     // Reuse the cache if it already holds this entry.
     if let Some((cached_idx, _)) = &state.preview_cache {
         if *cached_idx == entry_idx {
@@ -418,8 +422,7 @@ fn validate_extract_path(state: &mut AppState) -> bool {
     let trimmed = state.extract_path.trim().to_owned();
     if trimmed.is_empty() {
         state.extract_error = Some(
-            rust_i18n::t!("tui.inspect.extract.error_empty", locale = locale.as_str())
-                .into_owned(),
+            rust_i18n::t!("tui.inspect.extract.error_empty", locale = locale.as_str()).into_owned(),
         );
         state.extract_path_resolved = None;
         return false;

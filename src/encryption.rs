@@ -1,7 +1,18 @@
+use crate::constants::crypto;
 use crate::i18n::Locale;
 use clap::ArgMatches;
-use eyre::{Context, eyre};
+use eyre::{eyre, Context};
 use rust_i18n::t;
+
+/// Derive a ChaCha20-Poly1305 nonce from the first [`crypto::NONCE_LEN`] bytes of `checksum`.
+///
+/// Both the encryption path (`pipeline.rs`) and the decryption path (`extractor.rs`) use
+/// this helper so the two never diverge.
+pub fn nonce_from_checksum(checksum: &[u8; 32]) -> [u8; crypto::NONCE_LEN] {
+    let mut nonce = [0u8; crypto::NONCE_LEN];
+    nonce.copy_from_slice(&checksum[..crypto::NONCE_LEN]);
+    nonce
+}
 
 pub fn resolve_encryption_passphrase(
     matches: &ArgMatches,

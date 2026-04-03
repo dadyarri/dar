@@ -1,4 +1,4 @@
-use crate::archive_builder::{FileAddOutcome, PreparedFile, prepare_file_from_disk};
+use crate::archive_builder::{prepare_file_from_disk, FileAddOutcome, PreparedFile};
 use crate::models::archive::CompressionMethod;
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::walker::ScannedFile;
@@ -57,7 +57,13 @@ pub fn compute_ratio(total_original: u64, total_stored: u64) -> String {
     }
 }
 
-pub fn print_summary(count: usize, total_original: u64, total_stored: u64, elapsed_secs: f64, locale: &str) {
+pub fn print_summary(
+    count: usize,
+    total_original: u64,
+    total_stored: u64,
+    elapsed_secs: f64,
+    locale: &str,
+) {
     let ratio = compute_ratio(total_original, total_stored);
     let elapsed_str = format!("{:.2}s", elapsed_secs);
     println!(
@@ -79,14 +85,20 @@ pub fn print_verbose_outcome(outcome: &FileAddOutcome, locale: &str) {
 
     if outcome.is_dedup {
         let dedup_label = t!("cli.common.methods.dedup", locale = locale);
-        println!("  {:<60} {:>10}  [{}]", outcome.archive_path, orig, dedup_label);
+        println!(
+            "  {:<60} {:>10}  [{}]",
+            outcome.archive_path, orig, dedup_label
+        );
         return;
     }
 
     match outcome.compression_method {
         CompressionMethod::None => {
             let stored_label = compression_method_label(CompressionMethod::None, locale);
-            println!("  {:<60} {:>10}  [{}]", outcome.archive_path, orig, stored_label);
+            println!(
+                "  {:<60} {:>10}  [{}]",
+                outcome.archive_path, orig, stored_label
+            );
         }
         method => {
             let ratio = if outcome.original_size > 0 {
@@ -113,7 +125,10 @@ pub fn print_dry_run_prepared(prepared: &PreparedFile, locale: &str) {
     match prepared.pipeline_result.compression_method {
         CompressionMethod::None => {
             let stored_label = compression_method_label(CompressionMethod::None, locale);
-            println!("  {:<60} {:>10}  [{}]", prepared.archive_path, orig, stored_label);
+            println!(
+                "  {:<60} {:>10}  [{}]",
+                prepared.archive_path, orig, stored_label
+            );
         }
         method => {
             let stored_size = if prepared.pipeline_result.compressed_content.is_some() {
@@ -192,7 +207,10 @@ mod tests {
 
         assert_eq!(count, 2);
         assert_eq!(total_original, 1_800);
-        assert_eq!(total_stored, 400, "dedup entry must not contribute to total_stored");
+        assert_eq!(
+            total_stored, 400,
+            "dedup entry must not contribute to total_stored"
+        );
         assert_eq!(compute_ratio(total_original, total_stored), "22.2");
     }
 
@@ -214,9 +232,21 @@ mod tests {
     #[test]
     fn test_compression_method_label_english() {
         use super::compression_method_label;
-        assert_eq!(compression_method_label(CompressionMethod::None, "en"), "stored");
-        assert_eq!(compression_method_label(CompressionMethod::Brotli, "en"), "brotli");
-        assert_eq!(compression_method_label(CompressionMethod::Zstandard, "en"), "zstd");
-        assert_eq!(compression_method_label(CompressionMethod::Lzma, "en"), "lzma");
+        assert_eq!(
+            compression_method_label(CompressionMethod::None, "en"),
+            "stored"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Brotli, "en"),
+            "brotli"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Zstandard, "en"),
+            "zstd"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Lzma, "en"),
+            "lzma"
+        );
     }
 }

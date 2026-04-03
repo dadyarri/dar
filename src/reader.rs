@@ -1,9 +1,10 @@
+use crate::constants::flags;
+use crate::constants::format;
 use crate::i18n::Locale;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
-use crate::pipeline::INDEX_FLAG_ENCRYPTED_DATA;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -72,7 +73,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     )?;
     let header = *bytemuck::from_bytes::<ArchiveHeader>(&header_buf);
 
-    if header.signature != *b"DARI" || header.version != 5 {
+    if header.signature != *format::SIGNATURE || header.version != format::VERSION {
         return Err(eyre!(t!(
             "cli.common.errors.header_invalid",
             locale = locale.as_str()
@@ -101,7 +102,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     )?;
     let footer = *bytemuck::from_bytes::<ArchiveFooter>(&footer_buf);
 
-    if footer.signature != *b"DARIEND" {
+    if footer.signature != *format::FOOTER_SIGNATURE {
         return Err(eyre!(t!(
             "cli.common.errors.footer_invalid",
             locale = locale.as_str()
@@ -141,7 +142,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
         )?;
         let entry = *bytemuck::from_bytes::<ArchiveIndexEntry>(&entry_buf);
 
-        let entry_encrypted = (entry.bitflags & INDEX_FLAG_ENCRYPTED_DATA) != 0;
+        let entry_encrypted = (entry.bitflags & flags::ENCRYPTED_DATA) != 0;
         match encryption_mode {
             None => encryption_mode = Some(entry_encrypted),
             Some(expected) if expected != entry_encrypted => {

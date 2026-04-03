@@ -1,5 +1,5 @@
-use clap::{Arg, ArgAction, Command};
 use clap::{crate_authors, crate_version};
+use clap::{Arg, ArgAction, Command};
 use clap_complete::Shell;
 
 fn root_help_template<T>(translate: &T) -> String
@@ -423,9 +423,8 @@ mod tests {
 
     #[test]
     fn test_completions_invalid_shell_produces_error() {
-        let result =
-            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
-                .try_get_matches_from(vec!["dari", "completions", "invalidshell"]);
+        let result = build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+            .try_get_matches_from(vec!["dari", "completions", "invalidshell"]);
 
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidValue);

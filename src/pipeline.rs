@@ -1,6 +1,9 @@
+use crate::constants::extra_keys;
+use crate::constants::flags;
+use crate::encryption::nonce_from_checksum;
 use crate::extra::{encode_extra_pairs, upsert_extra_pair};
 use crate::models::archive::CompressionMethod;
-use crate::traits::{Compressor, compressor_for_extension};
+use crate::traits::{compressor_for_extension, Compressor};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use exif::{Exif, In, Reader as ExifReader, Tag};
@@ -10,22 +13,6 @@ use lofty::prelude::Accessor;
 use lofty::probe::Probe;
 use std::io::Cursor;
 use std::path::Path;
-
-pub const INDEX_FLAG_LINKED_DATA: u16 = 0b0000_0000_0000_0001;
-pub const INDEX_FLAG_ENCRYPTED_DATA: u16 = 0b0000_0000_0000_0010;
-
-const EXTRA_KEY_ENCRYPTION_ALGO: &str = "e";
-const EXTRA_KEY_ENCRYPTION_NONCE: &str = "en";
-const EXTRA_KEY_ENCRYPTION_TAG: &str = "et";
-
-const EXTRA_KEY_IMAGE_MAKE: &str = "imk";
-const EXTRA_KEY_IMAGE_MODEL: &str = "imd";
-const EXTRA_KEY_IMAGE_DATETIME_ORIGINAL: &str = "idt";
-
-const EXTRA_KEY_AUDIO_TITLE: &str = "atl";
-const EXTRA_KEY_AUDIO_ARTIST: &str = "aar";
-const EXTRA_KEY_AUDIO_ALBUM: &str = "aal";
-const EXTRA_KEY_AUDIO_GENRE: &str = "agn";
 
 /// Result of processing a file through the pipeline.
 #[derive(Debug, Clone)]
@@ -142,8 +129,7 @@ impl CompressionPipeline {
         };
 
         // Derive a stable nonce from checksum so deduplicated linked entries can reuse metadata.
-        let mut nonce = [0u8; 12];
-        nonce.copy_from_slice(&file_data.checksum[..12]);
+        let nonce = nonce_from_checksum(&file_data.checksum);
         let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
         let cipher = ChaCha20Poly1305::new((&key).into());
 
@@ -158,7 +144,7 @@ impl CompressionPipeline {
         encrypted.extend_from_slice(tag.as_slice());
         file_data.compressed_size = encrypted.len() as u64;
         file_data.compressed_content = Some(encrypted);
-        file_data.bitflags |= INDEX_FLAG_ENCRYPTED_DATA;
+        file_data.bitflags |= flags::ENCRYPTED_DATA;
         file_data.encryption_nonce_hex = Some(hex_encode(&nonce));
         file_data.encryption_tag_hex = Some(hex_encode(tag.as_slice()));
         Ok(())
@@ -168,14 +154,14 @@ impl CompressionPipeline {
         let mut pairs: Vec<(String, String)> = Vec::new();
 
         if self.config.encryption_passphrase.is_some() {
-            upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_ALGO, "chacha20poly1305");
+            upsert_extra_pair(&mut pairs, extra_keys::ENC_ALGO, "chacha20poly1305");
 
             if let Some(nonce) = &file_data.encryption_nonce_hex {
-                upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_NONCE, nonce.clone());
+                upsert_extra_pair(&mut pairs, extra_keys::ENC_NONCE, nonce.clone());
             }
 
             if let Some(tag) = &file_data.encryption_tag_hex {
-                upsert_extra_pair(&mut pairs, EXTRA_KEY_ENCRYPTION_TAG, tag.clone());
+                upsert_extra_pair(&mut pairs, extra_keys::ENC_TAG, tag.clone());
             }
         }
 
@@ -200,9 +186,9 @@ fn extract_image_metadata(bytes: &[u8]) -> Vec<(String, String)> {
     };
 
     for (tag, key) in [
-        (Tag::Make, EXTRA_KEY_IMAGE_MAKE),
-        (Tag::Model, EXTRA_KEY_IMAGE_MODEL),
-        (Tag::DateTimeOriginal, EXTRA_KEY_IMAGE_DATETIME_ORIGINAL),
+        (Tag::Make, extra_keys::IMG_MAKE),
+        (Tag::Model, extra_keys::IMG_MODEL),
+        (Tag::DateTimeOriginal, extra_keys::IMG_DATETIME_ORIGINAL),
     ] {
         push_exif_field(&mut metadata, &exif, tag, key);
     }
@@ -232,10 +218,10 @@ fn extract_audio_metadata(bytes: &[u8]) -> Vec<(String, String)> {
         .or_else(|| tagged_file.first_tag())
     {
         for (accessor, key) in [
-            (tag.title(), EXTRA_KEY_AUDIO_TITLE),
-            (tag.artist(), EXTRA_KEY_AUDIO_ARTIST),
-            (tag.album(), EXTRA_KEY_AUDIO_ALBUM),
-            (tag.genre(), EXTRA_KEY_AUDIO_GENRE),
+            (tag.title(), extra_keys::AUDIO_TITLE),
+            (tag.artist(), extra_keys::AUDIO_ARTIST),
+            (tag.album(), extra_keys::AUDIO_ALBUM),
+            (tag.genre(), extra_keys::AUDIO_GENRE),
         ] {
             if let Some(value) = accessor {
                 upsert_extra_pair(&mut metadata, key, value.to_string());
@@ -262,6 +248,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::flags;
     use std::path::Path;
 
     fn make_pipeline(compress_images: bool) -> CompressionPipeline {
@@ -464,8 +451,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            result.bitflags & INDEX_FLAG_ENCRYPTED_DATA,
-            INDEX_FLAG_ENCRYPTED_DATA
+            result.bitflags & flags::ENCRYPTED_DATA,
+            flags::ENCRYPTED_DATA
         );
         assert!(result.extra.contains("e=chacha20poly1305"));
         assert!(result.extra.contains("en="));

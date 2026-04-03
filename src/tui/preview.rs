@@ -1,3 +1,4 @@
+use crate::constants::extra_keys;
 use crate::extra::{is_entry_encrypted, parse_extra_pairs};
 use crate::extractor::{read_raw_entry_bytes, try_decrypt_bytes};
 use crate::models::archive::ArchiveIndexEntryWrapper;
@@ -17,17 +18,24 @@ static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 // ---------------------------------------------------------------------------
 
 /// Extra-field keys that belong to the encryption subsystem; never shown in UI.
-const ENCRYPTION_KEYS: &[&str] = &["e", "en", "et"];
+const ENCRYPTION_KEYS: &[&str] = &[
+    extra_keys::ENC_ALGO,
+    extra_keys::ENC_NONCE,
+    extra_keys::ENC_TAG,
+];
 
 /// Mapping of short extra-field keys to their `rust_i18n` key paths.
 pub const KNOWN_TAGS: &[(&str, &str)] = &[
-    ("imk", "tui.inspect.preview.tags.imk"),
-    ("imd", "tui.inspect.preview.tags.imd"),
-    ("idt", "tui.inspect.preview.tags.idt"),
-    ("atl", "tui.inspect.preview.tags.atl"),
-    ("aar", "tui.inspect.preview.tags.aar"),
-    ("aal", "tui.inspect.preview.tags.aal"),
-    ("agn", "tui.inspect.preview.tags.agn"),
+    (extra_keys::IMG_MAKE, "tui.inspect.preview.tags.imk"),
+    (extra_keys::IMG_MODEL, "tui.inspect.preview.tags.imd"),
+    (
+        extra_keys::IMG_DATETIME_ORIGINAL,
+        "tui.inspect.preview.tags.idt",
+    ),
+    (extra_keys::AUDIO_TITLE, "tui.inspect.preview.tags.atl"),
+    (extra_keys::AUDIO_ARTIST, "tui.inspect.preview.tags.aar"),
+    (extra_keys::AUDIO_ALBUM, "tui.inspect.preview.tags.aal"),
+    (extra_keys::AUDIO_GENRE, "tui.inspect.preview.tags.agn"),
 ];
 
 /// Maximum bytes of decoded text content shown in the preview.

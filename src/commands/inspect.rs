@@ -1,25 +1,22 @@
 use crate::i18n::Locale;
 use crate::reader;
 use crate::tui::{
-    App,
     state::{AppState, Focus, PreviewMode},
-    tree,
+    tree, App,
 };
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use ratatui::widgets::TableState;
 use std::fs::File;
 use std::path::PathBuf;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
-    let file_path = matches
-        .get_one::<String>("file")
-        .ok_or_else(|| {
-            eyre!(rust_i18n::t!(
-                "cli.common.errors.file_required",
-                locale = locale.as_str()
-            ))
-        })?;
+    let file_path = matches.get_one::<String>("file").ok_or_else(|| {
+        eyre!(rust_i18n::t!(
+            "cli.common.errors.file_required",
+            locale = locale.as_str()
+        ))
+    })?;
     let passphrase = matches.get_one::<String>("encrypt-passphrase").cloned();
 
     let mut file = File::open(file_path).wrap_err_with(|| {

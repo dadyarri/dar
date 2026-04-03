@@ -30,10 +30,7 @@ pub(crate) fn extract_dialog_rect(r: ratatui::layout::Rect) -> ratatui::layout::
 }
 
 /// Render the extract-to-path floating dialog.
-pub(crate) fn render_extract_dialog(
-    frame: &mut ratatui::Frame,
-    state: &AppState,
-) {
+pub(crate) fn render_extract_dialog(frame: &mut ratatui::Frame, state: &AppState) {
     let locale = state.locale.as_str();
 
     let title = rust_i18n::t!("tui.inspect.extract.title", locale = locale).into_owned();
@@ -52,9 +49,7 @@ pub(crate) fn render_extract_dialog(
         .fg(Color::Black)
         .bg(Color::White)
         .add_modifier(Modifier::BOLD);
-    let error_style = Style::default()
-        .fg(Color::Red)
-        .add_modifier(Modifier::BOLD);
+    let error_style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
 
     let popup_area = extract_dialog_rect(frame.area());
 
@@ -86,7 +81,10 @@ pub(crate) fn render_extract_dialog(
         let resolved_char_count = resolved_str.chars().count();
         let display_resolved = if resolved_char_count > inner_width.saturating_sub(6) {
             let skip = resolved_char_count - inner_width.saturating_sub(6);
-            format!("  → {}", resolved_str.chars().skip(skip).collect::<String>())
+            format!(
+                "  → {}",
+                resolved_str.chars().skip(skip).collect::<String>()
+            )
         } else {
             format!("  → {resolved_str}")
         };
@@ -150,7 +148,10 @@ pub(crate) fn draw_extract_status_bar(
 
     let input_spans = vec![
         Span::styled(format!(" {} ", label), prompt_style),
-        Span::styled(state.extract_path.clone(), Style::default().fg(Color::White)),
+        Span::styled(
+            state.extract_path.clone(),
+            Style::default().fg(Color::White),
+        ),
         Span::styled("█", cursor_style),
     ];
 
@@ -170,8 +171,7 @@ pub(crate) fn draw_extract_status_bar(
     }
     hint_spans.push(Span::raw("  "));
 
-    let status_chunks =
-        Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(area);
+    let status_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(area);
     frame.render_widget(
         Paragraph::new(Line::from(input_spans)).style(bar_bg),
         status_chunks[0],

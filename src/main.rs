@@ -5,6 +5,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod archive_builder;
 mod cli;
 mod commands;
+mod constants;
 mod counting_writer;
 mod encryption;
 mod extra;
@@ -64,8 +65,7 @@ fn main() -> Result<()> {
         }
         Some(("list", sub_matches)) => {
             commands::list::call(sub_matches, &locale).wrap_err(
-                rust_i18n::t!("cli.list.errors.list_failed", locale = locale.as_str())
-                    .to_string(),
+                rust_i18n::t!("cli.list.errors.list_failed", locale = locale.as_str()).to_string(),
             )?;
         }
         Some(("encrypt", sub_matches)) => {

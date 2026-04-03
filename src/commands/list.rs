@@ -1,9 +1,9 @@
 use super::shared::{compression_method_label, format_size};
+use crate::constants::flags;
 use crate::i18n::Locale;
-use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, INDEX_FLAG_LINKED_DATA};
 use crate::reader::load_archive;
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs::File;
 use std::path::Path;
@@ -45,8 +45,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             let compressed_size = entry.entry.compressed_size;
             let compression_method = u8::from(entry.entry.compression_method);
             let checksum_hex = hex_string(&entry.entry.checksum);
-            let encrypted = entry.entry.bitflags & INDEX_FLAG_ENCRYPTED_DATA != 0;
-            let linked = entry.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0;
+            let encrypted = entry.entry.bitflags & flags::ENCRYPTED_DATA != 0;
+            let linked = entry.entry.bitflags & flags::LINKED_DATA != 0;
 
             items.push(serde_json::json!({
                 "path": path,

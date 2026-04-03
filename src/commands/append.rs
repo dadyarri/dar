@@ -1,13 +1,15 @@
-use crate::archive_builder::{ArchiveBuilder, ConflictMode, make_renamed_path};
+use super::shared::{
+    prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome,
+};
+use crate::archive_builder::{make_renamed_path, ArchiveBuilder, ConflictMode};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::extractor::try_decrypt_bytes;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
-use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
+use crate::reader::{load_archive, ArchiveState, EncryptedEntryProbe};
 use crate::walker::scan_files;
-use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome};
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -43,7 +45,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     })?;
 
     let conflict_mode = parse_conflict_mode(
-        matches.get_one::<String>("on-conflict").map(String::as_str).unwrap_or("error"),
+        matches
+            .get_one::<String>("on-conflict")
+            .map(String::as_str)
+            .unwrap_or("error"),
         locale,
     )?;
 
@@ -164,7 +169,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
         println!(
             "{}",
-            t!("cli.append.messages.dry_run_footer", locale = locale.as_str())
+            t!(
+                "cli.append.messages.dry_run_footer",
+                locale = locale.as_str()
+            )
         );
         return Ok(());
     }
@@ -172,8 +180,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     // ── Pre-flight conflict check for error mode ─────────────────────────────
     // Must happen before we truncate the archive so it is never modified on error.
     if conflict_mode == ConflictMode::Error {
-        let existing_path_set: HashSet<&str> =
-            entries.iter().map(|e| e.path.as_str()).collect();
+        let existing_path_set: HashSet<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         let mut seen: HashSet<&str> = HashSet::new();
         let mut conflicts: Vec<&str> = Vec::new();
         for p in &prepared {
@@ -243,7 +250,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     builder.build()?;
 
     let elapsed = start.elapsed();
-    print_summary(count, total_original, total_stored, elapsed.as_secs_f64(), locale.as_str());
+    print_summary(
+        count,
+        total_original,
+        total_stored,
+        elapsed.as_secs_f64(),
+        locale.as_str(),
+    );
 
     Ok(())
 }
@@ -402,9 +415,18 @@ mod tests {
     fn test_parse_conflict_mode_valid_values() {
         use crate::archive_builder::ConflictMode;
         let locale = Locale::new("en");
-        assert_eq!(parse_conflict_mode("error", &locale).unwrap(), ConflictMode::Error);
-        assert_eq!(parse_conflict_mode("rename", &locale).unwrap(), ConflictMode::Rename);
-        assert_eq!(parse_conflict_mode("overwrite", &locale).unwrap(), ConflictMode::Overwrite);
+        assert_eq!(
+            parse_conflict_mode("error", &locale).unwrap(),
+            ConflictMode::Error
+        );
+        assert_eq!(
+            parse_conflict_mode("rename", &locale).unwrap(),
+            ConflictMode::Rename
+        );
+        assert_eq!(
+            parse_conflict_mode("overwrite", &locale).unwrap(),
+            ConflictMode::Overwrite
+        );
     }
 
     #[test]
@@ -485,7 +507,11 @@ mod tests {
         super::call(&sub_matches, &locale).unwrap();
 
         // After appending, the archive should contain both "file.txt" and "file-1.txt"
-        let mut fh = OpenOptions::new().read(true).write(true).open(&archive).unwrap();
+        let mut fh = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&archive)
+            .unwrap();
         let state = load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
         let paths: Vec<_> = state.entries.iter().map(|e| e.path.as_str()).collect();
         assert!(paths.contains(&"file.txt"), "original entry must be kept");
@@ -512,10 +538,21 @@ mod tests {
         super::call(&sub_matches, &locale).unwrap();
 
         // Archive should have exactly one entry named "file.txt"
-        let mut fh = OpenOptions::new().read(true).write(true).open(&archive).unwrap();
+        let mut fh = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&archive)
+            .unwrap();
         let state = load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
-        let count = state.entries.iter().filter(|e| e.path == "file.txt").count();
-        assert_eq!(count, 1, "overwrite mode must leave exactly one entry with the path");
+        let count = state
+            .entries
+            .iter()
+            .filter(|e| e.path == "file.txt")
+            .count();
+        assert_eq!(
+            count, 1,
+            "overwrite mode must leave exactly one entry with the path"
+        );
     }
 
     #[test]
@@ -568,15 +605,13 @@ mod tests {
             load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale).unwrap();
         let probe = state.encryption_probe.unwrap();
 
-        assert!(
-            verify_passphrase_matches(
-                &mut archive_file,
-                &probe,
-                "wrong",
-                archive_path.to_str().unwrap(),
-                &locale,
-            )
-            .is_err()
-        );
+        assert!(verify_passphrase_matches(
+            &mut archive_file,
+            &probe,
+            "wrong",
+            archive_path.to_str().unwrap(),
+            &locale,
+        )
+        .is_err());
     }
 }

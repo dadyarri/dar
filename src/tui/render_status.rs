@@ -44,8 +44,7 @@ pub(crate) fn draw_status_bar(
     let search_type_hint = rust_i18n::t!("tui.inspect.hint_search_type", locale = locale);
     let search_keep_hint = rust_i18n::t!("tui.inspect.hint_search_keep", locale = locale);
     let search_restore_hint = rust_i18n::t!("tui.inspect.hint_search_restore", locale = locale);
-    let meta_search_keep_hint =
-        rust_i18n::t!("tui.inspect.hint_meta_search_keep", locale = locale);
+    let meta_search_keep_hint = rust_i18n::t!("tui.inspect.hint_meta_search_keep", locale = locale);
     let meta_search_restore_hint =
         rust_i18n::t!("tui.inspect.hint_meta_search_restore", locale = locale);
 
@@ -217,8 +216,7 @@ pub(crate) fn draw_status_bar(
         let right_text = format!(" {} ", total_text);
         let right_width = right_text.chars().count() as u16;
         let status_chunks =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
-                .split(area);
+            Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)]).split(area);
 
         frame.render_widget(
             Paragraph::new(Line::from(hint_spans)).style(bar_bg),

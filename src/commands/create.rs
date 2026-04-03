@@ -1,11 +1,13 @@
+use super::shared::{
+    prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome,
+};
 use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
-use super::shared::{prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome};
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::fs;
 use std::fs::File;
@@ -59,7 +61,10 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         }
         println!(
             "{}",
-            t!("cli.create.messages.dry_run_footer", locale = locale.as_str())
+            t!(
+                "cli.create.messages.dry_run_footer",
+                locale = locale.as_str()
+            )
         );
         return Ok(());
     }
@@ -121,7 +126,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     builder.build()?;
 
     let elapsed = start.elapsed();
-    print_summary(count, total_original, total_stored, elapsed.as_secs_f64(), locale.as_str());
+    print_summary(
+        count,
+        total_original,
+        total_stored,
+        elapsed.as_secs_f64(),
+        locale.as_str(),
+    );
 
     Ok(())
 }
