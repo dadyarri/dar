@@ -133,10 +133,12 @@ impl CompressionPipeline {
         let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
         let cipher = ChaCha20Poly1305::new((&key).into());
 
-        let mut encrypted = match &file_data.compressed_content {
-            Some(content) => content.clone(),
-            None => file_data.original_content.clone(),
-        };
+        // Take ownership of the compressed bytes if available, otherwise fall back to the
+        // original content.  This avoids an extra clone for large files (7.1 in roadmap).
+        let mut encrypted = file_data
+            .compressed_content
+            .take()
+            .unwrap_or_else(|| file_data.original_content.clone());
 
         let tag =
             cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
@@ -182,6 +184,11 @@ fn extract_image_metadata(bytes: &[u8]) -> Vec<(String, String)> {
     let mut cursor = Cursor::new(bytes);
 
     let Ok(exif) = ExifReader::new().read_from_container(&mut cursor) else {
+        if std::env::var("DARI_DEBUG").is_ok() {
+            eprintln!(
+                "[dari debug] extract_image_metadata: failed to read EXIF data (file may have no EXIF or is not a supported image format)"
+            );
+        }
         return metadata;
     };
 
@@ -210,6 +217,11 @@ fn extract_audio_metadata(bytes: &[u8]) -> Vec<(String, String)> {
     let mut metadata = Vec::new();
 
     let Ok(tagged_file) = Probe::new(Cursor::new(bytes)).read() else {
+        if std::env::var("DARI_DEBUG").is_ok() {
+            eprintln!(
+                "[dari debug] extract_audio_metadata: failed to probe audio metadata (file may have no tags or is not a supported audio format)"
+            );
+        }
         return metadata;
     };
 

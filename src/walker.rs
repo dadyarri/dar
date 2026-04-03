@@ -126,4 +126,86 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].archive_path, "sub/nested.rs");
     }
+
+    // --- 5.7 .gitignore / .darignore respecting ---
+
+    #[test]
+    fn test_gitignore_excludes_matched_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a minimal .git directory so the ignore crate recognises this as a git repo
+        // and honours the .gitignore file (git_ignore only applies inside a git repository).
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        fs::write(dir.path().join(".gitignore"), b"secret.txt\n").unwrap();
+        fs::write(dir.path().join("public.txt"), b"ok").unwrap();
+        fs::write(dir.path().join("secret.txt"), b"hidden").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        let names: Vec<_> = files.iter().map(|f| f.archive_path.as_str()).collect();
+        assert!(
+            names.contains(&"public.txt"),
+            "public.txt should be included"
+        );
+        assert!(
+            !names.contains(&"secret.txt"),
+            "secret.txt should be excluded by .gitignore"
+        );
+    }
+
+    #[test]
+    fn test_darignore_excludes_matched_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".darignore"), b"private.log\n").unwrap();
+        fs::write(dir.path().join("app.rs"), b"fn main(){}").unwrap();
+        fs::write(dir.path().join("private.log"), b"logs").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        let names: Vec<_> = files.iter().map(|f| f.archive_path.as_str()).collect();
+        assert!(names.contains(&"app.rs"), "app.rs should be included");
+        assert!(
+            !names.contains(&"private.log"),
+            "private.log should be excluded by .darignore"
+        );
+    }
+
+    #[test]
+    fn test_file_matched_by_both_gitignore_and_darignore_is_excluded() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        fs::write(dir.path().join(".gitignore"), b"both.tmp\n").unwrap();
+        fs::write(dir.path().join(".darignore"), b"both.tmp\n").unwrap();
+        fs::write(dir.path().join("both.tmp"), b"x").unwrap();
+        fs::write(dir.path().join("keep.txt"), b"y").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        let names: Vec<_> = files.iter().map(|f| f.archive_path.as_str()).collect();
+        assert!(names.contains(&"keep.txt"), "keep.txt must be included");
+        assert!(
+            !names.contains(&"both.tmp"),
+            "both.tmp excluded by both ignore files"
+        );
+    }
+
+    #[test]
+    fn test_dotfiles_are_included_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden"), b"dot").unwrap();
+        fs::write(dir.path().join("normal.txt"), b"norm").unwrap();
+
+        let path_str = dir.path().to_str().unwrap().to_string();
+        let files = scan_with_args(&[&path_str]);
+
+        let names: Vec<_> = files.iter().map(|f| f.archive_path.as_str()).collect();
+        // .hidden should be included (hidden=false in WalkBuilder)
+        assert!(
+            names.contains(&".hidden"),
+            "dotfiles must be included when hidden=false"
+        );
+        assert!(names.contains(&"normal.txt"));
+    }
 }

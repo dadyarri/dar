@@ -24,57 +24,6 @@ worked in any order unless a dependency is noted.
 
 ## 2. Error Handling & Observability
 
-### 2.2 `P1` — Document the `Option`-returning pattern in `extractor.rs`
-
-`read_raw_entry_bytes` returns `Option<Vec<u8>>` (silently converting all I/O
-errors to `None`) while the rest of the extractor returns `eyre::Result`.
-This is intentional for best-effort preview reads, but:
-
-1. Add a `/// # Errors` or `/// Note: …` doc comment explaining *why* this
-   returns `Option` instead of `Result`.
-2. Consider adding a debug-level log (behind a `DARI_DEBUG` env-var flag)
-   so developers can diagnose unexpected `None` returns without a full rewrite.
-
----
-
-### 2.3 `P2` — Extract read-with-context helper in `reader.rs`
-
-`reader.rs` repeats the same `file.read_exact(…).wrap_err(t!(…))` pattern
-roughly 10 times.  Extract a private helper:
-
-```rust
-fn read_exact_ctx(
-    file: &mut File,
-    buf: &mut [u8],
-    ctx_key: &str,
-    locale: &Locale,
-) -> eyre::Result<()> {
-    file.read_exact(buf)
-        .wrap_err(t!(ctx_key, locale = locale.as_str()))
-}
-```
-
-This shortens `reader.rs` by ~60 lines and makes the control flow more
-readable.
-
----
-
-### 2.4 `P2` — Surface silent metadata-extraction failures in `pipeline.rs`
-
-Image EXIF and audio tag extraction currently fails silently:
-
-```rust
-let Ok(exif) = ExifReader::new().read_from_container(&mut cursor) else {
-    return metadata; // empty — no log, no warning
-};
-```
-
-**Proposed fix:** Emit a debug-level message (guarded by an env-var or a
-`--verbose` flag already present in the CLI) so operators can distinguish
-"file has no metadata" from "metadata library failed to parse valid file."
-
----
-
 ### 2.5 `P3` — Structured error types for validation failures
 
 All validation errors currently use `eyre!()` with a translated string.  For
@@ -100,7 +49,7 @@ for eyre::Report` impl.
 
 ### 3.1 `P1` — Split `archive_builder.rs` into focused modules
 
-At 858 lines `archive_builder.rs` has at least four distinct responsibilities:
+At ~880 lines `archive_builder.rs` has at least four distinct responsibilities:
 
 | Responsibility | Suggested module |
 |----------------|-----------------|
@@ -141,7 +90,7 @@ allows:
 
 ---
 
-### 3.3 `P2` — Reduce `commands/append.rs::call()` length (582 lines total, ~249-line function)
+### 3.3 `P2` — Reduce `commands/append.rs::call()` length (~249-line function)
 
 `call()` does argument parsing, archive loading, encryption validation,
 passphrase verification, dry-run simulation, and archive writing — all in one
@@ -207,12 +156,8 @@ tests.
 
 ### 4.2 `P1` — Make `walker::scan_files` accept an iterator source
 
-`walker.rs` wraps `ignore::WalkBuilder` directly.  This means:
-
-- Tests that check `.gitignore` / `.darignore` behaviour need real temporary
-  directories with real files and ignore files.
-- There is no way to inject a synthetic file list without touching the
-  filesystem.
+`walker.rs` wraps `ignore::WalkBuilder` directly.  This means there is no way
+to inject a synthetic file list without touching the filesystem.
 
 **Proposed fix:** Keep `scan_files(paths, locale)` as the public API but
 extract the actual walk behind a `trait FileSource`:
@@ -232,7 +177,7 @@ pub struct FixedFileSource(Vec<ScannedFile>); // test implementation
 
 ### 4.3 `P2` — Use `Cursor<Vec<u8>>` in `reader.rs` tests instead of `tempfile`
 
-After implementing 4.1, all 14 `reader.rs` tests can drop `tempfile` and use
+After implementing 4.1, all `reader.rs` tests can drop `tempfile` and use
 `Cursor<Vec<u8>>`.  This removes filesystem I/O from the test hot path,
 speeding them up and making them reproducible regardless of filesystem state.
 
@@ -274,56 +219,6 @@ pub fn draw_status(frame: &mut Frame, state: &AppState) {
 ---
 
 ## 5. Test-Coverage Gaps
-
-### 5.3 `P2` — Deduplication with three or more identical files
-
-Current tests only verify the two-file dedup case.  Add a test that adds the
-same content three times and asserts:
-
-- Only one data block is written (offset reuse).
-- All three index entries carry `INDEX_FLAG_LINKED_DATA` except the first.
-- Extraction of any of the three paths returns the correct content.
-
----
-
-### 5.4 `P2` — Path sanitisation adversarial cases in `extractor.rs`
-
-`calculate_archive_path` in `utils.rs` already strips `../` sequences, but the
-extractor's final `fs::create_dir_all` / write path is not tested against:
-
-- `../../etc/passwd`
-- Absolute paths (`/tmp/evil`)
-- Windows-style drive prefixes (`C:\Windows\`)
-- Null bytes in path (`foo\0bar`)
-
-Add dedicated tests asserting that these all result in a sanitised, relative,
-safe path.
-
----
-
-### 5.5 `P2` — Corrupt/truncated archive handling in `reader.rs`
-
-Current negative tests cover wrong signatures and wrong versions.  Add tests
-for:
-
-- Footer present but `index_offset` points beyond EOF.
-- Valid header + footer but index bytes are all zeros.
-- Archive truncated mid-index-entry.
-- Archive with zero entries (edge case for empty archive creation).
-
----
-
-### 5.7 `P2` — `.gitignore` / `.darignore` respecting in `walker.rs`
-
-The current walker tests only verify recursive traversal.  Add tests (using
-`tempfile` directories with actual ignore files) that:
-
-- Files matched by `.gitignore` are excluded.
-- Files matched by `.darignore` are excluded.
-- Files matched by both are excluded.
-- Dotfiles are **included** (current default).
-
----
 
 ### 5.8 `P3` — `commands/list.rs` output formatting
 
@@ -449,25 +344,6 @@ required).
 
 ## 7. Performance & Resource Usage
 
-### 7.1 `P2` — Avoid cloning compressed content in `pipeline.rs`
-
-`pipeline.rs` lines ~151-152 clone either `compressed_content` or
-`original_content` into a new `Vec<u8>` before encryption.  With large files
-this doubles peak memory usage.
-
-**Proposed fix:** Consume the inner `Vec` using `Option::take` or by
-restructuring `PipelineFileData` so the encryption step takes ownership
-instead of borrowing:
-
-```rust
-let mut to_encrypt = file_data
-    .compressed_content
-    .take()
-    .unwrap_or(file_data.original_content);
-```
-
----
-
 ### 7.2 `P2` — Stream large-file encryption instead of buffering
 
 Currently the entire (potentially multi-GB) compressed buffer is held in RAM
@@ -480,11 +356,10 @@ Two long-term options (format changes — v6):
 a. **Chunked AEAD:** Split the file into 1 MB segments, each with its own
    nonce/tag.  Streaming is possible; random access supported.
 b. **Encrypt-then-Compress swap:** Compress first, buffer is already the
-   compressed (smaller) bytes, then encrypt.  Current code already does this
-   but the clone on line 151 can be removed as above.
+   compressed (smaller) bytes, then encrypt.  The unnecessary clone has already
+   been removed (7.1 — done); option (a) remains a format-v6 work item.
 
 Option (a) is a breaking format change and belongs in a major version bump.
-Option (b) is a code-quality fix (7.1) independent of the format.
 
 ---
 
@@ -535,18 +410,6 @@ Run `cargo audit` and `cargo outdated` periodically.  Notable items currently:
 
 ## 9. Documentation
 
-### 9.1 `P2` — Add `/// # Errors` sections to all public `Result`-returning functions
-
-No public function currently has a `/// # Errors` section, making it
-impossible for downstream callers (or contributors) to know what failure modes
-to handle.
-
-**Scope:** `reader::load_archive`, `extractor::extract_entry`,
-`archive_builder::ArchiveBuilder::add_file`, `pipeline::run`, and all
-`commands::*/call` functions.
-
----
-
 ### 9.2 `P2` — Add `/// # Panics` where applicable
 
 Two `unwrap()` calls in `tui/mod.rs` (lines 316, 386) are safe by invariant
@@ -579,8 +442,6 @@ tooling-instructions.  Extract a standalone `docs/format.md` that documents:
 
 | Feature | Notes |
 |---------|-------|
-| `dari completions <SHELL>` subcommand | Tracked in `plan.md` Step 19 |
-| `encrypt` command: `-o` / `-i` flags | Tracked in `plan.md` Step 20 |
 | Streaming encryption (chunked AEAD) | See 7.2; requires format v6 |
 | `--json` output mode | Requires structured `DariError` (see 2.5) |
 | Customisable TUI keybindings | See 6.3 |
@@ -608,12 +469,12 @@ preserve user experience:
 
 | Sprint | Items | Goal |
 |--------|-------|------|
-| 1 | 2.3, 3.1 (split `archive_builder`) | Error clarity + module split |
+| 1 | 3.1 (split `archive_builder`) | Module split |
 | 2 | 4.1, 4.2 (filesystem abstraction) | Core testability unlock |
-| 3 | 5.3–5.5, 5.7 (gap coverage) | Targeted unit-test additions |
-| 4 | 3.3, 3.4, 4.4 (injection points) | Dependency injection for pipeline/command |
+| 3 | 4.3, 4.4 (in-memory tests + pipeline injection) | Test-speed improvements |
+| 4 | 3.2, 3.3, 3.4 (injection points) | Dependency injection for pipeline/command |
 | 5 | 6.1, 6.2 (TUI decompose) | TUI maintainability |
 | 6 | 4.5, 5.9 (TUI pure functions + tests) | TUI testability |
-| 7 | 7.1, 7.3, 3.5 (performance) | Performance pass |
+| 7 | 7.2, 7.3, 2.5 (performance + error types) | Performance pass |
 | 8 | 8.2, 8.3 (features + audit) | Binary size + security |
-| 9 | 9.1–9.4 (docs) | Documentation completion |
+| 9 | 9.2–9.4, 5.8–5.11 (docs + remaining tests) | Documentation + coverage |

@@ -244,6 +244,12 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     /// - [`ConflictMode::Rename`]    — the path is suffixed with `-1`, `-2`, … until free.
     /// - [`ConflictMode::Overwrite`] — the existing entry is dropped from the index (its data
     ///   block becomes dead bytes since the format has no compaction step).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `archive_path` already exists and [`ConflictMode::Error`] is active,
+    /// - writing the file data block or the index entry fails due to an I/O error.
     pub fn commit_prepared(&mut self, prepared: PreparedFile) -> Result<FileAddOutcome> {
         let mut archive_path = prepared.archive_path;
         let pipeline_result = prepared.pipeline_result;
@@ -370,11 +376,23 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     /// Convenience wrapper: prepare and commit a single file.
     /// Use [`prepare_file_from_disk`] + [`Self::commit_prepared`] for parallel workflows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read from disk, or if committing it fails
+    /// (see [`Self::commit_prepared`]).
     pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<FileAddOutcome> {
         let prepared = prepare_file_from_disk(&self.pipeline, file_path, archive_path)?;
         self.commit_prepared(prepared)
     }
 
+    /// Finalise the archive by writing all index entries and the footer, then flushing.
+    ///
+    /// Must be called exactly once after all files have been added.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any index entry, the footer, or the flush fails due to an I/O error.
     pub fn build(&mut self) -> Result<()> {
         // Record where the index section begins
         let index_offset =
@@ -872,5 +890,119 @@ mod tests {
         set.insert("assets/logo-1.png".to_string());
         let renamed = make_renamed_path("assets/logo.png", &set);
         assert_eq!(renamed, "assets/logo-2.png");
+    }
+
+    // 5.3 — Deduplication with three or more identical files
+
+    #[test]
+    fn test_dedup_three_identical_files_share_one_data_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("copy1.bin");
+        let f2 = dir.path().join("copy2.bin");
+        let f3 = dir.path().join("copy3.bin");
+        let content = b"deduplicated content shared three times";
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+        std::fs::write(&f3, content).unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        builder.write_header().unwrap();
+        builder.add_file(&f1, "copy1.bin").unwrap();
+        builder.add_file(&f2, "copy2.bin").unwrap();
+        builder.add_file(&f3, "copy3.bin").unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        // Parse footer to find index_offset
+        let footer_base = data.len() - size_of::<ArchiveFooter>();
+        let index_offset = read_bytes_as::<u32>(&data, footer_base + 7).unwrap() as usize;
+        let entry_size = size_of::<crate::models::archive::ArchiveIndexEntry>();
+
+        // Parse first entry: offset + path/extra lengths
+        let first_offset = read_bytes_as::<u64>(&data, index_offset).unwrap();
+        let first_flags = read_bytes_as::<u16>(&data, index_offset + 8).unwrap();
+        let first_path_len = read_bytes_as::<u32>(&data, index_offset + 77).unwrap() as usize;
+        let first_extra_len = read_bytes_as::<u32>(&data, index_offset + 81).unwrap() as usize;
+
+        // Parse second entry
+        let second_base = index_offset + entry_size + first_path_len + first_extra_len;
+        let second_offset = read_bytes_as::<u64>(&data, second_base).unwrap();
+        let second_flags = read_bytes_as::<u16>(&data, second_base + 8).unwrap();
+        let second_path_len = read_bytes_as::<u32>(&data, second_base + 77).unwrap() as usize;
+        let second_extra_len = read_bytes_as::<u32>(&data, second_base + 81).unwrap() as usize;
+
+        // Parse third entry
+        let third_base = second_base + entry_size + second_path_len + second_extra_len;
+        let third_offset = read_bytes_as::<u64>(&data, third_base).unwrap();
+        let third_flags = read_bytes_as::<u16>(&data, third_base + 8).unwrap();
+
+        // First entry must NOT carry LINKED_DATA
+        assert_eq!(
+            first_flags & flags::LINKED_DATA,
+            0,
+            "first entry must not be linked"
+        );
+        // Second and third must be linked to the first data block
+        assert_eq!(
+            second_flags & flags::LINKED_DATA,
+            flags::LINKED_DATA,
+            "second entry must be linked"
+        );
+        assert_eq!(
+            third_flags & flags::LINKED_DATA,
+            flags::LINKED_DATA,
+            "third entry must be linked"
+        );
+        // All three share the same data offset
+        assert_eq!(
+            first_offset, second_offset,
+            "second entry must reuse first data offset"
+        );
+        assert_eq!(
+            first_offset, third_offset,
+            "third entry must reuse first data offset"
+        );
+    }
+
+    #[test]
+    fn test_dedup_three_identical_files_all_extract_correctly() {
+        use crate::extractor::extract_entries;
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"shared content across three copies";
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.txt");
+        let f3 = dir.path().join("c.txt");
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+        std::fs::write(&f3, content).unwrap();
+
+        let archive_path = dir.path().join("triple_dedup.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_config(file_handle, PipelineConfig::default());
+            builder.write_header().unwrap();
+            builder.add_file(&f1, "a.txt").unwrap();
+            builder.add_file(&f2, "b.txt").unwrap();
+            builder.add_file(&f3, "c.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut f = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut f, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 3);
+
+        let dest = dir.path().join("out");
+        let refs: Vec<_> = state.entries.iter().collect();
+        extract_entries(&archive_path, &refs, &state.entries, &dest, None).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), content);
+        assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), content);
+        assert_eq!(std::fs::read(dest.join("c.txt")).unwrap(), content);
     }
 }

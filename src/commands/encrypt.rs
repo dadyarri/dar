@@ -16,8 +16,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn create() -> std::io::Result<Self> {
-        let path = std::env::temp_dir()
-            .join(format!("dari-encrypt-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("dari-encrypt-{}", std::process::id()));
         fs::create_dir_all(&path)?;
         Ok(TempDir(path))
     }
