@@ -1,6 +1,7 @@
+use crate::constants::format;
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
-use eyre::{Error, Result, eyre};
+use eyre::{eyre, Error, Result};
 use rust_i18n::t;
 use std::io::Write;
 
@@ -18,8 +19,8 @@ unsafe impl Zeroable for ArchiveHeader {}
 impl ArchiveHeader {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            signature: *b"DARI",
-            version: 5,
+            signature: *format::SIGNATURE,
+            version: format::VERSION,
             timestamp: get_unix_timestamp()?,
         })
     }
@@ -43,7 +44,7 @@ unsafe impl Zeroable for ArchiveFooter {}
 impl ArchiveFooter {
     pub fn new(index_offset: u32, amount_of_files: u32) -> Self {
         Self {
-            signature: *b"DARIEND",
+            signature: *format::FOOTER_SIGNATURE,
             index_offset,
             amount_of_files,
         }

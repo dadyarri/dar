@@ -1,6 +1,7 @@
+use crate::constants::extra_keys;
 use crate::extra::parse_extra_pairs;
 use crate::models::archive::ArchiveIndexEntryWrapper;
-use crate::tui::tree::{FlatNode, TreeNode, flatten_visible};
+use crate::tui::tree::{flatten_visible, FlatNode, TreeNode};
 
 // ---------------------------------------------------------------------------
 // Tag alias table
@@ -13,13 +14,13 @@ use crate::tui::tree::{FlatNode, TreeNode, flatten_visible};
 /// key is the *primary* alias shown in help text; secondary aliases are
 /// alternatives the user may also type.
 pub const TAG_ALIASES: &[(&str, &str)] = &[
-    ("artist",   "aar"),
-    ("album",    "aal"),
-    ("title",    "atl"),
-    ("genre",    "agn"),
-    ("make",     "imk"),
-    ("model",    "imd"),
-    ("date",     "idt"),
+    ("artist", extra_keys::AUDIO_ARTIST),
+    ("album", extra_keys::AUDIO_ALBUM),
+    ("title", extra_keys::AUDIO_TITLE),
+    ("genre", extra_keys::AUDIO_GENRE),
+    ("make", extra_keys::IMG_MAKE),
+    ("model", extra_keys::IMG_MODEL),
+    ("date", extra_keys::IMG_DATETIME_ORIGINAL),
 ];
 
 /// Full tag information: `(alias, internal_key, i18n_description_key)`.
@@ -27,13 +28,37 @@ pub const TAG_ALIASES: &[(&str, &str)] = &[
 /// Used by the help panel to render a table of available tags with their
 /// localised descriptions.
 pub const TAG_ALIASES_FULL: &[(&str, &str, &str)] = &[
-    ("artist",  "aar", "tui.inspect.preview.tags.aar"),
-    ("album",   "aal", "tui.inspect.preview.tags.aal"),
-    ("title",   "atl", "tui.inspect.preview.tags.atl"),
-    ("genre",   "agn", "tui.inspect.preview.tags.agn"),
-    ("make",    "imk", "tui.inspect.preview.tags.imk"),
-    ("model",   "imd", "tui.inspect.preview.tags.imd"),
-    ("date",    "idt", "tui.inspect.preview.tags.idt"),
+    (
+        "artist",
+        extra_keys::AUDIO_ARTIST,
+        "tui.inspect.preview.tags.aar",
+    ),
+    (
+        "album",
+        extra_keys::AUDIO_ALBUM,
+        "tui.inspect.preview.tags.aal",
+    ),
+    (
+        "title",
+        extra_keys::AUDIO_TITLE,
+        "tui.inspect.preview.tags.atl",
+    ),
+    (
+        "genre",
+        extra_keys::AUDIO_GENRE,
+        "tui.inspect.preview.tags.agn",
+    ),
+    ("make", extra_keys::IMG_MAKE, "tui.inspect.preview.tags.imk"),
+    (
+        "model",
+        extra_keys::IMG_MODEL,
+        "tui.inspect.preview.tags.imd",
+    ),
+    (
+        "date",
+        extra_keys::IMG_DATETIME_ORIGINAL,
+        "tui.inspect.preview.tags.idt",
+    ),
 ];
 
 /// Resolve a user-facing alias (case-insensitive) to an internal extra-field key.
@@ -256,7 +281,10 @@ mod tests {
 
     #[test]
     fn camera_and_make_alias() {
-        assert_eq!(parse_meta_query("make:nikon", "en").unwrap()[0].internal_key, "imk");
+        assert_eq!(
+            parse_meta_query("make:nikon", "en").unwrap()[0].internal_key,
+            "imk"
+        );
     }
 
     #[test]
@@ -343,9 +371,3 @@ mod tests {
         assert!(results.is_empty());
     }
 }
-
-
-
-
-
-

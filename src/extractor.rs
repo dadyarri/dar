@@ -1,10 +1,12 @@
+use crate::constants::crypto;
+use crate::constants::flags;
+use crate::encryption::nonce_from_checksum;
 use crate::models::archive::ArchiveIndexEntryWrapper;
-use crate::pipeline::{INDEX_FLAG_ENCRYPTED_DATA, INDEX_FLAG_LINKED_DATA};
 use crate::traits::decompress_bytes;
 use crate::utils::sanitize_path;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
-use eyre::{Result, eyre};
+use eyre::{eyre, Result};
 use rust_i18n::t;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -32,7 +34,7 @@ pub fn extract_entry(
 /// Extract multiple entries from an archive on disk.
 ///
 /// Opens the archive once and processes every entry in `entries_to_extract` in
-/// order.  If `INDEX_FLAG_LINKED_DATA` is set on an entry the primary entry
+/// order.  If `flags::LINKED_DATA` is set on an entry the primary entry
 /// (same checksum, no linked flag) is looked up in `all_entries` to resolve
 /// the real data offset.
 pub fn extract_entries(
@@ -72,7 +74,7 @@ fn extract_one(
     let compressed_size = entry.entry.compressed_size;
 
     // Resolve the real data offset: linked entries share the primary's offset.
-    let data_offset = if bitflags & INDEX_FLAG_LINKED_DATA != 0 {
+    let data_offset = if bitflags & flags::LINKED_DATA != 0 {
         resolve_primary_offset(&checksum, all_entries).ok_or_else(|| {
             eyre!(t!(
                 "cli.extractor.errors.no_primary_for_linked",
@@ -91,7 +93,7 @@ fn extract_one(
         .map_err(|_| eyre!(t!("cli.extractor.errors.read_failed")))?;
 
     // Decrypt when the entry carries the encrypted flag.
-    let decrypted = if bitflags & INDEX_FLAG_ENCRYPTED_DATA != 0 {
+    let decrypted = if bitflags & flags::ENCRYPTED_DATA != 0 {
         let pass = passphrase.ok_or_else(|| {
             eyre!(t!(
                 "cli.extractor.errors.passphrase_required",
@@ -147,13 +149,13 @@ pub fn resolve_primary_offset(
 ) -> Option<u64> {
     all_entries
         .iter()
-        .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & INDEX_FLAG_LINKED_DATA) == 0)
+        .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & flags::LINKED_DATA) == 0)
         .map(|e| e.entry.offset)
 }
 
 /// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
 ///
-/// Follows `INDEX_FLAG_LINKED_DATA` to resolve the actual data offset.  Returns
+/// Follows `flags::LINKED_DATA` to resolve the actual data offset.  Returns
 /// `None` on any I/O error so callers that only need a best-effort read (e.g.
 /// the inspect preview) can handle the failure gracefully.
 pub fn read_raw_entry_bytes(
@@ -161,7 +163,7 @@ pub fn read_raw_entry_bytes(
     entry: &ArchiveIndexEntryWrapper,
     all_entries: &[ArchiveIndexEntryWrapper],
 ) -> Option<Vec<u8>> {
-    let offset = if entry.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0 {
+    let offset = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
         resolve_primary_offset(&entry.entry.checksum, all_entries)?
     } else {
         entry.entry.offset
@@ -180,13 +182,12 @@ pub fn read_raw_entry_bytes(
 /// wraps this for the extractor where a proper `Result` with a user-facing message
 /// is expected.
 pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<Vec<u8>> {
-    if data.len() < 16 {
+    if data.len() < crypto::TAG_LEN {
         return None;
     }
-    let tag_bytes = &data[data.len() - 16..];
-    let mut ciphertext = data[..data.len() - 16].to_vec();
-    let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&checksum[..12]);
+    let tag_bytes = &data[data.len() - crypto::TAG_LEN..];
+    let mut ciphertext = data[..data.len() - crypto::TAG_LEN].to_vec();
+    let nonce = nonce_from_checksum(checksum);
     let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
     let cipher = ChaCha20Poly1305::new((&key).into());
     cipher
@@ -202,11 +203,11 @@ pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> 
 
 /// Decrypt ChaCha20-Poly1305 ciphertext, returning a user-facing `Result`.
 ///
-/// The nonce is the first 12 bytes of `checksum` (matching the encoding in
-/// `pipeline.rs`).  The authentication tag occupies the last 16 bytes of
-/// `data`; the rest is the actual ciphertext.
+/// The nonce is the first `crypto::NONCE_LEN` bytes of `checksum` (matching the
+/// encoding in `pipeline.rs`).  The authentication tag occupies the last
+/// `crypto::TAG_LEN` bytes of `data`; the rest is the actual ciphertext.
 fn decrypt_data(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Result<Vec<u8>> {
-    if data.len() < 16 {
+    if data.len() < crypto::TAG_LEN {
         return Err(eyre!(t!("cli.extractor.errors.data_too_short")));
     }
     try_decrypt_bytes(data, checksum, passphrase)
@@ -379,7 +380,7 @@ mod tests {
         // At least one entry should carry the linked flag.
         let has_linked = entries
             .iter()
-            .any(|e| e.entry.bitflags & INDEX_FLAG_LINKED_DATA != 0);
+            .any(|e| e.entry.bitflags & flags::LINKED_DATA != 0);
         assert!(has_linked, "expected a linked entry after deduplication");
 
         let dest = dir.path().join("out_dedup");

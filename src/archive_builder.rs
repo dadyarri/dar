@@ -1,19 +1,17 @@
+use crate::constants::flags;
+use crate::constants::format::CHUNK_SIZE;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
 };
-use crate::pipeline::{
-    CompressionPipeline, INDEX_FLAG_LINKED_DATA, PipelineConfig, PipelineFileData,
-};
+use crate::pipeline::{CompressionPipeline, PipelineConfig, PipelineFileData};
 use crate::utils::get_mode;
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, metadata};
+use std::fs::{metadata, File};
 use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
-
-const CHUNK_SIZE: usize = 512 * 1024; // 512KB
 
 /// How to handle an archive-relative path that already exists in the archive
 /// when `dari append` is called.
@@ -34,7 +32,11 @@ pub fn make_renamed_path(path: &str, path_set: &HashSet<String>) -> String {
     let slash_pos = path.rfind('/').map_or(0, |p| p + 1);
     let filename = &path[slash_pos..];
     let (dir_prefix, stem, ext) = if let Some(dot_pos) = filename.rfind('.') {
-        (&path[..slash_pos], &filename[..dot_pos], &filename[dot_pos..])
+        (
+            &path[..slash_pos],
+            &filename[..dot_pos],
+            &filename[dot_pos..],
+        )
     } else {
         (&path[..slash_pos], filename, "")
     };
@@ -165,7 +167,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     pub fn import_existing_entries(&mut self, existing_entries: Vec<ArchiveIndexEntryWrapper>) {
         for wrapper in existing_entries {
-            if wrapper.entry.bitflags & INDEX_FLAG_LINKED_DATA == 0 {
+            if wrapper.entry.bitflags & flags::LINKED_DATA == 0 {
                 self.dedup_index.insert(
                     wrapper.entry.checksum,
                     ExistingFileData {
@@ -223,8 +225,8 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                     // dedup index (if it was a primary block) so that future files
                     // with the same checksum don't get linked to now-dead bytes.
                     if let Some(removed) = self.entries.iter().find(|e| e.path == archive_path) {
-                        let flags = removed.entry.bitflags;
-                        if flags & INDEX_FLAG_LINKED_DATA == 0 {
+                        let entry_bitflags = removed.entry.bitflags;
+                        if entry_bitflags & flags::LINKED_DATA == 0 {
                             self.dedup_index.remove(&removed.entry.checksum);
                         }
                     }
@@ -235,7 +237,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         }
 
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
-            bitflags |= INDEX_FLAG_LINKED_DATA;
+            bitflags |= flags::LINKED_DATA;
 
             self.entries.push(ArchiveIndexEntryWrapper::new(
                 ArchiveIndexEntry {
@@ -369,7 +371,6 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 mod tests {
     use super::*;
     use crate::models::archive::{ArchiveFooter, ArchiveHeader, CompressionMethod};
-    use crate::pipeline::INDEX_FLAG_LINKED_DATA;
     use crate::utils::read_bytes_as;
     use std::io::Cursor;
     use std::mem::size_of;
@@ -540,7 +541,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_dedup_links_second_file_to_first_offset() {
         let dir = tempfile::tempdir().unwrap();
@@ -574,8 +574,8 @@ mod tests {
             "deduplicated file should link to first offset"
         );
         assert_eq!(
-            second_flags & INDEX_FLAG_LINKED_DATA,
-            INDEX_FLAG_LINKED_DATA,
+            second_flags & flags::LINKED_DATA,
+            flags::LINKED_DATA,
             "deduplicated entry should set linked bitflag"
         );
     }
@@ -613,7 +613,7 @@ mod tests {
             "different files should keep distinct data offsets"
         );
         assert_eq!(
-            second_flags & INDEX_FLAG_LINKED_DATA,
+            second_flags & flags::LINKED_DATA,
             0,
             "non-duplicate entry must not set linked bitflag"
         );
@@ -666,8 +666,8 @@ mod tests {
 
         let appended_flags = unsafe { ptr::read_unaligned(ptr::addr_of!(appended.entry.bitflags)) };
         assert_eq!(
-            appended_flags & INDEX_FLAG_LINKED_DATA,
-            INDEX_FLAG_LINKED_DATA,
+            appended_flags & flags::LINKED_DATA,
+            flags::LINKED_DATA,
             "appended entry should reuse imported data block"
         );
     }
@@ -761,8 +761,15 @@ mod tests {
         builder.add_file(&f2, "config.toml").unwrap();
 
         // Only one entry with path "config.toml" should remain
-        let count = builder.entries.iter().filter(|e| e.path == "config.toml").count();
-        assert_eq!(count, 1, "overwrite mode should leave exactly one entry for the path");
+        let count = builder
+            .entries
+            .iter()
+            .filter(|e| e.path == "config.toml")
+            .count();
+        assert_eq!(
+            count, 1,
+            "overwrite mode should leave exactly one entry for the path"
+        );
     }
 
     #[test]

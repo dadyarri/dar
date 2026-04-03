@@ -1,8 +1,4 @@
-use crate::tui::{
-    meta_search::TAG_ALIASES_FULL,
-    preview::PreviewContent,
-    state::AppState,
-};
+use crate::tui::{meta_search::TAG_ALIASES_FULL, preview::PreviewContent, state::AppState};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
@@ -72,12 +68,22 @@ fn ratio_label(compressed: u64, original: u64, locale: &str) -> String {
     let ratio = compressed as f64 / original as f64;
     if compressed < original {
         let pct = format!("{:.1}", (1.0 - ratio) * 100.0);
-        rust_i18n::t!("tui.inspect.ratio.saved", locale = locale, pct = pct.as_str()).into_owned()
+        rust_i18n::t!(
+            "tui.inspect.ratio.saved",
+            locale = locale,
+            pct = pct.as_str()
+        )
+        .into_owned()
     } else if compressed == original {
         rust_i18n::t!("tui.inspect.ratio.no_change", locale = locale).into_owned()
     } else {
         let pct = format!("{:.1}", (ratio - 1.0) * 100.0);
-        rust_i18n::t!("tui.inspect.ratio.larger", locale = locale, pct = pct.as_str()).into_owned()
+        rust_i18n::t!(
+            "tui.inspect.ratio.larger",
+            locale = locale,
+            pct = pct.as_str()
+        )
+        .into_owned()
     }
 }
 
@@ -200,8 +206,7 @@ pub(crate) fn render_metadata_panel(
         rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
 
     let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label =
-            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
         (label, human_size(meta.original_size))
     } else {
         let label =

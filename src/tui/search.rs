@@ -1,7 +1,7 @@
-use crate::tui::tree::{FlatNode, TreeNode, flatten_visible};
+use crate::tui::tree::{flatten_visible, FlatNode, TreeNode};
 use nucleo_matcher::{
-    Config, Matcher, Utf32Str,
     pattern::{CaseMatching, Normalization, Pattern},
+    Config, Matcher, Utf32Str,
 };
 
 /// Return a flat list of visible rows filtered by `query`.
@@ -40,7 +40,11 @@ fn collect_scored_files(
             let mut buf = Vec::new();
             let mut indices: Vec<u32> = Vec::new();
             let score = pattern
-                .indices(Utf32Str::new(&child.full_path, &mut buf), matcher, &mut indices)
+                .indices(
+                    Utf32Str::new(&child.full_path, &mut buf),
+                    matcher,
+                    &mut indices,
+                )
                 .unwrap_or(0);
             if score > 0 {
                 indices.sort_unstable();
