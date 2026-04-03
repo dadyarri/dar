@@ -425,6 +425,15 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         Ok(())
     }
+
+    /// Consume the builder and return the underlying writer.
+    ///
+    /// Useful when the writer is a `Cursor<Vec<u8>>` and the caller needs to
+    /// inspect or reuse the raw bytes after [`Self::build`] has been called.
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 #[cfg(test)]

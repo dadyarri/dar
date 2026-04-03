@@ -2,7 +2,9 @@ use crate::counting_writer::CountingWriter;
 use crate::models::archive::CompressionMethod;
 use eyre::{Result, eyre};
 use rust_i18n::t;
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::OnceLock;
 
 pub struct CompressionOutcome {
     pub bytes_written: u64,
@@ -48,7 +50,7 @@ impl FromLeBytes for u64 {
     }
 }
 
-pub trait Compressor {
+pub trait Compressor: Sync + Send {
     fn get_best_extensions(&self) -> &[&str];
     /// Compress `input` into `output`, returning the number of bytes written.
     ///
@@ -238,29 +240,63 @@ pub static ZSTANDARD_COMPRESSOR: ZStandardCompressor = ZStandardCompressor;
 pub static LZMA_COMPRESSOR: LzmaCompressor = LzmaCompressor;
 pub static PNG_OXIPNG_COMPRESSOR: PngOxipngCompressor = PngOxipngCompressor;
 
+/// A registry that maps file extensions to [`Compressor`] instances in O(1) time.
+///
+/// Use [`CompressorRegistry::default_registry`] to obtain the standard mapping used
+/// by `dari`.  The registry can also be constructed with a custom set of compressors
+/// for testing (e.g., "always use ZStd regardless of extension").
+pub struct CompressorRegistry {
+    map: HashMap<&'static str, &'static dyn Compressor>,
+    default: &'static dyn Compressor,
+}
+
+impl CompressorRegistry {
+    /// Build the default registry from all built-in compressors.
+    ///
+    /// Extensions are registered in priority order (None → Brotli → ZStandard → Lzma).
+    /// If the same extension appears in multiple compressors the first match wins, which
+    /// matches the behaviour of the previous linear-scan implementation.
+    pub fn default_registry() -> Self {
+        let mut map: HashMap<&'static str, &'static dyn Compressor> = HashMap::new();
+        let compressors: &[&'static dyn Compressor] = &[
+            &NONE_COMPRESSOR,
+            &BROTLI_COMPRESSOR,
+            &ZSTANDARD_COMPRESSOR,
+            &LZMA_COMPRESSOR,
+        ];
+        for &compressor in compressors {
+            for &ext in compressor.get_best_extensions() {
+                map.entry(ext).or_insert(compressor);
+            }
+        }
+        Self {
+            map,
+            default: &ZSTANDARD_COMPRESSOR,
+        }
+    }
+
+    /// Return the compressor for `ext`, falling back to the default (ZStandard) for
+    /// unknown extensions.
+    #[must_use]
+    pub fn for_extension(&self, ext: &str) -> &'static dyn Compressor {
+        self.map.get(ext).copied().unwrap_or(self.default)
+    }
+}
+
+static REGISTRY: OnceLock<CompressorRegistry> = OnceLock::new();
+
 /// Returns the best compressor for the given lowercase file extension.
 ///
-/// Compressors are checked in priority order: None → Brotli → ZStandard → Lzma.
+/// Uses a [`CompressorRegistry`] built once at startup for O(1) lookup.
 /// Unknown extensions fall back to [`ZSTANDARD_COMPRESSOR`].
 pub fn compressor_for_extension(ext: &str, compress_images: bool) -> &'static dyn Compressor {
     if compress_images && ext == "png" {
         return &PNG_OXIPNG_COMPRESSOR;
     }
 
-    let candidates: &[&'static dyn Compressor] = &[
-        &NONE_COMPRESSOR,
-        &BROTLI_COMPRESSOR,
-        &ZSTANDARD_COMPRESSOR,
-        &LZMA_COMPRESSOR,
-    ];
-
-    for &compressor in candidates {
-        if compressor.get_best_extensions().contains(&ext) {
-            return compressor;
-        }
-    }
-
-    &ZSTANDARD_COMPRESSOR // default for unknown extensions
+    REGISTRY
+        .get_or_init(CompressorRegistry::default_registry)
+        .for_extension(ext)
 }
 
 /// Decompress `data` that was stored with the given [`CompressionMethod`].

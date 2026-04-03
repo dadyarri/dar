@@ -6,23 +6,42 @@ use crate::models::archive::{
 };
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
+
+/// A combined [`Read`] + [`Seek`] bound that is object-safe.
+///
+/// Automatically implemented for any `T: Read + Seek`, including `std::fs::File`
+/// and `std::io::Cursor<Vec<u8>>`.  Passing a `Cursor<Vec<u8>>` makes it possible
+/// to unit-test archive parsing without touching the filesystem.
+pub trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
 
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Wrapper around [`File::read_exact`] that attaches a translated error context.
-fn read_exact_ctx(file: &mut File, buf: &mut [u8], ctx_key: &str, locale: &Locale) -> Result<()> {
-    file.read_exact(buf)
+/// Wrapper around [`Read::read_exact`] that attaches a translated error context.
+fn read_exact_ctx(
+    source: &mut dyn ReadSeek,
+    buf: &mut [u8],
+    ctx_key: &str,
+    locale: &Locale,
+) -> Result<()> {
+    source
+        .read_exact(buf)
         .wrap_err(t!(ctx_key, locale = locale.as_str()).to_string())
 }
 
-/// Wrapper around [`File::seek`] that attaches a translated error context.
-fn seek_ctx(file: &mut File, pos: SeekFrom, file_path: &str, locale: &Locale) -> Result<()> {
-    file.seek(pos)
+/// Wrapper around [`Seek::seek`] that attaches a translated error context.
+fn seek_ctx(
+    source: &mut dyn ReadSeek,
+    pos: SeekFrom,
+    file_path: &str,
+    locale: &Locale,
+) -> Result<()> {
+    source
+        .seek(pos)
         .wrap_err(
             t!(
                 "cli.common.errors.seek_failed",
@@ -53,28 +72,35 @@ pub struct EncryptedEntryProbe {
     pub checksum: [u8; 32],
 }
 
-/// Parse the header, footer, and full index of a `.dar` file.
+/// Parse the header, footer, and full index of a `.dar` archive source.
 ///
-/// The file cursor position after this call is unspecified; callers should seek before further I/O.
+/// `source` can be any [`ReadSeek`] implementation — typically a `std::fs::File`
+/// in production code or a `std::io::Cursor<Vec<u8>>` in unit tests.
+///
+/// The cursor position after this call is unspecified; callers should seek before further I/O.
 ///
 /// # Errors
 ///
 /// Returns an error if:
-/// - the file is too short to hold a valid header + footer,
+/// - the source is too short to hold a valid header + footer,
 /// - the header signature or version is invalid,
 /// - the footer signature is invalid or `index_offset` is out of range,
-/// - any index entry cannot be read or decoded (truncated file, invalid UTF-8 path/extra),
+/// - any index entry cannot be read or decoded (truncated source, invalid UTF-8 path/extra),
 /// - entries mix encrypted and unencrypted data.
-pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result<ArchiveState> {
-    let metadata = file.metadata().wrap_err(
+pub fn load_archive(
+    source: &mut dyn ReadSeek,
+    file_path: &str,
+    locale: &Locale,
+) -> Result<ArchiveState> {
+    // Determine total byte length by seeking to the end.
+    let file_len = source.seek(SeekFrom::End(0)).wrap_err(
         t!(
-            "cli.common.errors.read_failed",
+            "cli.common.errors.seek_failed",
             locale = locale.as_str(),
             file = file_path
         )
         .to_string(),
     )?;
-    let file_len = metadata.len();
     let header_size = size_of::<ArchiveHeader>() as u64;
     let footer_size = size_of::<ArchiveFooter>() as u64;
 
@@ -86,11 +112,11 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     }
 
     // --- Header ---
-    seek_ctx(file, SeekFrom::Start(0), file_path, locale)?;
+    seek_ctx(source, SeekFrom::Start(0), file_path, locale)?;
 
     let mut header_buf = [0u8; size_of::<ArchiveHeader>()];
     read_exact_ctx(
-        file,
+        source,
         &mut header_buf,
         "cli.common.errors.header_read_failed",
         locale,
@@ -106,11 +132,11 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
     // --- Footer ---
     let footer_pos = file_len - footer_size;
-    seek_ctx(file, SeekFrom::Start(footer_pos), file_path, locale)?;
+    seek_ctx(source, SeekFrom::Start(footer_pos), file_path, locale)?;
 
     let mut footer_buf = [0u8; size_of::<ArchiveFooter>()];
     read_exact_ctx(
-        file,
+        source,
         &mut footer_buf,
         "cli.common.errors.footer_read_failed",
         locale,
@@ -133,7 +159,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     }
 
     // --- Index entries ---
-    seek_ctx(file, SeekFrom::Start(index_offset), file_path, locale)?;
+    seek_ctx(source, SeekFrom::Start(index_offset), file_path, locale)?;
 
     let mut entries = Vec::with_capacity(footer.amount_of_files as usize);
     let mut encryption_mode: Option<bool> = None;
@@ -142,7 +168,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     for _ in 0..footer.amount_of_files {
         let mut entry_buf = [0u8; size_of::<ArchiveIndexEntry>()];
         read_exact_ctx(
-            file,
+            source,
             &mut entry_buf,
             "cli.common.errors.index_decode_failed",
             locale,
@@ -171,7 +197,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
         let mut path_bytes = vec![0u8; entry.path_length as usize];
         read_exact_ctx(
-            file,
+            source,
             &mut path_bytes,
             "cli.common.errors.index_decode_failed",
             locale,
@@ -187,7 +213,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
         let mut extra_bytes = vec![0u8; entry.extra_length as usize];
         read_exact_ctx(
-            file,
+            source,
             &mut extra_bytes,
             "cli.common.errors.index_decode_failed",
             locale,
@@ -221,31 +247,37 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 mod tests {
     use super::*;
     use crate::i18n::Locale;
-    use crate::test_utils::build_archive;
-    use std::fs::File;
+    use crate::test_utils::build_archive_bytes;
+    use std::io::Cursor;
 
     fn en() -> Locale {
         Locale::new("en")
+    }
+
+    /// Build an in-memory archive and return a `Cursor` ready for parsing.
+    fn archive(files: &[(&str, &[u8])]) -> Cursor<Vec<u8>> {
+        Cursor::new(build_archive_bytes(files, None))
+    }
+
+    /// Build an encrypted in-memory archive and return a `Cursor` ready for parsing.
+    fn enc_archive(files: &[(&str, &[u8])], pass: &str) -> Cursor<Vec<u8>> {
+        Cursor::new(build_archive_bytes(files, Some(pass)))
     }
 
     // --- single entry ---
 
     #[test]
     fn test_parses_single_entry_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "a.dar", &[("hello.txt", b"hello")], None);
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("hello.txt", b"hello")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(state.entries.len(), 1);
         assert_eq!(state.entries[0].path, "hello.txt");
     }
 
     #[test]
     fn test_parses_entry_original_size() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "b.dar", &[("data.bin", b"0123456789")], None);
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("data.bin", b"0123456789")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         // `ArchiveIndexEntry` is #[repr(C, packed)]; copy field before comparing.
         let original_size = state.entries[0].entry.original_size;
         assert_eq!(original_size, 10);
@@ -255,15 +287,8 @@ mod tests {
 
     #[test]
     fn test_parses_multiple_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(
-            &dir,
-            "multi.dar",
-            &[("a.txt", b"aaa"), ("b.txt", b"bbb"), ("c.txt", b"ccc")],
-            None,
-        );
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("a.txt", b"aaa"), ("b.txt", b"bbb"), ("c.txt", b"ccc")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(state.entries.len(), 3);
         let paths: Vec<&str> = state.entries.iter().map(|e| e.path.as_str()).collect();
         assert!(paths.contains(&"a.txt"));
@@ -275,29 +300,23 @@ mod tests {
 
     #[test]
     fn test_unencrypted_archive_reports_false_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "plain.dar", &[("f.txt", b"x")], None);
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("f.txt", b"x")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(state.encryption_mode, Some(false));
         assert!(state.encryption_probe.is_none());
     }
 
     #[test]
     fn test_encrypted_archive_reports_true_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "enc.dar", &[("f.txt", b"x")], Some("s3cr3t"));
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = enc_archive(&[("f.txt", b"x")], "s3cr3t");
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(state.encryption_mode, Some(true));
     }
 
     #[test]
     fn test_encrypted_archive_populates_probe() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "enc2.dar", &[("f.txt", b"secret")], Some("pass"));
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = enc_archive(&[("f.txt", b"secret")], "pass");
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         let probe = state
             .encryption_probe
             .expect("probe should be Some for encrypted archive");
@@ -309,11 +328,10 @@ mod tests {
 
     #[test]
     fn test_index_offset_is_within_file_bounds() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "off.dar", &[("x.rs", b"fn main(){}")], None);
-        let file_len = std::fs::metadata(&path).unwrap().len();
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let bytes = build_archive_bytes(&[("x.rs", b"fn main(){}")], None);
+        let file_len = bytes.len() as u64;
+        let mut src = Cursor::new(bytes);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert!(state.index_offset >= size_of::<ArchiveHeader>() as u64);
         assert!(state.index_offset < file_len);
     }
@@ -322,103 +340,82 @@ mod tests {
 
     #[test]
     fn test_header_signature_is_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "hdr.dar", &[("f.txt", b"y")], None);
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("f.txt", b"y")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(&state.header.signature, b"DARI");
         assert_eq!(state.header.version, 5);
     }
 
     #[test]
     fn test_header_timestamp_is_nonzero() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = build_archive(&dir, "ts.dar", &[("f.txt", b"z")], None);
-        let mut f = File::open(&path).unwrap();
-        let state = load_archive(&mut f, path.to_str().unwrap(), &en()).unwrap();
+        let mut src = archive(&[("f.txt", b"z")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert!(state.header.timestamp > 0);
     }
 
-    // --- negative: file too short ---
+    // --- negative: source too short ---
 
     #[test]
     fn test_rejects_file_shorter_than_header_plus_footer() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("short.dar");
-        std::fs::write(&path, b"DARI").unwrap();
-        let mut f = File::open(&path).unwrap();
-        assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+        let mut src = Cursor::new(b"DARI".to_vec());
+        assert!(load_archive(&mut src, "<mem>", &en()).is_err());
     }
 
     // --- negative: bad header signature ---
 
     #[test]
     fn test_rejects_invalid_header_signature() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("badsig.dar");
         // 28 bytes: wrong sig + version 5 + zero timestamp + zero footer area
         let mut data = vec![0u8; 28];
         data[0..4].copy_from_slice(b"XXXX");
         data[4] = 5;
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
-        assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+        let mut src = Cursor::new(data);
+        assert!(load_archive(&mut src, "<mem>", &en()).is_err());
     }
 
     // --- negative: bad header version ---
 
     #[test]
     fn test_rejects_invalid_header_version() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("badver.dar");
         let mut data = vec![0u8; 28];
         data[0..4].copy_from_slice(b"DARI");
         data[4] = 99; // unsupported version
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
-        assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+        let mut src = Cursor::new(data);
+        assert!(load_archive(&mut src, "<mem>", &en()).is_err());
     }
 
     // --- negative: bad footer signature ---
 
     #[test]
     fn test_rejects_invalid_footer_signature() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("badftr.dar");
         // Valid header (13 B) + bad footer (15 B): total 28 B.
         // Footer is read from the last 15 bytes; signature must be "DARIEND".
         let mut data = vec![0u8; 28];
         data[0..4].copy_from_slice(b"DARI");
         data[4] = 5;
         // bytes 13‥19 are footer signature — leave as zeros (not "DARIEND")
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
-        assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+        let mut src = Cursor::new(data);
+        assert!(load_archive(&mut src, "<mem>", &en()).is_err());
     }
 
     // --- negative: index_offset out of range ---
 
     #[test]
     fn test_rejects_index_offset_of_zero() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("badoff.dar");
         // 28 bytes: valid header + valid footer signature but index_offset = 0
         let mut data = vec![0u8; 28];
         data[0..4].copy_from_slice(b"DARI");
         data[4] = 5;
         data[13..20].copy_from_slice(b"DARIEND");
         // index_offset at bytes 20‥23 — leave as 0u32 LE (< header_size = 13)
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
-        assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+        let mut src = Cursor::new(data);
+        assert!(load_archive(&mut src, "<mem>", &en()).is_err());
     }
 
     // --- 5.5 corrupt / truncated archive handling ---
 
     #[test]
     fn test_rejects_index_offset_beyond_eof() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("bigoff.dar");
         // Build a valid 28-byte stub but set index_offset to a value beyond the file.
         let mut data = vec![0u8; 28];
         data[0..4].copy_from_slice(b"DARI");
@@ -427,10 +424,9 @@ mod tests {
         // index_offset = 9999 — well past EOF
         let off: u32 = 9999;
         data[20..24].copy_from_slice(&off.to_le_bytes());
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
+        let mut src = Cursor::new(data);
         assert!(
-            load_archive(&mut f, path.to_str().unwrap(), &en()).is_err(),
+            load_archive(&mut src, "<mem>", &en()).is_err(),
             "index_offset beyond EOF must be rejected"
         );
     }
@@ -438,9 +434,7 @@ mod tests {
     #[test]
     fn test_rejects_index_with_zero_bytes_for_entry() {
         // Build a real single-entry archive then overwrite the index area with zeros.
-        let dir = tempfile::tempdir().unwrap();
-        let real = build_archive(&dir, "zero_idx.dar", &[("f.txt", b"hi")], None);
-        let mut data = std::fs::read(&real).unwrap();
+        let mut data = build_archive_bytes(&[("f.txt", b"hi")], None);
 
         // Locate index_offset from the footer and zero out every byte from that point
         // up to (but not including) the footer.
@@ -453,13 +447,11 @@ mod tests {
             *b = 0;
         }
 
-        let path = dir.path().join("zeroed_idx.dar");
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
+        let mut src = Cursor::new(data);
         // Zeroed index entries may parse as garbage (e.g. huge path_length / extra_length),
         // which will cause a read-exact failure on the variable-length fields.
         // The important invariant is that load_archive does not succeed with corrupted data.
-        let result = load_archive(&mut f, path.to_str().unwrap(), &en());
+        let result = load_archive(&mut src, "<mem>", &en());
         // It may succeed (all-zero entry happens to be valid: path_length=0, extra_length=0)
         // or fail — either is acceptable; what must NOT happen is a panic or returning the
         // wrong entries.  We verify that no panic occurred (the test just runs) and, if it
@@ -477,9 +469,7 @@ mod tests {
     #[test]
     fn test_rejects_archive_truncated_mid_index_entry() {
         // Build a real archive, then truncate it inside the first index entry.
-        let dir = tempfile::tempdir().unwrap();
-        let real = build_archive(&dir, "trunc.dar", &[("file.rs", b"fn main(){}")], None);
-        let mut data = std::fs::read(&real).unwrap();
+        let mut data = build_archive_bytes(&[("file.rs", b"fn main(){}")], None);
 
         let footer_size = std::mem::size_of::<crate::models::archive::ArchiveFooter>();
         let footer_base = data.len() - footer_size;
@@ -487,14 +477,12 @@ mod tests {
             u32::from_le_bytes(data[footer_base + 7..footer_base + 11].try_into().unwrap())
                 as usize;
 
-        // Truncate the file to remove the last half of the index section (including the footer)
+        // Truncate to remove the last half of the index section (including the footer)
         let truncate_at = idx_off + 4; // only 4 bytes into the index entry — well short of a full entry
         data.truncate(truncate_at);
-        let path = dir.path().join("trunc_mid.dar");
-        std::fs::write(&path, &data).unwrap();
-        let mut f = File::open(&path).unwrap();
+        let mut src = Cursor::new(data);
         assert!(
-            load_archive(&mut f, path.to_str().unwrap(), &en()).is_err(),
+            load_archive(&mut src, "<mem>", &en()).is_err(),
             "archive truncated mid-index must be rejected"
         );
     }
@@ -504,17 +492,14 @@ mod tests {
         use crate::archive_builder::ArchiveBuilder;
         use crate::pipeline::PipelineConfig;
 
-        let dir = tempfile::tempdir().unwrap();
-        let archive_path = dir.path().join("empty.dar");
-        {
-            let fh = File::create(&archive_path).unwrap();
-            let mut builder = ArchiveBuilder::with_config(fh, PipelineConfig::default());
-            builder.write_header().unwrap();
-            builder.build().unwrap();
-        }
+        let cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let mut builder = ArchiveBuilder::with_config(cursor, PipelineConfig::default());
+        builder.write_header().unwrap();
+        builder.build().unwrap();
+        let bytes = builder.into_inner().into_inner();
 
-        let mut f = File::open(&archive_path).unwrap();
-        let state = load_archive(&mut f, archive_path.to_str().unwrap(), &en()).unwrap();
+        let mut src = Cursor::new(bytes);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(
             state.entries.len(),
             0,
