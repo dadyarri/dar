@@ -1,7 +1,7 @@
 use crate::constants::extra_keys;
 use crate::extra::parse_extra_pairs;
 use crate::models::archive::ArchiveIndexEntryWrapper;
-use crate::tui::tree::{flatten_visible, FlatNode, TreeNode};
+use crate::tui::tree::{FlatNode, TreeNode, flatten_visible};
 
 // ---------------------------------------------------------------------------
 // Tag alias table

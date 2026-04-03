@@ -3,7 +3,7 @@ use crate::constants::flags;
 use crate::encryption::nonce_from_checksum;
 use crate::extra::{encode_extra_pairs, upsert_extra_pair};
 use crate::models::archive::CompressionMethod;
-use crate::traits::{compressor_for_extension, Compressor};
+use crate::traits::{Compressor, compressor_for_extension};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use exif::{Exif, In, Reader as ExifReader, Tag};

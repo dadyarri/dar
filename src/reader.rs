@@ -4,7 +4,7 @@ use crate::i18n::Locale;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
 };
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -170,12 +170,13 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
             )
             .to_string(),
         )?;
-        let path = String::from_utf8(path_bytes).map_err(|_| {
-            eyre!(t!(
+        let path = String::from_utf8(path_bytes).wrap_err_with(|| {
+            t!(
                 "cli.common.errors.utf8_failed",
                 locale = locale.as_str(),
                 field = "path"
-            ))
+            )
+            .to_string()
         })?;
 
         let mut extra_bytes = vec![0u8; entry.extra_length as usize];
@@ -186,12 +187,13 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
             )
             .to_string(),
         )?;
-        let extra = String::from_utf8(extra_bytes).map_err(|_| {
-            eyre!(t!(
+        let extra = String::from_utf8(extra_bytes).wrap_err_with(|| {
+            t!(
                 "cli.common.errors.utf8_failed",
                 locale = locale.as_str(),
                 field = "extra"
-            ))
+            )
+            .to_string()
         })?;
 
         entries.push(ArchiveIndexEntryWrapper::new(entry, path, extra));

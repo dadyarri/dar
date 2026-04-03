@@ -1,7 +1,7 @@
 use crate::constants::crypto;
 use crate::i18n::Locale;
 use clap::ArgMatches;
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use rust_i18n::t;
 
 /// Derive a ChaCha20-Poly1305 nonce from the first [`crypto::NONCE_LEN`] bytes of `checksum`.

@@ -6,7 +6,7 @@ use crate::traits::decompress_bytes;
 use crate::utils::sanitize_path;
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use rust_i18n::t;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};

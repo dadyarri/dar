@@ -1,7 +1,7 @@
 use crate::constants::format;
 use crate::utils::get_unix_timestamp;
 use bytemuck::{Pod, Zeroable};
-use eyre::{eyre, Error, Result};
+use eyre::{Error, Result, eyre};
 use rust_i18n::t;
 use std::io::Write;
 

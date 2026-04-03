@@ -1,11 +1,12 @@
 use crate::i18n::Locale;
 use crate::reader;
 use crate::tui::{
+    App,
     state::{AppState, Focus, PreviewMode},
-    tree, App,
+    tree,
 };
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use ratatui::widgets::TableState;
 use std::fs::File;
 use std::path::PathBuf;

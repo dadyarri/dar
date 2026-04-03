@@ -5,10 +5,10 @@ use crate::models::archive::{
 };
 use crate::pipeline::{CompressionPipeline, PipelineConfig, PipelineFileData};
 use crate::utils::get_mode;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
-use std::fs::{metadata, File};
+use std::fs::{File, metadata};
 use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -28,6 +28,7 @@ pub enum ConflictMode {
 
 /// Compute the renamed path by appending `-N` before the file extension until a
 /// name that is not in `path_set` is found.
+#[must_use]
 pub fn make_renamed_path(path: &str, path_set: &HashSet<String>) -> String {
     let slash_pos = path.rfind('/').map_or(0, |p| p + 1);
     let filename = &path[slash_pos..];
@@ -142,7 +143,47 @@ pub fn prepare_file_from_disk(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Construct an [`ArchiveIndexEntry`] from its constituent parts.
+///
+/// Extracted to eliminate the two nearly-identical construction sites in
+/// [`ArchiveBuilder::commit_prepared`].
+#[allow(clippy::too_many_arguments)]
+fn make_index_entry(
+    offset: u64,
+    bitflags: u16,
+    compression_method: CompressionMethod,
+    timestamp: u64,
+    uid: u32,
+    gid: u32,
+    perm: u16,
+    checksum: [u8; 32],
+    original_size: u64,
+    compressed_size: u64,
+    path_len: u32,
+    extra_len: u32,
+) -> ArchiveIndexEntry {
+    ArchiveIndexEntry {
+        offset,
+        bitflags,
+        compression_method,
+        modification_timestamp: timestamp,
+        uid,
+        gid,
+        perm,
+        checksum,
+        original_size,
+        compressed_size,
+        path_length: path_len,
+        extra_length: extra_len,
+    }
+}
+
 impl<W: Write + Seek> ArchiveBuilder<W> {
+    #[must_use]
     pub fn with_config(writer: W, config: PipelineConfig) -> Self {
         Self {
             writer,
@@ -161,6 +202,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     /// Returns `true` if `path` is already present in the archive (either from
     /// imported existing entries or previously committed files in this session).
+    #[allow(dead_code)]
     pub fn path_exists(&self, path: &str) -> bool {
         self.path_set.contains(path)
     }
@@ -240,20 +282,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             bitflags |= flags::LINKED_DATA;
 
             self.entries.push(ArchiveIndexEntryWrapper::new(
-                ArchiveIndexEntry {
-                    offset: existing.offset,
-                    bitflags: bitflags | existing.bitflags,
-                    compression_method: existing.compression_method,
-                    modification_timestamp: prepared.timestamp,
-                    uid: prepared.uid,
-                    gid: prepared.gid,
-                    perm: prepared.perm,
-                    checksum: pipeline_result.checksum,
-                    original_size: pipeline_result.original_size,
-                    compressed_size: existing.compressed_size,
-                    path_length: archive_path.len() as u32,
-                    extra_length: pipeline_result.extra.len() as u32,
-                },
+                make_index_entry(
+                    existing.offset,
+                    bitflags | existing.bitflags,
+                    existing.compression_method,
+                    prepared.timestamp,
+                    prepared.uid,
+                    prepared.gid,
+                    prepared.perm,
+                    pipeline_result.checksum,
+                    pipeline_result.original_size,
+                    existing.compressed_size,
+                    archive_path.len() as u32,
+                    pipeline_result.extra.len() as u32,
+                ),
                 archive_path.clone(),
                 pipeline_result.extra,
             ));
@@ -289,20 +331,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         self.path_set.insert(archive_path.clone());
         self.entries.push(ArchiveIndexEntryWrapper::new(
-            ArchiveIndexEntry {
-                offset: data_offset,
+            make_index_entry(
+                data_offset,
                 bitflags,
-                compression_method: pipeline_result.compression_method,
-                modification_timestamp: prepared.timestamp,
-                uid: prepared.uid,
-                gid: prepared.gid,
-                perm: prepared.perm,
-                checksum: pipeline_result.checksum,
-                original_size: pipeline_result.original_size,
+                pipeline_result.compression_method,
+                prepared.timestamp,
+                prepared.uid,
+                prepared.gid,
+                prepared.perm,
+                pipeline_result.checksum,
+                pipeline_result.original_size,
                 compressed_size,
-                path_length: archive_path.len() as u32,
-                extra_length: pipeline_result.extra.len() as u32,
-            },
+                archive_path.len() as u32,
+                pipeline_result.extra.len() as u32,
+            ),
             archive_path.clone(),
             pipeline_result.extra,
         ));

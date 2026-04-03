@@ -1,7 +1,7 @@
-use crate::tui::tree::{flatten_visible, FlatNode, TreeNode};
+use crate::tui::tree::{FlatNode, TreeNode, flatten_visible};
 use nucleo_matcher::{
-    pattern::{CaseMatching, Normalization, Pattern},
     Config, Matcher, Utf32Str,
+    pattern::{CaseMatching, Normalization, Pattern},
 };
 
 /// Return a flat list of visible rows filtered by `query`.
