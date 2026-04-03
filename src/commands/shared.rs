@@ -252,4 +252,25 @@ mod tests {
             "lzma"
         );
     }
+
+    #[test]
+    fn test_compression_method_label_russian() {
+        use super::compression_method_label;
+        assert_eq!(
+            compression_method_label(CompressionMethod::None, "ru"),
+            "без сжатия"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Brotli, "ru"),
+            "brotli"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Zstandard, "ru"),
+            "zstd"
+        );
+        assert_eq!(
+            compression_method_label(CompressionMethod::Lzma, "ru"),
+            "lzma"
+        );
+    }
 }

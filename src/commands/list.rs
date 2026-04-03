@@ -1,6 +1,7 @@
 use super::shared::{compression_method_label, format_size};
 use crate::constants::flags;
 use crate::i18n::Locale;
+use crate::models::archive::CompressionMethod;
 use crate::reader::load_archive;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
@@ -87,20 +88,16 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         println!("{}", "-".repeat(90));
 
         for entry in &archive_state.entries {
-            let path = &entry.path;
-            let original_size = entry.entry.original_size;
-            let compressed_size = entry.entry.compressed_size;
-            let method = entry.entry.compression_method;
-            let checksum = &entry.entry.checksum;
-
-            let orig_human = format_size(original_size);
-            let stored_human = format_size(compressed_size);
-            let method_label = compression_method_label(method, locale.as_str());
-            let checksum_prefix = &hex_string(checksum)[..8];
-
             println!(
-                "{:<50}  {:>8}  {:>8}  {:<8}  {}",
-                path, orig_human, stored_human, method_label, checksum_prefix
+                "{}",
+                format_entry_row(
+                    &entry.path,
+                    entry.entry.original_size,
+                    entry.entry.compressed_size,
+                    entry.entry.compression_method,
+                    &entry.entry.checksum,
+                    locale.as_str(),
+                )
             );
         }
     }
@@ -108,6 +105,129 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     Ok(())
 }
 
+/// Format a single archive entry as a fixed-width table row.
+///
+/// Returns a `String` with columns separated by fixed-width padding:
+/// path (50), original size (8), stored size (8), method (8), checksum prefix (8 hex chars).
+///
+/// Extracted as a pure function so it can be tested without a real archive on disk.
+pub(crate) fn format_entry_row(
+    path: &str,
+    original_size: u64,
+    compressed_size: u64,
+    method: CompressionMethod,
+    checksum: &[u8],
+    locale: &str,
+) -> String {
+    let orig_human = format_size(original_size);
+    let stored_human = format_size(compressed_size);
+    let method_label = compression_method_label(method, locale);
+    let checksum_prefix = &hex_string(checksum)[..8];
+    format!(
+        "{:<50}  {:>8}  {:>8}  {:<8}  {}",
+        path, orig_human, stored_human, method_label, checksum_prefix
+    )
+}
+
 fn hex_string(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_entry_row_stored_method() {
+        let row = format_entry_row(
+            "foo/bar.txt",
+            1024,
+            1024,
+            CompressionMethod::None,
+            &[0u8; 32],
+            "en",
+        );
+        assert!(row.contains("foo/bar.txt"), "path must appear in row");
+        assert!(
+            row.contains("stored"),
+            "method label must be 'stored' for None"
+        );
+        assert!(row.contains("1.00 KB"), "original size must be formatted");
+        assert!(
+            row.contains("00000000"),
+            "first 8 checksum hex chars must appear"
+        );
+    }
+
+    #[test]
+    fn test_format_entry_row_brotli_method() {
+        let row = format_entry_row(
+            "doc.html",
+            4096,
+            2048,
+            CompressionMethod::Brotli,
+            &[0xabu8; 32],
+            "en",
+        );
+        assert!(row.contains("doc.html"));
+        assert!(row.contains("brotli"));
+        assert!(row.contains("4.00 KB"));
+        assert!(row.contains("abababab"));
+    }
+
+    #[test]
+    fn test_format_entry_row_zstandard_method() {
+        let row = format_entry_row(
+            "src/main.rs",
+            512,
+            300,
+            CompressionMethod::Zstandard,
+            &[0xffu8; 32],
+            "en",
+        );
+        assert!(row.contains("src/main.rs"));
+        assert!(row.contains("zstd"));
+        assert!(row.contains("ffffffff"));
+    }
+
+    #[test]
+    fn test_format_entry_row_lzma_method() {
+        let row = format_entry_row(
+            "disk.iso",
+            1_048_576,
+            524_288,
+            CompressionMethod::Lzma,
+            &[0x12u8; 32],
+            "en",
+        );
+        assert!(row.contains("disk.iso"));
+        assert!(row.contains("lzma"));
+        assert!(row.contains("1.00 MB"));
+        assert!(row.contains("12121212"));
+    }
+
+    #[test]
+    fn test_format_entry_row_russian_locale() {
+        let row = format_entry_row(
+            "file.txt",
+            100,
+            100,
+            CompressionMethod::None,
+            &[0u8; 32],
+            "ru",
+        );
+        assert!(row.contains("file.txt"));
+        assert!(
+            row.contains("без сжатия"),
+            "Russian locale must use translated method label"
+        );
+    }
+
+    #[test]
+    fn test_format_entry_row_path_fits_column_width() {
+        // A 50-char path should be left-padded to exactly 50 chars in the output.
+        let path = "a".repeat(50);
+        let row = format_entry_row(&path, 0, 0, CompressionMethod::None, &[0u8; 32], "en");
+        assert!(row.starts_with(&path));
+    }
 }
