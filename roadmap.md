@@ -28,94 +28,7 @@ worked in any order unless a dependency is noted.
 These are low-risk, stand-alone changes that improve readability and reduce
 future confusion.
 
-### 1.1 `P1` — Centralise magic constants in `src/constants.rs`
-
-**Problem:** Binary-format values, bit-flags, and metadata-field keys are
-copy-pasted across at least six files.
-
-| Constant | Locations |
-|----------|-----------|
-| `"DARI"` / `"DARIEND"` | `models/archive.rs`, `reader.rs` |
-| Archive version `5` | `reader.rs`, `models/archive.rs` |
-| `INDEX_FLAG_LINKED_DATA = 0b01` | `pipeline.rs`, `archive_builder.rs`, `extractor.rs` |
-| `INDEX_FLAG_ENCRYPTED_DATA = 0b10` | same |
-| Extra-field keys `"e"`, `"en"`, `"et"` | `pipeline.rs`, `extractor.rs`, `tui/preview.rs` |
-| Image meta keys `"imk"`, `"imd"`, … | `pipeline.rs`, `tui/preview.rs`, `tui/meta_search.rs` |
-| Nonce length `12`, tag length `16` | `pipeline.rs`, `extractor.rs` |
-| Chunk size `512 * 1024` | `archive_builder.rs` |
-
-**Proposed fix:** Create `src/constants.rs` and expose clearly-named
-sub-modules:
-
-```rust
-pub mod format {
-    pub const SIGNATURE: &[u8; 4] = b"DARI";
-    pub const FOOTER_SIGNATURE: &[u8; 7] = b"DARIEND";
-    pub const VERSION: u8 = 5;
-    pub const CHUNK_SIZE: usize = 512 * 1024;
-}
-
-pub mod flags {
-    pub const LINKED_DATA: u16    = 0b0000_0000_0000_0001;
-    pub const ENCRYPTED_DATA: u16 = 0b0000_0000_0000_0010;
-}
-
-pub mod extra_keys {
-    // encryption
-    pub const ENC_ALGO: &str  = "e";
-    pub const ENC_NONCE: &str = "en";
-    pub const ENC_TAG: &str   = "et";
-    // image EXIF
-    pub const IMG_MAKE: &str  = "imk";
-    pub const IMG_MODEL: &str = "imd";
-    // … etc.
-}
-
-pub mod crypto {
-    pub const NONCE_LEN: usize = 12;
-    pub const TAG_LEN: usize   = 16;
-}
-```
-
-**Impact:** Eliminates a whole class of silent bugs if the format evolves;
-makes all call-sites self-documenting.
-
----
-
-### 1.2 `P1` — Deduplicate nonce-derivation logic
-
-**Problem:** The same three-line slice copy from `checksum[..12]` into a
-12-byte nonce array appears independently in `pipeline.rs` (encryption path)
-and `extractor.rs` (decryption path).  A one-character divergence would
-silently produce wrong results.
-
-**Proposed fix:** Move to `src/encryption.rs`:
-
-```rust
-pub fn nonce_from_checksum(checksum: &[u8; 32]) -> [u8; crypto::NONCE_LEN] {
-    let mut nonce = [0u8; crypto::NONCE_LEN];
-    nonce.copy_from_slice(&checksum[..crypto::NONCE_LEN]);
-    nonce
-}
-```
-
-Both call-sites become a single `encryption::nonce_from_checksum(checksum)`
-call.
-
----
-
-### 1.3 `P2` — Replace `unwrap()` on `entry_idx` in `tui/mod.rs`
-
-**Problem:** Lines 316 and 386 call `.unwrap()` on `flat.entry_idx` after an
-`is_none()` guard on line 313/380, which is logically safe but still
-misleading and will panic if the control flow ever changes.
-
-**Proposed fix:** Replace with `expect("entry_idx is Some; checked above")` or
-restructure with `let Some(entry_idx) = flat.entry_idx else { return; }`.
-
----
-
-### 1.4 `P2` — Remove duplicate `tempfile` dependency
+### 1.1 `P2` — Remove duplicate `tempfile` dependency
 
 `tempfile = "3"` appears in both `[dependencies]` and `[dev-dependencies]` in
 `Cargo.toml`.  It should only be in `[dev-dependencies]` (it is only used in
@@ -123,7 +36,7 @@ tests).
 
 ---
 
-### 1.5 `P3` — Add `#[must_use]` to builder and pure functions
+### 1.2 `P3` — Add `#[must_use]` to builder and pure functions
 
 Functions like `ArchiveBuilder::with_config`, `make_renamed_path`, and all
 pure `compute_*` / `format_*` helpers in `commands/shared.rs` silently discard
@@ -132,7 +45,7 @@ compile-time warning.
 
 ---
 
-### 1.6 `P3` — Deduplicate index-entry construction in `archive_builder.rs`
+### 1.3 `P3` — Deduplicate index-entry construction in `archive_builder.rs`
 
 `commit_prepared()` contains two nearly-identical blocks that construct an
 `ArchiveIndexEntry` (one for the dedup hit path, one for the normal write
@@ -237,13 +150,7 @@ for eyre::Report` impl.
 
 ## 3. Architecture — Reduce Coupling
 
-### 3.1 `P1` — Extract encryption nonce/tag helpers (see 1.2)
-
-*(Listed separately here because it unblocks both testability and correctness.)*
-
----
-
-### 3.2 `P1` — Split `archive_builder.rs` into focused modules
+### 3.1 `P1` — Split `archive_builder.rs` into focused modules
 
 At 858 lines `archive_builder.rs` has at least four distinct responsibilities:
 
@@ -264,7 +171,7 @@ archive fixture.
 
 ---
 
-### 3.3 `P2` — Introduce a `MetadataExtractor` trait in `pipeline.rs`
+### 3.2 `P2` — Introduce a `MetadataExtractor` trait in `pipeline.rs`
 
 Image EXIF extraction and audio-tag extraction in `pipeline.rs` are both
 "attempt to read key-value pairs from bytes; return empty vec on failure."
@@ -286,7 +193,7 @@ allows:
 
 ---
 
-### 3.4 `P2` — Reduce `commands/append.rs::call()` length (582 lines total, ~249-line function)
+### 3.3 `P2` — Reduce `commands/append.rs::call()` length (582 lines total, ~249-line function)
 
 `call()` does argument parsing, archive loading, encryption validation,
 passphrase verification, dry-run simulation, and archive writing — all in one
@@ -303,7 +210,7 @@ consolidating them reduces the surface area for divergence bugs.
 
 ---
 
-### 3.5 `P3` — `CompressorRegistry` to replace scattered extension lists
+### 3.4 `P3` — `CompressorRegistry` to replace scattered extension lists
 
 `traits.rs` has five compressor implementations each returning a
 `get_best_extensions() -> &[&str]` list, plus `compressor_for_extension` that
