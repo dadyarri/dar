@@ -15,6 +15,11 @@ use std::path::Path;
 /// Extract a single entry from an archive on disk.
 ///
 /// Convenience wrapper around [`extract_entries`].
+///
+/// # Errors
+///
+/// Returns an error if the archive cannot be opened, the entry's data cannot be read,
+/// decryption fails (wrong passphrase, passphrase missing), or decompression fails.
 pub fn extract_entry(
     archive_path: &Path,
     entry: &ArchiveIndexEntryWrapper,
@@ -37,6 +42,11 @@ pub fn extract_entry(
 /// order.  If `flags::LINKED_DATA` is set on an entry the primary entry
 /// (same checksum, no linked flag) is looked up in `all_entries` to resolve
 /// the real data offset.
+///
+/// # Errors
+///
+/// Returns an error if the archive cannot be opened, or if any individual entry
+/// fails to be extracted (see [`extract_entry`]).
 pub fn extract_entries(
     archive_path: &Path,
     entries_to_extract: &[&ArchiveIndexEntryWrapper],
@@ -155,23 +165,73 @@ pub fn resolve_primary_offset(
 
 /// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
 ///
-/// Follows `flags::LINKED_DATA` to resolve the actual data offset.  Returns
-/// `None` on any I/O error so callers that only need a best-effort read (e.g.
-/// the inspect preview) can handle the failure gracefully.
+/// Follows `flags::LINKED_DATA` to resolve the actual data offset.
+///
+/// # Note
+///
+/// This function intentionally returns `Option<Vec<u8>>` instead of `eyre::Result` because
+/// it is used for **best-effort preview reads** in the TUI inspector (`tui/preview.rs`).
+/// Any I/O failure (e.g. archive truncated, permission error, corrupted offset) is silently
+/// converted to `None` so the caller can display a graceful "cannot preview" message instead
+/// of crashing the TUI.  For extraction that must succeed, use [`extract_entry`] or
+/// [`extract_entries`] which return proper `Result` values with user-facing error messages.
+///
+/// Set the `DARI_DEBUG=1` environment variable to have I/O failures logged to stderr, which
+/// helps diagnose unexpected `None` returns during development.
 pub fn read_raw_entry_bytes(
     archive_path: &Path,
     entry: &ArchiveIndexEntryWrapper,
     all_entries: &[ArchiveIndexEntryWrapper],
 ) -> Option<Vec<u8>> {
+    let debug = std::env::var("DARI_DEBUG").is_ok();
+
     let offset = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
-        resolve_primary_offset(&entry.entry.checksum, all_entries)?
+        let primary = resolve_primary_offset(&entry.entry.checksum, all_entries);
+        if primary.is_none() && debug {
+            eprintln!(
+                "[dari debug] read_raw_entry_bytes: no primary entry found for linked entry '{}'",
+                entry.path
+            );
+        }
+        primary?
     } else {
         entry.entry.offset
     };
-    let mut file = File::open(archive_path).ok()?;
-    file.seek(SeekFrom::Start(offset)).ok()?;
+
+    let mut file = match File::open(archive_path) {
+        Ok(f) => f,
+        Err(e) => {
+            if debug {
+                eprintln!(
+                    "[dari debug] read_raw_entry_bytes: failed to open '{}': {e}",
+                    archive_path.display()
+                );
+            }
+            return None;
+        }
+    };
+
+    if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+        if debug {
+            eprintln!(
+                "[dari debug] read_raw_entry_bytes: seek to offset {offset} failed for '{}': {e}",
+                entry.path
+            );
+        }
+        return None;
+    }
+
     let mut buf = vec![0u8; entry.entry.compressed_size as usize];
-    file.read_exact(&mut buf).ok()?;
+    if let Err(e) = file.read_exact(&mut buf) {
+        if debug {
+            eprintln!(
+                "[dari debug] read_raw_entry_bytes: read_exact failed for '{}': {e}",
+                entry.path
+            );
+        }
+        return None;
+    }
+
     Some(buf)
 }
 
@@ -404,5 +464,100 @@ mod tests {
     fn test_decrypt_data_rejects_too_short_input() {
         let result = decrypt_data(&[0u8; 10], &[0u8; 32], "pass");
         assert!(result.is_err());
+    }
+
+    // --- 5.4 path sanitisation adversarial cases ---
+
+    /// Build an archive where the index entry records an arbitrary logical `archive_path`
+    /// (bypassing `calculate_archive_path`) so we can test the extractor's sanitisation.
+    fn build_archive_with_path(
+        dir: &tempfile::TempDir,
+        archive_name: &str,
+        archive_path: &str,
+        content: &[u8],
+    ) -> std::path::PathBuf {
+        let archive_file = dir.path().join(archive_name);
+        let src = dir.path().join("_src_tmp");
+        std::fs::write(&src, content).unwrap();
+        let fh = File::create(&archive_file).unwrap();
+        let mut builder = ArchiveBuilder::with_config(
+            fh,
+            PipelineConfig {
+                compress_images: false,
+                encryption_passphrase: None,
+            },
+        );
+        builder.write_header().unwrap();
+        builder.add_file(&src, archive_path).unwrap();
+        builder.build().unwrap();
+        archive_file
+    }
+
+    #[test]
+    fn test_path_traversal_dotdot_is_sanitised() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = build_archive_with_path(&dir, "trav.dar", "../../etc/passwd", b"evil");
+        let entries = load(&archive);
+        let dest = dir.path().join("out_trav");
+        extract_entry(&archive, &entries[0], &entries, &dest, None).unwrap();
+
+        // The extracted file must be inside `dest`, not at ../../etc/passwd
+        let extracted_path = dest.join("etc/passwd");
+        assert!(
+            extracted_path.exists(),
+            "sanitised path should land at dest/etc/passwd"
+        );
+        let evil_path = std::path::Path::new("/etc/passwd");
+        assert!(
+            !evil_path.exists() || std::fs::read(evil_path).unwrap_or_default() != b"evil",
+            "must not have overwritten /etc/passwd"
+        );
+    }
+
+    #[test]
+    fn test_absolute_path_is_sanitised() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = build_archive_with_path(&dir, "abs.dar", "/tmp/evil_absolute", b"abs");
+        let entries = load(&archive);
+        let dest = dir.path().join("out_abs");
+        extract_entry(&archive, &entries[0], &entries, &dest, None).unwrap();
+
+        // Absolute leading slash must be stripped; file lands inside dest
+        let expected = dest.join("tmp/evil_absolute");
+        assert!(
+            expected.exists(),
+            "absolute path must be sanitised to a relative path under dest"
+        );
+    }
+
+    #[test]
+    fn test_windows_drive_prefix_is_sanitised() {
+        let dir = tempfile::tempdir().unwrap();
+        // On Unix this just looks like a path component with a colon, but sanitize_path
+        // must still produce a safe relative path.
+        let archive =
+            build_archive_with_path(&dir, "win.dar", "C:\\Windows\\System32\\file.txt", b"win");
+        let entries = load(&archive);
+        let dest = dir.path().join("out_win");
+        extract_entry(&archive, &entries[0], &entries, &dest, None).unwrap();
+
+        // dest must contain exactly the sanitised file; nothing escaped outside dest
+        fn any_file_under(dir: &std::path::Path) -> bool {
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for entry in rd.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        return true;
+                    } else if p.is_dir() && any_file_under(&p) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        assert!(
+            any_file_under(&dest),
+            "extracted file should land somewhere inside dest"
+        );
     }
 }

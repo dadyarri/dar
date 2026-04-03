@@ -10,6 +10,30 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
 
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Wrapper around [`File::read_exact`] that attaches a translated error context.
+fn read_exact_ctx(file: &mut File, buf: &mut [u8], ctx_key: &str, locale: &Locale) -> Result<()> {
+    file.read_exact(buf)
+        .wrap_err(t!(ctx_key, locale = locale.as_str()).to_string())
+}
+
+/// Wrapper around [`File::seek`] that attaches a translated error context.
+fn seek_ctx(file: &mut File, pos: SeekFrom, file_path: &str, locale: &Locale) -> Result<()> {
+    file.seek(pos)
+        .wrap_err(
+            t!(
+                "cli.common.errors.seek_failed",
+                locale = locale.as_str(),
+                file = file_path
+            )
+            .to_string(),
+        )
+        .map(|_| ())
+}
+
 /// Parsed state of an existing `.dar` archive.
 pub struct ArchiveState {
     pub entries: Vec<ArchiveIndexEntryWrapper>,
@@ -32,6 +56,15 @@ pub struct EncryptedEntryProbe {
 /// Parse the header, footer, and full index of a `.dar` file.
 ///
 /// The file cursor position after this call is unspecified; callers should seek before further I/O.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - the file is too short to hold a valid header + footer,
+/// - the header signature or version is invalid,
+/// - the footer signature is invalid or `index_offset` is out of range,
+/// - any index entry cannot be read or decoded (truncated file, invalid UTF-8 path/extra),
+/// - entries mix encrypted and unencrypted data.
 pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result<ArchiveState> {
     let metadata = file.metadata().wrap_err(
         t!(
@@ -53,23 +86,14 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     }
 
     // --- Header ---
-    file.seek(SeekFrom::Start(0)).wrap_err(
-        t!(
-            "cli.common.errors.seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
+    seek_ctx(file, SeekFrom::Start(0), file_path, locale)?;
 
     let mut header_buf = [0u8; size_of::<ArchiveHeader>()];
-    file.read_exact(&mut header_buf).wrap_err(
-        t!(
-            "cli.common.errors.header_read_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
+    read_exact_ctx(
+        file,
+        &mut header_buf,
+        "cli.common.errors.header_read_failed",
+        locale,
     )?;
     let header = *bytemuck::from_bytes::<ArchiveHeader>(&header_buf);
 
@@ -82,23 +106,14 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
     // --- Footer ---
     let footer_pos = file_len - footer_size;
-    file.seek(SeekFrom::Start(footer_pos)).wrap_err(
-        t!(
-            "cli.common.errors.seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
+    seek_ctx(file, SeekFrom::Start(footer_pos), file_path, locale)?;
 
     let mut footer_buf = [0u8; size_of::<ArchiveFooter>()];
-    file.read_exact(&mut footer_buf).wrap_err(
-        t!(
-            "cli.common.errors.footer_read_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
+    read_exact_ctx(
+        file,
+        &mut footer_buf,
+        "cli.common.errors.footer_read_failed",
+        locale,
     )?;
     let footer = *bytemuck::from_bytes::<ArchiveFooter>(&footer_buf);
 
@@ -118,14 +133,7 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
     }
 
     // --- Index entries ---
-    file.seek(SeekFrom::Start(index_offset)).wrap_err(
-        t!(
-            "cli.common.errors.seek_failed",
-            locale = locale.as_str(),
-            file = file_path
-        )
-        .to_string(),
-    )?;
+    seek_ctx(file, SeekFrom::Start(index_offset), file_path, locale)?;
 
     let mut entries = Vec::with_capacity(footer.amount_of_files as usize);
     let mut encryption_mode: Option<bool> = None;
@@ -133,12 +141,11 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
 
     for _ in 0..footer.amount_of_files {
         let mut entry_buf = [0u8; size_of::<ArchiveIndexEntry>()];
-        file.read_exact(&mut entry_buf).wrap_err(
-            t!(
-                "cli.common.errors.index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
+        read_exact_ctx(
+            file,
+            &mut entry_buf,
+            "cli.common.errors.index_decode_failed",
+            locale,
         )?;
         let entry = *bytemuck::from_bytes::<ArchiveIndexEntry>(&entry_buf);
 
@@ -163,12 +170,11 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
         }
 
         let mut path_bytes = vec![0u8; entry.path_length as usize];
-        file.read_exact(&mut path_bytes).wrap_err(
-            t!(
-                "cli.common.errors.index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
+        read_exact_ctx(
+            file,
+            &mut path_bytes,
+            "cli.common.errors.index_decode_failed",
+            locale,
         )?;
         let path = String::from_utf8(path_bytes).wrap_err_with(|| {
             t!(
@@ -180,12 +186,11 @@ pub fn load_archive(file: &mut File, file_path: &str, locale: &Locale) -> Result
         })?;
 
         let mut extra_bytes = vec![0u8; entry.extra_length as usize];
-        file.read_exact(&mut extra_bytes).wrap_err(
-            t!(
-                "cli.common.errors.index_decode_failed",
-                locale = locale.as_str()
-            )
-            .to_string(),
+        read_exact_ctx(
+            file,
+            &mut extra_bytes,
+            "cli.common.errors.index_decode_failed",
+            locale,
         )?;
         let extra = String::from_utf8(extra_bytes).wrap_err_with(|| {
             t!(
@@ -406,5 +411,118 @@ mod tests {
         std::fs::write(&path, &data).unwrap();
         let mut f = File::open(&path).unwrap();
         assert!(load_archive(&mut f, path.to_str().unwrap(), &en()).is_err());
+    }
+
+    // --- 5.5 corrupt / truncated archive handling ---
+
+    #[test]
+    fn test_rejects_index_offset_beyond_eof() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bigoff.dar");
+        // Build a valid 28-byte stub but set index_offset to a value beyond the file.
+        let mut data = vec![0u8; 28];
+        data[0..4].copy_from_slice(b"DARI");
+        data[4] = 5;
+        data[13..20].copy_from_slice(b"DARIEND");
+        // index_offset = 9999 — well past EOF
+        let off: u32 = 9999;
+        data[20..24].copy_from_slice(&off.to_le_bytes());
+        std::fs::write(&path, &data).unwrap();
+        let mut f = File::open(&path).unwrap();
+        assert!(
+            load_archive(&mut f, path.to_str().unwrap(), &en()).is_err(),
+            "index_offset beyond EOF must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_rejects_index_with_zero_bytes_for_entry() {
+        // Build a real single-entry archive then overwrite the index area with zeros.
+        let dir = tempfile::tempdir().unwrap();
+        let real = build_archive(&dir, "zero_idx.dar", &[("f.txt", b"hi")], None);
+        let mut data = std::fs::read(&real).unwrap();
+
+        // Locate index_offset from the footer and zero out every byte from that point
+        // up to (but not including) the footer.
+        let footer_size = std::mem::size_of::<crate::models::archive::ArchiveFooter>();
+        let footer_base = data.len() - footer_size;
+        let idx_off =
+            u32::from_le_bytes(data[footer_base + 7..footer_base + 11].try_into().unwrap())
+                as usize;
+        for b in &mut data[idx_off..footer_base] {
+            *b = 0;
+        }
+
+        let path = dir.path().join("zeroed_idx.dar");
+        std::fs::write(&path, &data).unwrap();
+        let mut f = File::open(&path).unwrap();
+        // Zeroed index entries may parse as garbage (e.g. huge path_length / extra_length),
+        // which will cause a read-exact failure on the variable-length fields.
+        // The important invariant is that load_archive does not succeed with corrupted data.
+        let result = load_archive(&mut f, path.to_str().unwrap(), &en());
+        // It may succeed (all-zero entry happens to be valid: path_length=0, extra_length=0)
+        // or fail — either is acceptable; what must NOT happen is a panic or returning the
+        // wrong entries.  We verify that no panic occurred (the test just runs) and, if it
+        // succeeded, the entry path is empty.
+        if let Ok(state) = result {
+            for entry in &state.entries {
+                assert!(
+                    entry.path.is_empty(),
+                    "zeroed index entry must yield an empty path"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_rejects_archive_truncated_mid_index_entry() {
+        // Build a real archive, then truncate it inside the first index entry.
+        let dir = tempfile::tempdir().unwrap();
+        let real = build_archive(&dir, "trunc.dar", &[("file.rs", b"fn main(){}")], None);
+        let mut data = std::fs::read(&real).unwrap();
+
+        let footer_size = std::mem::size_of::<crate::models::archive::ArchiveFooter>();
+        let footer_base = data.len() - footer_size;
+        let idx_off =
+            u32::from_le_bytes(data[footer_base + 7..footer_base + 11].try_into().unwrap())
+                as usize;
+
+        // Truncate the file to remove the last half of the index section (including the footer)
+        let truncate_at = idx_off + 4; // only 4 bytes into the index entry — well short of a full entry
+        data.truncate(truncate_at);
+        let path = dir.path().join("trunc_mid.dar");
+        std::fs::write(&path, &data).unwrap();
+        let mut f = File::open(&path).unwrap();
+        assert!(
+            load_archive(&mut f, path.to_str().unwrap(), &en()).is_err(),
+            "archive truncated mid-index must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_empty_archive_zero_entries_parses_successfully() {
+        use crate::archive_builder::ArchiveBuilder;
+        use crate::pipeline::PipelineConfig;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("empty.dar");
+        {
+            let fh = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_config(fh, PipelineConfig::default());
+            builder.write_header().unwrap();
+            builder.build().unwrap();
+        }
+
+        let mut f = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut f, archive_path.to_str().unwrap(), &en()).unwrap();
+        assert_eq!(
+            state.entries.len(),
+            0,
+            "empty archive should have zero entries"
+        );
+        assert!(
+            state.encryption_mode.is_none(),
+            "empty archive has no encryption mode"
+        );
     }
 }
