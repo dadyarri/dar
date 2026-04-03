@@ -7,9 +7,31 @@ use crate::reader::load_archive;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+
+/// A temporary directory that is automatically deleted when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn create() -> std::io::Result<Self> {
+        let path = std::env::temp_dir()
+            .join(format!("dari-encrypt-{}", std::process::id()));
+        fs::create_dir_all(&path)?;
+        Ok(TempDir(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file = matches.get_one::<String>("file").ok_or_else(|| {
@@ -91,7 +113,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let output_dir = output_path.parent().unwrap_or_else(|| Path::new("."));
 
     // Extract all entries from the unencrypted archive to a temp directory.
-    let temp_extract_dir = tempfile::tempdir().wrap_err(
+    let temp_extract_dir = TempDir::create().wrap_err(
         t!(
             "cli.encrypt.errors.encrypt_failed",
             locale = locale.as_str()
@@ -118,18 +140,14 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         )?;
     }
 
-    // Build a new encrypted archive in a named temp file in the same directory.
+    // Build a new encrypted archive to a uniquely-named temp file in the same
+    // directory as the output. Both paths are on the same filesystem so the
+    // subsequent rename is effectively atomic.
     // Note: this re-runs the full pipeline (including compression) on the extracted
     // data. Files are recompressed with the default settings (compress_images: false)
     // since the original pipeline settings are not stored in the archive format.
-    let temp_out = tempfile::NamedTempFile::new_in(output_dir).wrap_err(
-        t!(
-            "cli.encrypt.errors.encrypt_failed",
-            locale = locale.as_str()
-        )
-        .to_string(),
-    )?;
-    let (temp_file, temp_path) = temp_out.keep().wrap_err(
+    let temp_path = output_dir.join(format!(".dari-enc-{}.tmp", std::process::id()));
+    let temp_file = File::create(&temp_path).wrap_err(
         t!(
             "cli.encrypt.errors.encrypt_failed",
             locale = locale.as_str()
