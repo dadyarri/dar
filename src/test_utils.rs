@@ -40,13 +40,18 @@ pub fn build_archive(
 ///
 /// If `passphrase` is `Some`, the archive is encrypted with ChaCha20-Poly1305.
 pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) -> Vec<u8> {
-    let config = PipelineConfig {
+    let pipeline = CompressionPipeline::new(PipelineConfig {
         compress_images: false,
         encryption_passphrase: passphrase.map(str::to_owned),
-    };
-    let pipeline = CompressionPipeline::new(config.clone());
+    });
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
-    let mut builder = ArchiveBuilder::with_config(cursor, config);
+    let mut builder = ArchiveBuilder::with_config(
+        cursor,
+        PipelineConfig {
+            compress_images: false,
+            encryption_passphrase: passphrase.map(str::to_owned),
+        },
+    );
     builder.write_header().unwrap();
     for (archive_name, content) in files {
         let pipeline_result = pipeline
