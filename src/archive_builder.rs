@@ -202,6 +202,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     /// Returns `true` if `path` is already present in the archive (either from
     /// imported existing entries or previously committed files in this session).
+    #[allow(dead_code)]
     pub fn path_exists(&self, path: &str) -> bool {
         self.path_set.contains(path)
     }
