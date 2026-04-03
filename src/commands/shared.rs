@@ -1,4 +1,4 @@
-use crate::archive_builder::{prepare_file_from_disk, FileAddOutcome, PreparedFile};
+use crate::archive_builder::{FileAddOutcome, PreparedFile, prepare_file_from_disk};
 use crate::models::archive::CompressionMethod;
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::walker::ScannedFile;
@@ -21,6 +21,7 @@ pub fn prepare_files_parallel(
         .collect()
 }
 
+#[must_use]
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1_024;
     const MB: u64 = 1_024 * KB;
@@ -37,6 +38,7 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+#[must_use]
 pub fn compression_method_label(method: CompressionMethod, locale: &str) -> Cow<'static, str> {
     match method {
         CompressionMethod::None => t!("cli.common.methods.stored", locale = locale),
@@ -49,6 +51,7 @@ pub fn compression_method_label(method: CompressionMethod, locale: &str) -> Cow<
 /// Compute the stored-vs-original ratio as a formatted percentage string.
 ///
 /// Returns `"100.0"` when `total_original` is zero to avoid division by zero.
+#[must_use]
 pub fn compute_ratio(total_original: u64, total_stored: u64) -> String {
     if total_original > 0 {
         format!("{:.1}", total_stored as f64 / total_original as f64 * 100.0)

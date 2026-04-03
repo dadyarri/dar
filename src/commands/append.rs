@@ -1,15 +1,15 @@
 use super::shared::{
     prepare_files_parallel, print_dry_run_prepared, print_summary, print_verbose_outcome,
 };
-use crate::archive_builder::{make_renamed_path, ArchiveBuilder, ConflictMode};
+use crate::archive_builder::{ArchiveBuilder, ConflictMode, make_renamed_path};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::extractor::try_decrypt_bytes;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
-use crate::reader::{load_archive, ArchiveState, EncryptedEntryProbe};
+use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -605,13 +605,15 @@ mod tests {
             load_archive(&mut archive_file, archive_path.to_str().unwrap(), &locale).unwrap();
         let probe = state.encryption_probe.unwrap();
 
-        assert!(verify_passphrase_matches(
-            &mut archive_file,
-            &probe,
-            "wrong",
-            archive_path.to_str().unwrap(),
-            &locale,
-        )
-        .is_err());
+        assert!(
+            verify_passphrase_matches(
+                &mut archive_file,
+                &probe,
+                "wrong",
+                archive_path.to_str().unwrap(),
+                &locale,
+            )
+            .is_err()
+        );
     }
 }

@@ -5,7 +5,7 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::load_archive;
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::File;
 use std::io::BufWriter;

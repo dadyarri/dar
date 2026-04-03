@@ -11,6 +11,8 @@ mod encryption;
 mod extra;
 mod extractor;
 mod i18n;
+#[cfg(test)]
+mod integration_tests;
 mod models;
 mod pipeline;
 mod reader;

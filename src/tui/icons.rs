@@ -35,17 +35,9 @@ pub fn detect_powerline() -> bool {
 /// Fallback: `▼ ` / `▶ `.
 pub fn folder_icon(expanded: bool, powerline: bool) -> &'static str {
     if powerline {
-        if expanded {
-            "\u{F07C} "
-        } else {
-            "\u{F07B} "
-        }
+        if expanded { "\u{F07C} " } else { "\u{F07B} " }
     } else {
-        if expanded {
-            "▼ "
-        } else {
-            "▶ "
-        }
+        if expanded { "▼ " } else { "▶ " }
     }
 }
 

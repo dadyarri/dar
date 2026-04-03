@@ -1,5 +1,5 @@
-use clap::{crate_authors, crate_version};
 use clap::{Arg, ArgAction, Command};
+use clap::{crate_authors, crate_version};
 use clap_complete::Shell;
 
 fn root_help_template<T>(translate: &T) -> String

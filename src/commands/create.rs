@@ -7,7 +7,7 @@ use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs;
 use std::fs::File;

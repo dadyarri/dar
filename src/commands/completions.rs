@@ -1,7 +1,7 @@
 use crate::cli::build_cli_with_translator;
 use crate::i18n::Locale;
 use clap::ArgMatches;
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use eyre::Result;
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {

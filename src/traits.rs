@@ -1,6 +1,6 @@
 use crate::counting_writer::CountingWriter;
 use crate::models::archive::CompressionMethod;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use rust_i18n::t;
 use std::io::{Read, Write};
 
@@ -352,16 +352,20 @@ mod decompress_tests {
 
     #[test]
     fn test_brotli_decompress_rejects_garbage() {
-        assert!(BROTLI_COMPRESSOR
-            .decompress_bytes(b"not brotli data")
-            .is_err());
+        assert!(
+            BROTLI_COMPRESSOR
+                .decompress_bytes(b"not brotli data")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_zstandard_decompress_rejects_garbage() {
-        assert!(ZSTANDARD_COMPRESSOR
-            .decompress_bytes(b"not zstd data")
-            .is_err());
+        assert!(
+            ZSTANDARD_COMPRESSOR
+                .decompress_bytes(b"not zstd data")
+                .is_err()
+        );
     }
 
     #[test]

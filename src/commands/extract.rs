@@ -2,7 +2,7 @@ use crate::extractor::{extract_entries, extract_entry};
 use crate::i18n::Locale;
 use crate::reader::load_archive;
 use clap::ArgMatches;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::File;
 use std::path::Path;
