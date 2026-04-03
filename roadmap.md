@@ -9,72 +9,20 @@ worked in any order unless a dependency is noted.
 
 ## Table of Contents
 
-1. [Code-Quality Quick Wins](#1-code-quality-quick-wins)
-2. [Error Handling & Observability](#2-error-handling--observability)
-3. [Architecture — Reduce Coupling](#3-architecture--reduce-coupling)
-4. [Testability Improvements](#4-testability-improvements)
-5. [Test-Coverage Gaps](#5-test-coverage-gaps)
-6. [TUI Maintainability](#6-tui-maintainability)
-7. [Performance & Resource Usage](#7-performance--resource-usage)
-8. [Dependency Hygiene](#8-dependency-hygiene)
-9. [Documentation](#9-documentation)
-10. [Future Features (out-of-scope for this refactor)](#10-future-features)
-11. [Non-goals](#11-non-goals)
-
----
-
-## 1. Code-Quality Quick Wins
-
-These are low-risk, stand-alone changes that improve readability and reduce
-future confusion.
-
-### 1.1 `P2` — Remove duplicate `tempfile` dependency
-
-`tempfile = "3"` appears in both `[dependencies]` and `[dev-dependencies]` in
-`Cargo.toml`.  It should only be in `[dev-dependencies]` (it is only used in
-tests).
-
----
-
-### 1.2 `P3` — Add `#[must_use]` to builder and pure functions
-
-Functions like `ArchiveBuilder::with_config`, `make_renamed_path`, and all
-pure `compute_*` / `format_*` helpers in `commands/shared.rs` silently discard
-their return values if misused.  Adding `#[must_use]` turns this into a
-compile-time warning.
-
----
-
-### 1.3 `P3` — Deduplicate index-entry construction in `archive_builder.rs`
-
-`commit_prepared()` contains two nearly-identical blocks that construct an
-`ArchiveIndexEntry` (one for the dedup hit path, one for the normal write
-path).  Extract a private `fn make_index_entry(…) -> ArchiveIndexEntry` helper
-to remove the duplication and the associated drift risk.
+1. [Error Handling & Observability](#2-error-handling--observability)
+2. [Architecture — Reduce Coupling](#3-architecture--reduce-coupling)
+3. [Testability Improvements](#4-testability-improvements)
+4. [Test-Coverage Gaps](#5-test-coverage-gaps)
+5. [TUI Maintainability](#6-tui-maintainability)
+6. [Performance & Resource Usage](#7-performance--resource-usage)
+7. [Dependency Hygiene](#8-dependency-hygiene)
+8. [Documentation](#9-documentation)
+9. [Future Features (out-of-scope for this refactor)](#10-future-features)
+10. [Non-goals](#11-non-goals)
 
 ---
 
 ## 2. Error Handling & Observability
-
-### 2.1 `P1` — Preserve inner error details in `reader.rs`
-
-**Problem:** UTF-8 decode failures in `reader.rs` discard the original error:
-
-```rust
-String::from_utf8(path_bytes).map_err(|_| {
-    eyre!(t!("cli.common.errors.utf8_failed", …))
-})?;
-```
-
-**Proposed fix:** Chain the original error with `.wrap_err(...)` or use
-`String::from_utf8_lossy` for paths (with a distinct warning to the user):
-
-```rust
-String::from_utf8(path_bytes)
-    .wrap_err_with(|| t!("cli.common.errors.utf8_failed", …))?;
-```
-
----
 
 ### 2.2 `P1` — Document the `Option`-returning pattern in `extractor.rs`
 
@@ -327,31 +275,6 @@ pub fn draw_status(frame: &mut Frame, state: &AppState) {
 
 ## 5. Test-Coverage Gaps
 
-### 5.1 `P1` — End-to-end integration test: create → append → extract → verify
-
-There is currently no test that exercises the full user workflow.  Add a test
-(in a `tests/integration.rs` file) that:
-
-1. Creates an archive with `create::call()` (or directly with `ArchiveBuilder`)
-2. Appends additional files with `append::call()`
-3. Extracts all files with `extract::call()`
-4. Compares extracted byte contents against the originals
-
-This single test would catch serialisation/deserialisation regressions that
-exist in no individual unit test today.
-
----
-
-### 5.2 `P1` — Encryption end-to-end: create encrypted → extract with correct/wrong passphrase
-
-Extend the integration test above to cover the encrypted path:
-
-- `--encrypt-passphrase "secret"` on create → extract succeeds with `"secret"`,
-  fails with `"wrong"`, fails with no passphrase.
-- Append to encrypted archive without passphrase → should fail with clear error.
-
----
-
 ### 5.3 `P2` — Deduplication with three or more identical files
 
 Current tests only verify the two-file dedup case.  Add a test that adds the
@@ -387,14 +310,6 @@ for:
 - Valid header + footer but index bytes are all zeros.
 - Archive truncated mid-index-entry.
 - Archive with zero entries (edge case for empty archive creation).
-
----
-
-### 5.6 `P2` — Empty-file and single-byte-file round-trip
-
-No test verifies that zero-length files survive a create/extract cycle.  The
-compression path may behave differently (some codecs refuse empty input).  Add
-a parameterised test across all compression methods.
 
 ---
 
@@ -584,13 +499,6 @@ built once at startup makes the lookup O(1).
 
 ## 8. Dependency Hygiene
 
-### 8.1 `P1` — Move `tempfile` to `[dev-dependencies]` only
-
-`tempfile = "3"` is listed in both `[dependencies]` and `[dev-dependencies]`.
-It is only used in tests; it should only appear under `[dev-dependencies]`.
-
----
-
 ### 8.2 `P2` — Introduce feature flags for optional compression/image backends
 
 All compression and image-processing crates are unconditional dependencies,
@@ -642,8 +550,7 @@ to handle.
 ### 9.2 `P2` — Add `/// # Panics` where applicable
 
 Two `unwrap()` calls in `tui/mod.rs` (lines 316, 386) are safe by invariant
-but should be documented.  Once replaced (see 1.3) this item is resolved
-automatically.
+but should be documented.
 
 ---
 
@@ -701,14 +608,12 @@ preserve user experience:
 
 | Sprint | Items | Goal |
 |--------|-------|------|
-| 1 | 1.1, 1.2, 1.4, 8.1 | Quick wins: constants, dedup nonce, dep cleanup |
-| 2 | 2.1, 2.3, 3.2 (split `archive_builder`) | Error clarity + module split |
-| 3 | 4.1, 4.2 (filesystem abstraction) | Core testability unlock |
-| 4 | 5.1, 5.2 (integration tests) | E2E safety net before further refactor |
-| 5 | 5.3–5.7 (gap coverage) | Targeted unit-test additions |
-| 6 | 3.3, 3.4, 4.4 (injection points) | Dependency injection for pipeline/command |
-| 7 | 6.1, 6.2 (TUI decompose) | TUI maintainability |
-| 8 | 4.5, 5.9 (TUI pure functions + tests) | TUI testability |
-| 9 | 7.1, 7.3, 3.5 (performance) | Performance pass |
-| 10 | 8.2, 8.3 (features + audit) | Binary size + security |
-| 11 | 9.1–9.4 (docs) | Documentation completion |
+| 1 | 2.3, 3.1 (split `archive_builder`) | Error clarity + module split |
+| 2 | 4.1, 4.2 (filesystem abstraction) | Core testability unlock |
+| 3 | 5.3–5.5, 5.7 (gap coverage) | Targeted unit-test additions |
+| 4 | 3.3, 3.4, 4.4 (injection points) | Dependency injection for pipeline/command |
+| 5 | 6.1, 6.2 (TUI decompose) | TUI maintainability |
+| 6 | 4.5, 5.9 (TUI pure functions + tests) | TUI testability |
+| 7 | 7.1, 7.3, 3.5 (performance) | Performance pass |
+| 8 | 8.2, 8.3 (features + audit) | Binary size + security |
+| 9 | 9.1–9.4 (docs) | Documentation completion |
