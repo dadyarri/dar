@@ -2,7 +2,9 @@ use crate::i18n::Locale;
 use crate::reader;
 use crate::tui::{
     App,
-    state::{AppState, ExtractDialog, Focus, MetaSearchState, PreviewMode, PreviewState, SearchState},
+    state::{
+        AppState, ExtractDialog, Focus, MetaSearchState, PreviewMode, PreviewState, SearchState,
+    },
     tree,
 };
 use clap::ArgMatches;

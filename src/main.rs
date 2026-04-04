@@ -8,6 +8,7 @@ mod commands;
 mod constants;
 mod counting_writer;
 mod encryption;
+mod errors;
 mod extra;
 mod extractor;
 mod i18n;

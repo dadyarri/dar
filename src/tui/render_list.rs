@@ -115,7 +115,7 @@ pub(crate) fn draw_list(
         .and_then(|n| n.to_str())
         .unwrap_or("?");
 
-    let list_border_style = if state.focus == Focus::Preview {
+    let list_border_style = if state.preview.focus == Focus::Preview {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default()

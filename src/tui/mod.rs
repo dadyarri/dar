@@ -460,7 +460,7 @@ fn validate_extract_path(state: &mut AppState) -> bool {
     }
     let p = std::path::Path::new(&trimmed);
     if !p.exists() {
-        state.extract_error = Some(
+        state.extract.error = Some(
             rust_i18n::t!(
                 "tui.inspect.extract.error_not_found",
                 locale = locale.as_str(),
