@@ -1,9 +1,11 @@
 /// Benchmarks for [`dari::pipeline::CompressionPipeline::process_file`].
 ///
-/// Exercises Brotli, ZStd, and LZMA on a 1 MiB synthetic plaintext payload so
-/// that future changes to the compression layer don't regress throughput
-/// unnoticed.
-use criterion::{Criterion, criterion_group, criterion_main};
+/// Exercises Brotli, ZStd, and LZMA on a 1 MiB synthetic plaintext payload.
+///
+/// `iter_batched` is used so that the payload clone (needed because
+/// `process_file` takes ownership) is **excluded** from the measured time and
+/// only the compression step itself is captured.
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use dari::pipeline::{CompressionPipeline, PipelineConfig};
 use std::hint::black_box;
 use std::path::Path;
@@ -31,12 +33,14 @@ fn bench_brotli(c: &mut Criterion) {
     let pipeline = CompressionPipeline::new(config());
 
     c.bench_function("pipeline/brotli 1MiB", |b| {
-        b.iter(|| {
-            let result = pipeline
-                .process_file(black_box(path), black_box(payload.clone()))
-                .unwrap();
-            black_box(result);
-        })
+        b.iter_batched(
+            || payload.clone(),
+            |data| {
+                let result = pipeline.process_file(black_box(path), data).unwrap();
+                black_box(result);
+            },
+            BatchSize::LargeInput,
+        )
     });
 }
 
@@ -47,12 +51,14 @@ fn bench_zstd(c: &mut Criterion) {
     let pipeline = CompressionPipeline::new(config());
 
     c.bench_function("pipeline/zstd 1MiB", |b| {
-        b.iter(|| {
-            let result = pipeline
-                .process_file(black_box(path), black_box(payload.clone()))
-                .unwrap();
-            black_box(result);
-        })
+        b.iter_batched(
+            || payload.clone(),
+            |data| {
+                let result = pipeline.process_file(black_box(path), data).unwrap();
+                black_box(result);
+            },
+            BatchSize::LargeInput,
+        )
     });
 }
 
@@ -63,12 +69,14 @@ fn bench_lzma(c: &mut Criterion) {
     let pipeline = CompressionPipeline::new(config());
 
     c.bench_function("pipeline/lzma 1MiB", |b| {
-        b.iter(|| {
-            let result = pipeline
-                .process_file(black_box(path), black_box(payload.clone()))
-                .unwrap();
-            black_box(result);
-        })
+        b.iter_batched(
+            || payload.clone(),
+            |data| {
+                let result = pipeline.process_file(black_box(path), data).unwrap();
+                black_box(result);
+            },
+            BatchSize::LargeInput,
+        )
     });
 }
 

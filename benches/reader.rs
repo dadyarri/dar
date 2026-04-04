@@ -2,11 +2,16 @@
 ///
 /// Tests archive parsing performance on a large (1 000-entry) archive to catch
 /// regressions in index reading, footer parsing, and entry deserialization.
-use criterion::{Criterion, criterion_group, criterion_main};
+///
+/// The archive is built entirely in-memory — no filesystem I/O occurs during
+/// setup.  The benchmark loop creates a fresh `Cursor<&[u8]>` (O(1), no copy)
+/// rather than cloning the archive bytes on every iteration.
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use dari::{
     archive_builder::ArchiveBuilder,
+    file_reader::PreparedFile,
     i18n::detect_locale,
-    pipeline::PipelineConfig,
+    pipeline::{CompressionPipeline, PipelineConfig},
     reader::load_archive,
 };
 use std::hint::black_box;
@@ -14,36 +19,42 @@ use std::io::Cursor;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-/// Build a 1 000-entry in-memory archive and return its raw bytes.
+/// Build a 1 000-entry archive entirely in memory and return the raw bytes.
 ///
-/// Uses `ArchiveBuilder` over a `Cursor<Vec<u8>>` to avoid any filesystem I/O
-/// during the benchmark warm-up phase.
+/// Uses `CompressionPipeline::process_file` with a synthetic path so that no
+/// real files are read from disk during setup.
 fn build_large_archive() -> Vec<u8> {
     let config = PipelineConfig {
         compress_images: false,
         encryption_passphrase: None,
     };
-
-    let tmpdir = tempfile::tempdir().expect("tempdir");
-    let content = b"benchmark entry content for reader test";
-
-    // Write a single shared file that all 1 000 entries point to.
-    let src = tmpdir.path().join("entry.txt");
-    std::fs::write(&src, content).unwrap();
-
-    let archive_file = tmpdir.path().join("bench.dar");
-    let fh = std::fs::File::create(&archive_file).unwrap();
-    let mut builder = ArchiveBuilder::with_config(fh, config);
+    let pipeline = CompressionPipeline::new(config.clone());
+    let cursor = Cursor::new(Vec::<u8>::new());
+    let mut builder = ArchiveBuilder::with_config(cursor, config);
     builder.write_header().unwrap();
 
+    let content = b"benchmark entry content for reader test".to_vec();
     for i in 0..1_000u32 {
         let archive_name = format!("dir_{}/file_{}.txt", i / 100, i);
-        builder.add_file(&src, &archive_name).unwrap();
+        let pipeline_result = pipeline
+            .process_file(
+                std::path::Path::new("entry.txt"),
+                content.clone(),
+            )
+            .unwrap();
+        let prepared = PreparedFile {
+            archive_path: archive_name,
+            pipeline_result,
+            timestamp: 0,
+            uid: 1000,
+            gid: 1000,
+            perm: 644,
+        };
+        builder.commit_prepared(prepared).unwrap();
     }
 
     builder.build().unwrap();
-
-    std::fs::read(&archive_file).unwrap()
+    builder.into_inner().into_inner()
 }
 
 fn bench_load_archive(c: &mut Criterion) {
@@ -51,8 +62,9 @@ fn bench_load_archive(c: &mut Criterion) {
     let locale = detect_locale();
 
     c.bench_function("reader/load_archive 1000 entries", |b| {
+        // Cursor<&[u8]> is O(1) to create — we borrow archive_bytes, no clone.
         b.iter(|| {
-            let mut cursor = Cursor::new(black_box(archive_bytes.clone()));
+            let mut cursor = Cursor::new(black_box(archive_bytes.as_slice()));
             let state = load_archive(&mut cursor, "bench.dar", &locale).unwrap();
             black_box(state);
         })
