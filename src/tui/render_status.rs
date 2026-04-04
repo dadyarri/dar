@@ -14,7 +14,7 @@ pub(crate) fn draw_status_bar(
     state: &mut AppState,
 ) {
     // Extract dialog owns the status bar while it is open.
-    if state.extract_active {
+    if state.extract.active {
         crate::tui::render_extract::draw_extract_status_bar(frame, area, state);
         return;
     }

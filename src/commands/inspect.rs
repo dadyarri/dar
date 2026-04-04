@@ -2,7 +2,7 @@ use crate::i18n::Locale;
 use crate::reader;
 use crate::tui::{
     App,
-    state::{AppState, Focus, PreviewMode},
+    state::{AppState, ExtractDialog, Focus, MetaSearchState, PreviewMode, PreviewState, SearchState},
     tree,
 };
 use clap::ArgMatches;
@@ -44,27 +44,35 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         entries: archive_state.entries,
         passphrase,
         locale: locale.clone(),
+        powerline: crate::tui::icons::detect_powerline(),
         tree_root,
         visible,
         table_state,
-        preview_mode: PreviewMode::Closed,
-        focus: Focus::List,
-        preview_scroll: 0,
-        preview_line_count: 0,
-        preview_viewport_height: 0,
-        preview_cache: None,
-        search_query: String::new(),
-        search_active: false,
-        powerline: crate::tui::icons::detect_powerline(),
-        meta_search_query: String::new(),
-        meta_search_active: false,
-        meta_search_error: None,
-        extract_active: false,
-        extract_path: std::env::current_dir()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| String::from(".")),
-        extract_path_resolved: None,
-        extract_error: None,
+        search: SearchState {
+            query: String::new(),
+            active: false,
+        },
+        meta_search: MetaSearchState {
+            query: String::new(),
+            active: false,
+            error: None,
+        },
+        extract: ExtractDialog {
+            active: false,
+            path: std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| String::from(".")),
+            resolved: None,
+            error: None,
+        },
+        preview: PreviewState {
+            mode: PreviewMode::Closed,
+            focus: Focus::List,
+            scroll: 0,
+            line_count: 0,
+            viewport_height: 0,
+            cache: None,
+        },
     };
 
     App::run(app_state)
