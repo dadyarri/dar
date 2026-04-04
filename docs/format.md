@@ -59,19 +59,19 @@ UTF-8 strings (path and extra).
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 8 | `offset` | Byte offset of the file's data block (u64 LE) |
-| 8 | 8 | `original_size` | Uncompressed file size in bytes (u64 LE) |
-| 16 | 8 | `compressed_size` | Stored (compressed / encrypted) size in bytes (u64 LE) |
-| 24 | 32 | `checksum` | BLAKE3 checksum of the **original** file bytes |
-| 56 | 1 | `compression_method` | Compression codec; see table below |
-| 57 | 2 | `bitflags` | Feature flags; see table below |
-| 59 | 4 | `timestamp` | File modification time as Unix seconds (u32 LE) |
-| 63 | 4 | `uid` | Owner user ID (u32 LE); `1000` on Windows |
-| 67 | 4 | `gid` | Owner group ID (u32 LE); `1000` on Windows |
-| 71 | 2 | `perm` | Unix permission bits (u16 LE); `644` on Windows |
-| 73 | 2 | `path_length` | Byte length of the path string that follows (u16 LE) |
-| 75 | 2 | `extra_length` | Byte length of the extra string that follows (u16 LE) |
-| 77 | N | `path` | UTF-8 archive-relative path (`path_length` bytes) |
-| 77+N | M | `extra` | UTF-8 key=value metadata string (`extra_length` bytes) |
+| 8 | 2 | `bitflags` | Feature flags; see table below |
+| 10 | 1 | `compression_method` | Compression codec; see table below |
+| 11 | 8 | `timestamp` | File modification time as Unix seconds (u64 LE) |
+| 19 | 4 | `uid` | Owner user ID (u32 LE); `1000` on Windows |
+| 23 | 4 | `gid` | Owner group ID (u32 LE); `1000` on Windows |
+| 27 | 2 | `perm` | Unix permission bits (u16 LE); `644` on Windows |
+| 29 | 32 | `checksum` | BLAKE3 checksum of the **original** file bytes |
+| 61 | 8 | `original_size` | Uncompressed file size in bytes (u64 LE) |
+| 69 | 8 | `compressed_size` | Stored (compressed / encrypted) size in bytes (u64 LE) |
+| 77 | 4 | `path_length` | Byte length of the path string that follows (u32 LE) |
+| 81 | 4 | `extra_length` | Byte length of the extra string that follows (u32 LE) |
+| 85 | N | `path` | UTF-8 archive-relative path (`path_length` bytes) |
+| 85+N | M | `extra` | UTF-8 key=value metadata string (`extra_length` bytes) |
 
 #### `compression_method` values
 
@@ -86,8 +86,8 @@ UTF-8 strings (path and extra).
 
 | Bit | Constant | Meaning |
 |-----|----------|---------|
-| 0 | `ENCRYPTED_DATA` | Entry data is ChaCha20-Poly1305 encrypted |
-| 1 | `LINKED_DATA` | Entry is a dedup link; its `offset` points to a prior entry's data block |
+| 0 | `LINKED_DATA` | Entry is a dedup link; its `offset` points to a prior entry's data block |
+| 1 | `ENCRYPTED_DATA` | Entry data is ChaCha20-Poly1305 encrypted |
 
 ### Extra Field Format
 
@@ -110,7 +110,7 @@ Known key prefixes are documented in `src/constants.rs` and `src/tui/preview.rs`
 | 2 | Added `extra` field to index entries |
 | 3 | Added deduplication (`LINKED_DATA` bitflag) |
 | 4 | Added encryption (`ENCRYPTED_DATA` bitflag + nonce/tag in `extra`) |
-| 5 | Added `uid`, `gid`, `perm` fields; `timestamp` shrunk to u32; current version |
+| 5 | Added `uid`, `gid`, `perm` fields; `path_length`/`extra_length` widened to u32; `modification_timestamp` widened to u64; current version |
 
 ---
 

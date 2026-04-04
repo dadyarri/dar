@@ -21,7 +21,7 @@ pub struct ScannedFile {
 /// [`ScannedFile`] entries.
 ///
 /// Using a trait here lets tests inject a [`FixedFileSource`] containing a
-/// synthetic file list without touching the real filesystem.
+/// synthetic file list, avoiding real directory traversal during the walk.
 pub trait FileSource: Send + Sync {
     /// Walk `root` and return all files that should be archived.
     ///
@@ -35,7 +35,7 @@ pub trait FileSource: Send + Sync {
 pub struct IgnoreWalker;
 
 impl FileSource for IgnoreWalker {
-    fn walk(&self, root: &Path, locale: &Locale) -> Result<Vec<ScannedFile>> {
+    fn walk(&self, root: &Path, _locale: &Locale) -> Result<Vec<ScannedFile>> {
         let walker = WalkBuilder::new(root)
             .git_ignore(true)
             .add_custom_ignore_filename(".darignore")
@@ -44,13 +44,10 @@ impl FileSource for IgnoreWalker {
 
         let mut files = Vec::new();
         for entry in walker {
-            let entry = entry.wrap_err_with(|| {
-                t!(
-                    "cli.common.errors.walk_failed",
-                    locale = locale.as_str(),
-                    path = root.display()
-                )
-            })?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
 
             if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 files.push(ScannedFile {

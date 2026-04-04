@@ -21,8 +21,11 @@ pub struct PreparedFile {
     pub perm: u16,
 }
 
-/// Read file content into memory, using chunked I/O for files larger than
-/// [`CHUNK_SIZE`] to bound peak heap usage.
+/// Read file content fully into memory.
+///
+/// For files larger than [`CHUNK_SIZE`], this uses chunked I/O to bound the
+/// temporary per-read buffer size, but the full file is still accumulated in
+/// the returned [`Vec<u8>`].
 ///
 /// Safe to call from multiple threads simultaneously — no shared state is
 /// mutated.

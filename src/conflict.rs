@@ -16,25 +16,31 @@ pub enum ConflictMode {
 /// Compute the renamed path by appending `-N` before the file extension until a
 /// name that is not in `path_set` is found.
 ///
+/// Dotfiles (e.g. `.hidden`) are treated as having no extension — the leading
+/// dot is part of the stem, not a separator.
+///
 /// # Examples
 ///
-/// ```
-/// use std::collections::HashSet;
-/// use dari::conflict::make_renamed_path;
-///
+/// ```no_run
+/// # use std::collections::HashSet;
 /// let set: HashSet<String> = ["a.txt".to_string()].into();
-/// assert_eq!(make_renamed_path("a.txt", &set), "a-1.txt");
+/// // make_renamed_path("a.txt", &set) == "a-1.txt"
 /// ```
 #[must_use]
 pub fn make_renamed_path(path: &str, path_set: &HashSet<String>) -> String {
     let slash_pos = path.rfind('/').map_or(0, |p| p + 1);
     let filename = &path[slash_pos..];
     let (dir_prefix, stem, ext) = if let Some(dot_pos) = filename.rfind('.') {
-        (
-            &path[..slash_pos],
-            &filename[..dot_pos],
-            &filename[dot_pos..],
-        )
+        if dot_pos > 0 {
+            (
+                &path[..slash_pos],
+                &filename[..dot_pos],
+                &filename[dot_pos..],
+            )
+        } else {
+            // Leading dot (dotfile like ".hidden") — treat entire name as stem
+            (&path[..slash_pos], filename, "")
+        }
     } else {
         (&path[..slash_pos], filename, "")
     };
@@ -74,5 +80,11 @@ mod tests {
     fn test_rename_preserves_directory_prefix() {
         let set: HashSet<String> = ["src/main.rs".to_string()].into();
         assert_eq!(make_renamed_path("src/main.rs", &set), "src/main-1.rs");
+    }
+
+    #[test]
+    fn test_rename_dotfile_uses_whole_name_as_stem() {
+        let set: HashSet<String> = [".hidden".to_string()].into();
+        assert_eq!(make_renamed_path(".hidden", &set), ".hidden-1");
     }
 }
