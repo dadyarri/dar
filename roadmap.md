@@ -30,69 +30,53 @@ Items marked ✅ have been implemented.
 
 Implemented `DariError` enum in `src/errors.rs` with variants:
 `CorruptArchive`, `EncryptionMismatch`, `PathConflict`, `UnsupportedVersion`.
-A `From<DariError> for eyre::Report` impl keeps existing `?` call-sites intact.
+Because `DariError: std::error::Error + Send + Sync`, eyre's blanket impl converts
+it automatically — no call-site changes needed.
 
 ---
 
 ## 3. Architecture — Reduce Coupling
 
-### 3.1 `P1` — Split `archive_builder.rs` into focused modules
+### ✅ 3.1 `P1` — Split `archive_builder.rs` into focused modules (partial)
 
-At ~880 lines `archive_builder.rs` has at least four distinct responsibilities:
+Two responsibilities extracted into dedicated modules:
 
-| Responsibility | Suggested module |
-|----------------|-----------------|
-| Reading file content from disk, chunking | `src/file_reader.rs` |
-| Checksum → offset dedup map management | `src/dedup.rs` |
-| Conflict mode logic (Error/Rename/Overwrite) | `src/conflict.rs` |
-| Binary serialisation (header, entry, footer write) | stays in `archive_builder.rs` |
+- `src/conflict.rs` — `ConflictMode` enum + `make_renamed_path` helper + unit tests
+- `src/file_reader.rs` — `PreparedFile` struct + `read_file_content` +
+  `prepare_file_from_disk` (the parallel-safe file reading step)
 
-Each extracted module can then have its own unit tests without needing a full
-archive fixture.
-
-**Invariants to preserve:**
-- `ArchiveBuilder<W: Write + Seek>` public API stays identical.
-- The `import_existing_entries` method (used by `append`) keeps its current
-  signature.
+`archive_builder.rs` re-exports these via `pub use` to keep existing callers unchanged.
+The dedup (`ExistingFileData`) and binary-serialisation logic remain in
+`archive_builder.rs`; further extraction is deferred to a future PR.
 
 ---
 
-### 3.2 `P2` — Introduce a `MetadataExtractor` trait in `pipeline.rs`
+### ✅ 3.2 `P2` — Introduce a `MetadataExtractor` trait in `pipeline.rs`
 
-Image EXIF extraction and audio-tag extraction in `pipeline.rs` are both
-"attempt to read key-value pairs from bytes; return empty vec on failure."
-Unifying them behind a trait:
+`MetadataExtractor: Send + Sync` trait added to `src/pipeline.rs` with three impls:
 
-```rust
-pub trait MetadataExtractor: Send + Sync {
-    /// Returns `(key, value)` pairs or an empty vec on failure.
-    fn extract(&self, data: &[u8], extension: &str) -> Vec<(String, String)>;
-}
-```
+| Struct | Behaviour |
+|--------|-----------|
+| `ExifMetadataExtractor` | reads EXIF from image files via `kamadak-exif` |
+| `AudioMetadataExtractor` | reads ID3/Vorbis/APEv2 tags via `lofty` |
+| `NoOpMetadataExtractor` | returns empty vec (for tests / future feature-flag use) |
 
-allows:
-
-- Injecting a no-op extractor in unit tests (`pipeline.rs` tests currently
-  cannot test metadata population without real media files).
-- Adding future extractors (PDF metadata, video streams) without modifying
-  `pipeline.rs`.
+`CompressionPipeline::with_extractors(config, Vec<Box<dyn MetadataExtractor>>)` factory
+lets tests inject no-op extractors without real media files.
 
 ---
 
-### 3.3 `P2` — Reduce `commands/append.rs::call()` length (~249-line function)
+### ✅ 3.3 `P2` — Reduce `commands/append.rs::call()` length
 
-`call()` does argument parsing, archive loading, encryption validation,
-passphrase verification, dry-run simulation, and archive writing — all in one
-sequential block.  Extract into private functions:
+Three private helper functions extracted from `call()`:
 
-```rust
-fn validate_archive_state(…) -> eyre::Result<ArchiveState>
-fn simulate_conflicts(…) -> Vec<ConflictReport>   // dry-run path
-fn execute_append(…) -> eyre::Result<()>           // actual write path
-```
+- `run_dry_run(file, existing_entries, prepared, conflict_mode, locale)` — prints the
+  dry-run conflict report without writing.
+- `preflight_conflict_check(existing, prepared, mode, locale) -> Result<()>` — validates
+  conflicts before truncating the archive (no partial writes on error).
+- `execute_append_write(…) -> Result<()>` — performs the actual truncate-and-rewrite.
 
-The dry-run and execution paths currently duplicate conflict-checking logic;
-consolidating them reduces the surface area for divergence bugs.
+`call()` is now a thin orchestration layer (~40 lines) that delegates to these helpers.
 
 ---
 
@@ -114,24 +98,23 @@ directly — no filesystem I/O required.
 
 ---
 
-### 4.2 `P1` — Make `walker::scan_files` accept an iterator source
+### ✅ 4.2 `P1` — Make `walker::scan_files` accept a `FileSource` trait
 
-`walker.rs` wraps `ignore::WalkBuilder` directly.  This means there is no way
-to inject a synthetic file list without touching the filesystem.
-
-**Proposed fix:** Keep `scan_files(paths, locale)` as the public API but
-extract the actual walk behind a `trait FileSource`:
+`FileSource` trait added to `src/walker.rs`:
 
 ```rust
-pub trait FileSource {
-    fn walk(&self, root: &Path) -> eyre::Result<Vec<ScannedFile>>;
+pub trait FileSource: Send + Sync {
+    fn walk(&self, root: &Path, locale: &Locale) -> Result<Vec<ScannedFile>>;
 }
-
-pub struct IgnoreWalker;          // real implementation
-pub struct FixedFileSource(Vec<ScannedFile>); // test implementation
 ```
 
-`scan_files` can then accept `impl FileSource` (or default to `IgnoreWalker`).
+Two implementations provided:
+- `IgnoreWalker` — the real backend (wraps `ignore::WalkBuilder`).
+- `FixedFileSource(Vec<ScannedFile>)` — test-only synthetic source.
+
+`scan_files(paths, locale)` keeps its original signature and delegates to `IgnoreWalker`.
+`scan_files_with_source(paths, locale, source)` is the new injectable entry point.
+`ScannedFile` gains `#[derive(Clone)]` to allow `FixedFileSource` to clone its entries.
 
 ---
 
@@ -142,12 +125,11 @@ All `reader.rs` tests use `Cursor<Vec<u8>>` via `build_archive_bytes` from
 
 ---
 
-### 4.4 `P2` — Add a `TestCompressionPipeline` in `pipeline.rs`
+### ✅ 4.4 `P2` — Add a `TestCompressionPipeline` in `pipeline.rs`
 
-`CompressionPipeline::new(config)` currently always selects real compressors.
-Adding a `CompressionPipeline::with_compressor(box dyn Compressor)` factory
-used in tests gives fine-grained control over which codec is exercised,
-turning integration-heavy tests into pure unit tests.
+`CompressionPipeline::with_compressor(config, Box<dyn Compressor>)` factory added.
+When a compressor override is set, `compressor_for_extension` is bypassed entirely,
+giving test code fine-grained control over which codec is exercised.
 
 ---
 
@@ -214,30 +196,29 @@ Baselines prevent accidental performance regressions in future PRs.
 
 ---
 
-### 6.2 `P2` — Separate event-dispatch from drawing in `tui/mod.rs`
+### ✅ 6.2 `P2` — Separate event-dispatch from drawing in `tui/mod.rs`
 
-`tui/mod.rs` interleaves key-event handling and drawing.  Separate
-the event handler (`fn handle_event(state: &mut AppState, event: Event) ->
-ControlFlow<()>`) from the draw function (`fn draw(frame: &mut Frame, state:
-&AppState)`).  The event handler becomes testable with synthetic key sequences.
+`handle_event(state: &mut AppState, event: Event) -> std::ops::ControlFlow<()>`
+extracted from `run_loop`.  The event handler returns `Break` to signal quit and
+`Continue` for all other events.  `run_loop` is now a minimal 6-line loop.
 
 ---
 
 ### ✅ 6.3 `P2` — Replace magic key literals with named constants
 
-Key bindings defined in `tui::keys` module in `src/tui/mod.rs`:
+Key bindings defined as `KeyCode` constants in `tui::keys` module:
 `QUIT_LOWER`, `QUIT_UPPER`, `PREVIEW_METADATA`, `PREVIEW_CONTENT`,
 `SEARCH_ACTIVATE`, `META_SEARCH_ACTIVATE`, `EXTRACT_ACTIVATE`,
 `NAV_UP`, `NAV_DOWN`.
 
 ---
 
-### 6.4 `P3` — Extract `build_and_cache_preview` side effects
+### ✅ 6.4 `P3` — Extract `build_and_cache_preview` side effects
 
-`build_and_cache_preview` mutates `AppState` directly.  Splitting the pure
-"build preview data" step from the "store into state" step would allow the
-data-building step to be tested in isolation (no `AppState` construction
-required).
+`compute_preview_for_entry(state: &AppState, entry_idx: usize) -> EntryPreview`
+extracted as a pure function that only reads state.
+`build_and_cache_preview` is now a thin wrapper that calls `compute_preview_for_entry`
+then stores the result and resets scroll counters.
 
 ---
 
@@ -307,10 +288,10 @@ Run `cargo audit` and `cargo outdated` periodically.  Notable items currently:
 
 ## 9. Documentation
 
-### 9.2 `P2` — Add `/// # Panics` where applicable
+### ✅ 9.2 `P2` — Add `/// # Panics` where applicable
 
-Two `unwrap()` calls in `tui/mod.rs` (lines 316, 386) are safe by invariant
-but should be documented.
+`toggle_at_cursor` in `tui/mod.rs` documented with `# Panics` explaining that
+the `unwrap_or(0)` is a safe fallback invariant.
 
 ---
 
@@ -339,6 +320,8 @@ version history, and v6 migration guidelines.
 | Windows path-length > 260 chars | Requires extended path API |
 | Symlink preservation | Known walker gap; needs UX design |
 | `dari diff archive1 archive2` | New subcommand |
+| TUI render-data pure functions | See 4.5; enables `tui/preview.rs` tests (5.9) |
+| Benchmarks for hot paths | See 5.11 |
 
 ---
 

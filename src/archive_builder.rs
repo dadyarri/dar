@@ -1,66 +1,17 @@
+// Re-export so that callers importing from archive_builder keep working.
+pub use crate::conflict::{ConflictMode, make_renamed_path};
+pub use crate::file_reader::{PreparedFile, prepare_file_from_disk};
+
 use crate::constants::flags;
-use crate::constants::format::CHUNK_SIZE;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
 };
-use crate::pipeline::{CompressionPipeline, PipelineConfig, PipelineFileData};
-use crate::utils::get_mode;
+use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, metadata};
 use std::io::{Seek, Write};
 use std::path::PathBuf;
-use std::time::SystemTime;
-
-/// How to handle an archive-relative path that already exists in the archive
-/// when `dari append` is called.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ConflictMode {
-    /// Abort the entire operation with an error (default).
-    #[default]
-    Error,
-    /// Automatically suffix the conflicting path with `-1`, `-2`, … until a free name is found.
-    Rename,
-    /// Replace the existing entry; the old data block becomes dead bytes.
-    Overwrite,
-}
-
-/// Compute the renamed path by appending `-N` before the file extension until a
-/// name that is not in `path_set` is found.
-#[must_use]
-pub fn make_renamed_path(path: &str, path_set: &HashSet<String>) -> String {
-    let slash_pos = path.rfind('/').map_or(0, |p| p + 1);
-    let filename = &path[slash_pos..];
-    let (dir_prefix, stem, ext) = if let Some(dot_pos) = filename.rfind('.') {
-        (
-            &path[..slash_pos],
-            &filename[..dot_pos],
-            &filename[dot_pos..],
-        )
-    } else {
-        (&path[..slash_pos], filename, "")
-    };
-    let mut n = 1u32;
-    loop {
-        let candidate = format!("{dir_prefix}{stem}-{n}{ext}");
-        if !path_set.contains(&candidate) {
-            return candidate;
-        }
-        n += 1;
-    }
-}
-
-/// Holds all data needed to write a file into an archive, produced by
-/// [`prepare_file_from_disk`] so that preparation can run in parallel.
-pub struct PreparedFile {
-    pub archive_path: String,
-    pub pipeline_result: PipelineFileData,
-    pub timestamp: u64,
-    pub uid: u32,
-    pub gid: u32,
-    pub perm: u16,
-}
 
 /// Returned by [`ArchiveBuilder::commit_prepared`] with metadata suitable for
 /// verbose progress reporting.
@@ -90,57 +41,6 @@ struct ExistingFileData {
     compression_method: crate::models::archive::CompressionMethod,
     compressed_size: u64,
     bitflags: u16,
-}
-
-// ---------------------------------------------------------------------------
-// File reading helper (safe to call from multiple threads)
-// ---------------------------------------------------------------------------
-
-fn read_file_content(file_path: &PathBuf, file_size: usize) -> Result<Vec<u8>> {
-    if file_size > CHUNK_SIZE {
-        let mut file = File::open(file_path)?;
-        let mut content = Vec::with_capacity(file_size);
-        let mut buffer = vec![0u8; CHUNK_SIZE];
-        loop {
-            let n = std::io::Read::read(&mut file, &mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            content.extend_from_slice(&buffer[..n]);
-        }
-        Ok(content)
-    } else {
-        std::fs::read(file_path).map_err(Into::into)
-    }
-}
-
-/// Read, checksum, and compress a file without touching the archive writer.
-/// Safe to call from multiple threads simultaneously.
-pub fn prepare_file_from_disk(
-    pipeline: &CompressionPipeline,
-    file_path: &PathBuf,
-    archive_path: &str,
-) -> Result<PreparedFile> {
-    let fs_meta = metadata(file_path)?;
-    let file_size = fs_meta.len() as usize;
-    let (uid, gid, perm) = get_mode(&fs_meta);
-
-    let timestamp = fs_meta
-        .modified()?
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs();
-
-    let file_content = read_file_content(file_path, file_size)?;
-    let pipeline_result = pipeline.process_file(file_path, file_content)?;
-
-    Ok(PreparedFile {
-        archive_path: archive_path.to_string(),
-        pipeline_result,
-        timestamp,
-        uid,
-        gid,
-        perm,
-    })
 }
 
 // ---------------------------------------------------------------------------

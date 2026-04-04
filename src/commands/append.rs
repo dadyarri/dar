@@ -109,97 +109,148 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     // ── Dry-run short-circuit ────────────────────────────────────────────────
     if dry_run {
-        println!(
-            "{}",
-            t!(
-                "cli.append.messages.dry_run_header",
-                locale = locale.as_str(),
-                file = file
-            )
-        );
-
-        // Simulate conflict resolution to give accurate dry-run output.
-        let mut dry_run_path_set: HashSet<String> =
-            entries.iter().map(|e| e.path.clone()).collect();
-
-        for p in &prepared {
-            let conflict = dry_run_path_set.contains(&p.archive_path);
-            if conflict {
-                match conflict_mode {
-                    ConflictMode::Error => {
-                        print_dry_run_prepared(p, locale.as_str());
-                        println!(
-                            "    {}",
-                            t!(
-                                "cli.append.messages.dry_run_conflict_error",
-                                locale = locale.as_str()
-                            )
-                        );
-                    }
-                    ConflictMode::Rename => {
-                        let new_path = make_renamed_path(&p.archive_path, &dry_run_path_set);
-                        dry_run_path_set.insert(new_path.clone());
-                        print_dry_run_prepared(p, locale.as_str());
-                        println!(
-                            "    {}",
-                            t!(
-                                "cli.append.messages.dry_run_conflict_rename",
-                                locale = locale.as_str(),
-                                new_path = new_path
-                            )
-                        );
-                    }
-                    ConflictMode::Overwrite => {
-                        dry_run_path_set.insert(p.archive_path.clone());
-                        print_dry_run_prepared(p, locale.as_str());
-                        println!(
-                            "    {}",
-                            t!(
-                                "cli.append.messages.dry_run_conflict_overwrite",
-                                locale = locale.as_str()
-                            )
-                        );
-                    }
-                }
-            } else {
-                dry_run_path_set.insert(p.archive_path.clone());
-                print_dry_run_prepared(p, locale.as_str());
-            }
-        }
-
-        println!(
-            "{}",
-            t!(
-                "cli.append.messages.dry_run_footer",
-                locale = locale.as_str()
-            )
-        );
+        run_dry_run(file, &entries, &prepared, conflict_mode, locale);
         return Ok(());
     }
 
-    // ── Pre-flight conflict check for error mode ─────────────────────────────
-    // Must happen before we truncate the archive so it is never modified on error.
-    if conflict_mode == ConflictMode::Error {
-        let existing_path_set: HashSet<&str> = entries.iter().map(|e| e.path.as_str()).collect();
-        let mut seen: HashSet<&str> = HashSet::new();
-        let mut conflicts: Vec<&str> = Vec::new();
-        for p in &prepared {
-            if existing_path_set.contains(p.archive_path.as_str())
-                || seen.contains(p.archive_path.as_str())
-            {
-                conflicts.push(p.archive_path.as_str());
+    // ── Pre-flight conflict check for error mode + actual write ─────────────
+    preflight_conflict_check(&entries, &prepared, conflict_mode, locale)?;
+    execute_append_write(
+        file,
+        file_handle,
+        index_offset,
+        entries,
+        prepared,
+        config,
+        conflict_mode,
+        verbose,
+        locale,
+    )
+}
+
+/// Simulate the append operation and print a dry-run report without writing.
+fn run_dry_run(
+    file: &str,
+    existing_entries: &[crate::models::archive::ArchiveIndexEntryWrapper],
+    prepared: &[crate::archive_builder::PreparedFile],
+    conflict_mode: ConflictMode,
+    locale: &Locale,
+) {
+    println!(
+        "{}",
+        t!(
+            "cli.append.messages.dry_run_header",
+            locale = locale.as_str(),
+            file = file
+        )
+    );
+
+    // Simulate conflict resolution to give accurate dry-run output.
+    let mut dry_run_path_set: HashSet<String> =
+        existing_entries.iter().map(|e| e.path.clone()).collect();
+
+    for p in prepared {
+        let conflict = dry_run_path_set.contains(&p.archive_path);
+        if conflict {
+            match conflict_mode {
+                ConflictMode::Error => {
+                    print_dry_run_prepared(p, locale.as_str());
+                    println!(
+                        "    {}",
+                        t!(
+                            "cli.append.messages.dry_run_conflict_error",
+                            locale = locale.as_str()
+                        )
+                    );
+                }
+                ConflictMode::Rename => {
+                    let new_path = make_renamed_path(&p.archive_path, &dry_run_path_set);
+                    dry_run_path_set.insert(new_path.clone());
+                    print_dry_run_prepared(p, locale.as_str());
+                    println!(
+                        "    {}",
+                        t!(
+                            "cli.append.messages.dry_run_conflict_rename",
+                            locale = locale.as_str(),
+                            new_path = new_path
+                        )
+                    );
+                }
+                ConflictMode::Overwrite => {
+                    dry_run_path_set.insert(p.archive_path.clone());
+                    print_dry_run_prepared(p, locale.as_str());
+                    println!(
+                        "    {}",
+                        t!(
+                            "cli.append.messages.dry_run_conflict_overwrite",
+                            locale = locale.as_str()
+                        )
+                    );
+                }
             }
-            seen.insert(p.archive_path.as_str());
-        }
-        if !conflicts.is_empty() {
-            return Err(eyre!(t!(
-                "cli.append.errors.append_conflict_error",
-                locale = locale.as_str(),
-                paths = conflicts.join("\n  ")
-            )));
+        } else {
+            dry_run_path_set.insert(p.archive_path.clone());
+            print_dry_run_prepared(p, locale.as_str());
         }
     }
 
+    println!(
+        "{}",
+        t!(
+            "cli.append.messages.dry_run_footer",
+            locale = locale.as_str()
+        )
+    );
+}
+
+/// Check for path conflicts before modifying the archive.
+///
+/// Must be called before truncating the archive so the file is never modified
+/// on conflict in `ConflictMode::Error`.  Does nothing for other modes.
+fn preflight_conflict_check(
+    existing_entries: &[crate::models::archive::ArchiveIndexEntryWrapper],
+    prepared: &[crate::archive_builder::PreparedFile],
+    conflict_mode: ConflictMode,
+    locale: &Locale,
+) -> Result<()> {
+    if conflict_mode != ConflictMode::Error {
+        return Ok(());
+    }
+    let existing_path_set: HashSet<&str> =
+        existing_entries.iter().map(|e| e.path.as_str()).collect();
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut conflicts: Vec<&str> = Vec::new();
+    for p in prepared {
+        if existing_path_set.contains(p.archive_path.as_str())
+            || seen.contains(p.archive_path.as_str())
+        {
+            conflicts.push(p.archive_path.as_str());
+        }
+        seen.insert(p.archive_path.as_str());
+    }
+    if !conflicts.is_empty() {
+        return Err(eyre!(t!(
+            "cli.append.errors.append_conflict_error",
+            locale = locale.as_str(),
+            paths = conflicts.join("\n  ")
+        )));
+    }
+    Ok(())
+}
+
+/// Truncate the archive back to `index_offset`, write new entries, and rebuild the index.
+#[allow(clippy::too_many_arguments)]
+fn execute_append_write(
+    file: &str,
+    mut file_handle: std::fs::File,
+    index_offset: u64,
+    entries: Vec<crate::models::archive::ArchiveIndexEntryWrapper>,
+    prepared: Vec<crate::archive_builder::PreparedFile>,
+    config: crate::pipeline::PipelineConfig,
+    conflict_mode: ConflictMode,
+    verbose: bool,
+    locale: &Locale,
+) -> Result<()> {
     println!(
         "{}",
         t!(

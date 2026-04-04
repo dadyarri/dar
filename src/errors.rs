@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 /// Structured error type for the most common `dari` failure categories.
 ///
 /// Placing validation errors behind a concrete enum rather than `eyre!()` with

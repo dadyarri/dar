@@ -5,12 +5,14 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod archive_builder;
 mod cli;
 mod commands;
+mod conflict;
 mod constants;
 mod counting_writer;
 mod encryption;
 mod errors;
 mod extra;
 mod extractor;
+mod file_reader;
 mod i18n;
 #[cfg(test)]
 mod integration_tests;
