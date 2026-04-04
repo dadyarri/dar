@@ -14,6 +14,56 @@ use lofty::probe::Probe;
 use std::io::Cursor;
 use std::path::Path;
 
+/// Trait for extracting metadata key-value pairs from raw file bytes.
+///
+/// The trait is object-safe and `Send + Sync` so it can be stored in a
+/// `Box<dyn MetadataExtractor>` and shared across threads.
+///
+/// Implementors **must not** propagate errors — return an empty vec on any
+/// failure so the pipeline never aborts due to unrecognised metadata.
+pub trait MetadataExtractor: Send + Sync {
+    /// Returns `(key, value)` pairs extracted from `data`.
+    ///
+    /// The file extension (without leading dot, lowercase) is provided for
+    /// fast format dispatch when needed.  Returns an empty vec on any failure.
+    fn extract(&self, data: &[u8], extension: &str) -> Vec<(String, String)>;
+}
+
+/// [`MetadataExtractor`] that reads EXIF data from image files.
+pub struct ExifMetadataExtractor;
+
+impl MetadataExtractor for ExifMetadataExtractor {
+    fn extract(&self, data: &[u8], _extension: &str) -> Vec<(String, String)> {
+        extract_image_metadata(data)
+    }
+}
+
+/// [`MetadataExtractor`] that reads ID3 / Vorbis / APEv2 tags from audio files.
+pub struct AudioMetadataExtractor;
+
+impl MetadataExtractor for AudioMetadataExtractor {
+    fn extract(&self, data: &[u8], _extension: &str) -> Vec<(String, String)> {
+        extract_audio_metadata(data)
+    }
+}
+
+/// A no-op [`MetadataExtractor`] used in tests to eliminate I/O-heavy parsing.
+#[allow(dead_code)]
+pub struct NoOpMetadataExtractor;
+
+impl MetadataExtractor for NoOpMetadataExtractor {
+    fn extract(&self, _data: &[u8], _extension: &str) -> Vec<(String, String)> {
+        vec![]
+    }
+}
+
+fn default_metadata_extractors() -> Vec<Box<dyn MetadataExtractor>> {
+    vec![
+        Box::new(ExifMetadataExtractor),
+        Box::new(AudioMetadataExtractor),
+    ]
+}
+
 /// Result of processing a file through the pipeline.
 #[derive(Debug, Clone)]
 pub struct PipelineFileData {
@@ -58,15 +108,54 @@ pub struct PipelineConfig {
 ///
 /// Steps executed for every file:
 /// 1. Calculate BLAKE3 checksum.
-/// 2. Select compressor via [`compressor_for_extension`].
+/// 2. Select compressor via [`compressor_for_extension`] (or the injected override).
 /// 3. Compress using the selected [`Compressor`] implementation (skipped for `None`).
+/// 4. Optionally encrypt with ChaCha20-Poly1305.
+/// 5. Populate the `extra` metadata field via the registered [`MetadataExtractor`]s.
 pub struct CompressionPipeline {
     config: PipelineConfig,
+    metadata_extractors: Vec<Box<dyn MetadataExtractor>>,
+    /// Optional compressor override; when set, `compressor_for_extension` is bypassed.
+    compressor_override: Option<Box<dyn Compressor>>,
 }
 
 impl CompressionPipeline {
+    /// Create a standard pipeline using EXIF and audio metadata extractors.
     pub fn new(config: PipelineConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            metadata_extractors: default_metadata_extractors(),
+            compressor_override: None,
+        }
+    }
+
+    /// Create a pipeline that always uses `compressor` regardless of file extension.
+    ///
+    /// Primarily for tests that need fine-grained control over which codec is
+    /// exercised without depending on the extension-based dispatch table.
+    #[allow(dead_code)]
+    pub fn with_compressor(config: PipelineConfig, compressor: Box<dyn Compressor>) -> Self {
+        Self {
+            config,
+            metadata_extractors: default_metadata_extractors(),
+            compressor_override: Some(compressor),
+        }
+    }
+
+    /// Create a pipeline with a fully custom set of metadata extractors.
+    ///
+    /// Pass an empty `Vec` to disable all metadata extraction (useful for tests
+    /// that do not have real image/audio fixtures).
+    #[allow(dead_code)]
+    pub fn with_extractors(
+        config: PipelineConfig,
+        metadata_extractors: Vec<Box<dyn MetadataExtractor>>,
+    ) -> Self {
+        Self {
+            config,
+            metadata_extractors,
+            compressor_override: None,
+        }
     }
 
     pub fn process_file(
@@ -97,8 +186,12 @@ impl CompressionPipeline {
             .unwrap_or("")
             .to_lowercase();
 
-        let compressor: &dyn Compressor =
-            compressor_for_extension(&ext, self.config.compress_images);
+        // Use the injected override when present; otherwise dispatch by extension.
+        let compressor: &dyn Compressor = if let Some(c) = &self.compressor_override {
+            c.as_ref()
+        } else {
+            compressor_for_extension(&ext, self.config.compress_images)
+        };
 
         let mut input = Cursor::new(&file_data.original_content);
         let mut output: Vec<u8> = Vec::new();
@@ -152,7 +245,7 @@ impl CompressionPipeline {
         Ok(())
     }
 
-    fn populate_extra(&self, _file_path: &Path, file_data: &mut PipelineFileData) {
+    fn populate_extra(&self, file_path: &Path, file_data: &mut PipelineFileData) {
         let mut pairs: Vec<(String, String)> = Vec::new();
 
         if self.config.encryption_passphrase.is_some() {
@@ -167,12 +260,16 @@ impl CompressionPipeline {
             }
         }
 
-        for (key, value) in extract_image_metadata(&file_data.original_content) {
-            upsert_extra_pair(&mut pairs, key, value);
-        }
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
 
-        for (key, value) in extract_audio_metadata(&file_data.original_content) {
-            upsert_extra_pair(&mut pairs, key, value);
+        for extractor in &self.metadata_extractors {
+            for (key, value) in extractor.extract(&file_data.original_content, &ext) {
+                upsert_extra_pair(&mut pairs, key, value);
+            }
         }
 
         file_data.extra = encode_extra_pairs(pairs);

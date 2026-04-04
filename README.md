@@ -99,3 +99,42 @@ dari encrypt -f out.dar --encrypt-passphrase "secret"
 
 If compression does not reduce the file size, the original bytes are stored instead.
 
+## Architecture
+
+```
+CLI args (cli.rs) → commands/create.rs  → walker.rs (collect files)
+                                        → archive_builder.rs (stateful writer)
+                                            → pipeline.rs (checksum, compression, optional encryption, extra metadata)
+                                            → models/archive.rs (binary structs)
+                                            → traits.rs (Compressor dispatch + CompressorRegistry)
+                                            → extra.rs (encoded key/value metadata for index extra field)
+                                            → counting_writer.rs (byte counter)
+                  → commands/append.rs  → reader.rs (parse header/footer/index)
+                                        → walker.rs (collect files)
+                                        → archive_builder.rs (reuse pipeline, rebuild index)
+                  → commands/extract.rs → reader.rs (parse header/footer/index)
+                                        → extractor.rs (decrypt + decompress + write to disk)
+                  → commands/inspect.rs → reader.rs (parse header/footer/index)
+                                        → tui/ (ratatui TUI event loop)
+                                            → tui/tree.rs (collapsible dir tree)
+                                            → tui/preview.rs (file preview; uses extractor.rs)
+                                            → tui/search.rs (nucleo_matcher fuzzy search)
+                                            → tui/meta_search.rs (tag:value metadata filter)
+                                            → tui/icons.rs (Powerline/Nerd Font glyph detection)
+                                            → tui/state.rs (AppState and sub-structs)
+```
+
+Key modules:
+
+| Module | Responsibility |
+|--------|---------------|
+| `src/cli.rs` | CLI definition; all user-visible text uses i18n keys |
+| `src/reader.rs` | Shared archive parser (`load_archive`) returning `ArchiveState` |
+| `src/archive_builder.rs` | Generic writer (`ArchiveBuilder<W: Write+Seek>`); used by `create` and `append` |
+| `src/pipeline.rs` | Per-file pipeline: BLAKE3 checksum → compression → optional encryption → extra metadata |
+| `src/extractor.rs` | Extraction API shared by `extract` command and TUI preview |
+| `src/traits.rs` | `Compressor` trait + `CompressorRegistry` for O(1) extension-based dispatch |
+| `src/errors.rs` | `DariError` enum for structured, machine-consumable error variants |
+| `src/walker.rs` | File discovery via `ignore` crate (respects `.gitignore` / `.darignore`) |
+
+

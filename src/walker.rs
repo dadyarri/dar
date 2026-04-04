@@ -7,12 +7,92 @@ use rust_i18n::t;
 use std::fs::canonicalize;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct ScannedFile {
     pub source_path: PathBuf,
     pub archive_path: String,
 }
 
+// ---------------------------------------------------------------------------
+// FileSource trait
+// ---------------------------------------------------------------------------
+
+/// Abstraction over the mechanism that walks a directory and returns
+/// [`ScannedFile`] entries.
+///
+/// Using a trait here lets tests inject a [`FixedFileSource`] containing a
+/// synthetic file list, avoiding real directory traversal during the walk.
+pub trait FileSource: Send + Sync {
+    /// Walk `root` and return all files that should be archived.
+    ///
+    /// Returns an error only for unrecoverable I/O failures; individual
+    /// unreadable entries should be silently skipped where possible.
+    fn walk(&self, root: &Path, locale: &Locale) -> Result<Vec<ScannedFile>>;
+}
+
+/// The real [`FileSource`] backed by the `ignore` crate (respects `.gitignore`
+/// and `.darignore` rules and includes dotfiles).
+pub struct IgnoreWalker;
+
+impl FileSource for IgnoreWalker {
+    fn walk(&self, root: &Path, _locale: &Locale) -> Result<Vec<ScannedFile>> {
+        let walker = WalkBuilder::new(root)
+            .git_ignore(true)
+            .add_custom_ignore_filename(".darignore")
+            .hidden(false)
+            .build();
+
+        let mut files = Vec::new();
+        for entry in walker {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+
+            if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                files.push(ScannedFile {
+                    source_path: entry.path().to_path_buf(),
+                    archive_path: calculate_archive_path(root, entry.path()),
+                });
+            }
+        }
+        Ok(files)
+    }
+}
+
+/// A synthetic [`FileSource`] that returns a pre-built list.
+///
+/// Intended for unit tests that need deterministic file sets without creating
+/// real directories.
+#[cfg(test)]
+pub struct FixedFileSource(pub Vec<ScannedFile>);
+
+#[cfg(test)]
+impl FileSource for FixedFileSource {
+    fn walk(&self, _root: &Path, _locale: &Locale) -> Result<Vec<ScannedFile>> {
+        Ok(self.0.clone())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Collect all files reachable from `paths` using the real filesystem walker.
+///
+/// This is the standard entry point used by all commands.
 pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<ScannedFile>> {
+    scan_files_with_source(paths, locale, &IgnoreWalker)
+}
+
+/// Like [`scan_files`] but uses `source` for directory walking.
+///
+/// This allows tests to inject a [`FixedFileSource`] to avoid real I/O.
+pub fn scan_files_with_source(
+    paths: ValuesRef<String>,
+    locale: &Locale,
+    source: &dyn FileSource,
+) -> Result<Vec<ScannedFile>> {
     let mut files = vec![];
 
     for item in paths {
@@ -26,28 +106,7 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
         })?;
 
         if absolute_path.is_dir() {
-            let walker = WalkBuilder::new(&absolute_path)
-                .git_ignore(true)
-                .add_custom_ignore_filename(".darignore")
-                .hidden(false)
-                .build();
-
-            for entry in walker {
-                let entry = entry.wrap_err_with(|| {
-                    t!(
-                        "cli.common.errors.walk_failed",
-                        locale = locale.as_str(),
-                        path = absolute_path.display()
-                    )
-                })?;
-
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    files.push(ScannedFile {
-                        source_path: entry.path().to_path_buf(),
-                        archive_path: calculate_archive_path(&absolute_path, entry.path()),
-                    });
-                }
-            }
+            files.extend(source.walk(&absolute_path, locale)?);
         } else if absolute_path.is_file() {
             let archive_path = if let Some(name) = absolute_path.file_name() {
                 name.to_string_lossy().into_owned()

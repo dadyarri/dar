@@ -9,6 +9,32 @@ pub mod search;
 pub mod state;
 pub mod tree;
 
+/// Named keybinding constants for the TUI inspector.
+///
+/// Centralising key definitions here ensures that documentation, key-handling
+/// code, and any future "customisable keys" feature all share one source of truth.
+pub mod keys {
+    use crossterm::event::KeyCode;
+    /// Quit the TUI (lowercase).
+    pub const QUIT_LOWER: KeyCode = KeyCode::Char('q');
+    /// Quit the TUI (uppercase).
+    pub const QUIT_UPPER: KeyCode = KeyCode::Char('Q');
+    /// Open / switch to / close the **metadata** preview panel.
+    pub const PREVIEW_METADATA: KeyCode = KeyCode::Char('m');
+    /// Open / switch to / close the **content** preview panel.
+    pub const PREVIEW_CONTENT: KeyCode = KeyCode::Char('c');
+    /// Activate fuzzy filename search.
+    pub const SEARCH_ACTIVATE: KeyCode = KeyCode::Char('/');
+    /// Activate metadata tag search.
+    pub const META_SEARCH_ACTIVATE: KeyCode = KeyCode::Char('s');
+    /// Open the extract-to-path dialog.
+    pub const EXTRACT_ACTIVATE: KeyCode = KeyCode::Char('x');
+    /// Navigate up in the list (vim-style).
+    pub const NAV_UP: KeyCode = KeyCode::Char('k');
+    /// Navigate down in the list (vim-style).
+    pub const NAV_DOWN: KeyCode = KeyCode::Char('j');
+}
+
 use crate::tui::{
     meta_search::{apply_meta_filter, parse_meta_query},
     preview::build_preview,
@@ -70,165 +96,181 @@ fn run_loop<B: ratatui::backend::Backend>(
 ) -> Result<()> {
     loop {
         terminal.draw(|frame| draw(frame, state))?;
-
-        if let Event::Key(key) = event::read()? {
-            // Only react to key-press events; ignore repeat/release.
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-
-            // ── Extract dialog mode ────────────────────────────────────────
-            if state.extract_active {
-                match key.code {
-                    KeyCode::Esc => {
-                        state.extract_active = false;
-                        state.extract_error = None;
-                    }
-                    KeyCode::Enter => {
-                        do_extract(state);
-                    }
-                    KeyCode::Backspace => {
-                        state.extract_path.pop();
-                        validate_extract_path(state);
-                    }
-                    KeyCode::Char(c) => {
-                        state.extract_path.push(c);
-                        validate_extract_path(state);
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            // ── Meta-search mode ───────────────────────────────────────────
-            if state.meta_search_active {
-                match key.code {
-                    KeyCode::Esc => {
-                        state.meta_search_query.clear();
-                        state.meta_search_active = false;
-                        state.meta_search_error = None;
-                        state.visible = tui_tree::flatten_visible(&state.tree_root);
-                        state.table_state.select(if state.visible.is_empty() {
-                            None
-                        } else {
-                            Some(0)
-                        });
-                    }
-                    KeyCode::Enter => {
-                        state.meta_search_active = false;
-                        state.meta_search_error = None;
-                        if state.table_state.selected().is_none() && !state.visible.is_empty() {
-                            state.table_state.select(Some(0));
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        state.meta_search_query.pop();
-                        rebuild_visible_from_meta_search(state);
-                    }
-                    KeyCode::Char(c) => {
-                        state.meta_search_query.push(c);
-                        rebuild_visible_from_meta_search(state);
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            // ── Search mode ────────────────────────────────────────────────
-            if state.search_active {
-                match key.code {
-                    KeyCode::Esc => {
-                        // Clear query, deactivate search, restore full tree.
-                        state.search_query.clear();
-                        state.search_active = false;
-                        state.visible = tui_tree::flatten_visible(&state.tree_root);
-                        state.table_state.select(if state.visible.is_empty() {
-                            None
-                        } else {
-                            Some(0)
-                        });
-                    }
-                    KeyCode::Enter => {
-                        // Keep current filtered view, close input box.
-                        state.search_active = false;
-                        if state.table_state.selected().is_none() && !state.visible.is_empty() {
-                            state.table_state.select(Some(0));
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        state.search_query.pop();
-                        rebuild_visible_from_search(state);
-                    }
-                    KeyCode::Char(c) => {
-                        state.search_query.push(c);
-                        rebuild_visible_from_search(state);
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), _)
-                | (KeyCode::Char('Q'), _)
-                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-
-                // Preview navigation (scroll) when a preview window is focused.
-                (KeyCode::Up, _) if state.focus == Focus::Preview => {
-                    scroll_preview_up(state, 1);
-                }
-                (KeyCode::Down, _) if state.focus == Focus::Preview => {
-                    scroll_preview_down(state, 1);
-                }
-                (KeyCode::PageUp, _) if state.focus == Focus::Preview => {
-                    scroll_preview_up(state, 10);
-                }
-                (KeyCode::PageDown, _) if state.focus == Focus::Preview => {
-                    scroll_preview_down(state, 10);
-                }
-
-                // List navigation (works even while a preview window is open).
-                (KeyCode::Up, _) | (KeyCode::Char('k'), _) => move_up(state),
-                (KeyCode::Down, _) | (KeyCode::Char('j'), _) => move_down(state),
-
-                (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => toggle_at_cursor(state),
-
-                // 'm': open/switch-to/close the metadata floating window.
-                (KeyCode::Char('m'), _) => open_or_switch_preview(state, PreviewMode::Metadata),
-
-                // 'c': open/switch-to/close the content floating window.
-                (KeyCode::Char('c'), _) => open_or_switch_preview(state, PreviewMode::Content),
-
-                // Esc closes whichever preview window is open.
-                (KeyCode::Esc, _) if state.preview_mode != PreviewMode::Closed => {
-                    close_preview(state);
-                }
-
-                // '/' activates fuzzy search.
-                (KeyCode::Char('/'), _) => {
-                    state.search_active = true;
-                    // Don't clear an existing query — let the user see the
-                    // previous filter and extend/delete it.
-                }
-
-                // 's' activates metadata search.
-                (KeyCode::Char('s'), _) => {
-                    // Close filename search if it was open.
-                    state.search_active = false;
-                    state.meta_search_active = true;
-                    state.meta_search_error = None;
-                }
-
-                // 'x': open the extract-to-path dialog (only when no preview is open).
-                (KeyCode::Char('x'), _) if state.preview_mode == PreviewMode::Closed => {
-                    open_extract_dialog(state);
-                }
-
-                _ => {}
-            }
+        let event = event::read()?;
+        if handle_event(state, event).is_break() {
+            break;
         }
     }
     Ok(())
+}
+
+/// Dispatch a single input event and mutate `state` accordingly.
+///
+/// Returns [`std::ops::ControlFlow::Break`] when the user has requested to quit,
+/// or [`std::ops::ControlFlow::Continue`] for all other events.
+fn handle_event(state: &mut AppState, event: Event) -> std::ops::ControlFlow<()> {
+    let Event::Key(key) = event else {
+        return std::ops::ControlFlow::Continue(());
+    };
+
+    // Only react to key-press events; ignore repeat/release.
+    if key.kind != KeyEventKind::Press {
+        return std::ops::ControlFlow::Continue(());
+    }
+
+    // ── Extract dialog mode ────────────────────────────────────────
+    if state.extract.active {
+        match key.code {
+            KeyCode::Esc => {
+                state.extract.active = false;
+                state.extract.error = None;
+            }
+            KeyCode::Enter => {
+                do_extract(state);
+            }
+            KeyCode::Backspace => {
+                state.extract.path.pop();
+                validate_extract_path(state);
+            }
+            KeyCode::Char(c) => {
+                state.extract.path.push(c);
+                validate_extract_path(state);
+            }
+            _ => {}
+        }
+        return std::ops::ControlFlow::Continue(());
+    }
+
+    // ── Meta-search mode ───────────────────────────────────────────
+    if state.meta_search.active {
+        match key.code {
+            KeyCode::Esc => {
+                state.meta_search.query.clear();
+                state.meta_search.active = false;
+                state.meta_search.error = None;
+                state.visible = tui_tree::flatten_visible(&state.tree_root);
+                state.table_state.select(if state.visible.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            }
+            KeyCode::Enter => {
+                state.meta_search.active = false;
+                state.meta_search.error = None;
+                if state.table_state.selected().is_none() && !state.visible.is_empty() {
+                    state.table_state.select(Some(0));
+                }
+            }
+            KeyCode::Backspace => {
+                state.meta_search.query.pop();
+                rebuild_visible_from_meta_search(state);
+            }
+            KeyCode::Char(c) => {
+                state.meta_search.query.push(c);
+                rebuild_visible_from_meta_search(state);
+            }
+            _ => {}
+        }
+        return std::ops::ControlFlow::Continue(());
+    }
+
+    // ── Search mode ────────────────────────────────────────────────
+    if state.search.active {
+        match key.code {
+            KeyCode::Esc => {
+                // Clear query, deactivate search, restore full tree.
+                state.search.query.clear();
+                state.search.active = false;
+                state.visible = tui_tree::flatten_visible(&state.tree_root);
+                state.table_state.select(if state.visible.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            }
+            KeyCode::Enter => {
+                // Keep current filtered view, close input box.
+                state.search.active = false;
+                if state.table_state.selected().is_none() && !state.visible.is_empty() {
+                    state.table_state.select(Some(0));
+                }
+            }
+            KeyCode::Backspace => {
+                state.search.query.pop();
+                rebuild_visible_from_search(state);
+            }
+            KeyCode::Char(c) => {
+                state.search.query.push(c);
+                rebuild_visible_from_search(state);
+            }
+            _ => {}
+        }
+        return std::ops::ControlFlow::Continue(());
+    }
+
+    match (key.code, key.modifiers) {
+        (keys::QUIT_LOWER, _)
+        | (keys::QUIT_UPPER, _)
+        | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+            return std::ops::ControlFlow::Break(());
+        }
+
+        // Preview navigation (scroll) when a preview window is focused.
+        (KeyCode::Up, _) if state.preview.focus == Focus::Preview => {
+            scroll_preview_up(state, 1);
+        }
+        (KeyCode::Down, _) if state.preview.focus == Focus::Preview => {
+            scroll_preview_down(state, 1);
+        }
+        (KeyCode::PageUp, _) if state.preview.focus == Focus::Preview => {
+            scroll_preview_up(state, 10);
+        }
+        (KeyCode::PageDown, _) if state.preview.focus == Focus::Preview => {
+            scroll_preview_down(state, 10);
+        }
+
+        // List navigation (works even while a preview window is open).
+        (KeyCode::Up, _) | (keys::NAV_UP, _) => move_up(state),
+        (KeyCode::Down, _) | (keys::NAV_DOWN, _) => move_down(state),
+
+        (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => toggle_at_cursor(state),
+
+        // 'm': open/switch-to/close the metadata floating window.
+        (keys::PREVIEW_METADATA, _) => open_or_switch_preview(state, PreviewMode::Metadata),
+
+        // 'c': open/switch-to/close the content floating window.
+        (keys::PREVIEW_CONTENT, _) => open_or_switch_preview(state, PreviewMode::Content),
+
+        // Esc closes whichever preview window is open.
+        (KeyCode::Esc, _) if state.preview.mode != PreviewMode::Closed => {
+            close_preview(state);
+        }
+
+        // '/' activates fuzzy search.
+        (keys::SEARCH_ACTIVATE, _) => {
+            state.search.active = true;
+            // Don't clear an existing query — let the user see the
+            // previous filter and extend/delete it.
+        }
+
+        // 's' activates metadata search.
+        (keys::META_SEARCH_ACTIVATE, _) => {
+            // Close filename search if it was open.
+            state.search.active = false;
+            state.meta_search.active = true;
+            state.meta_search.error = None;
+        }
+
+        // 'x': open the extract-to-path dialog (only when no preview is open).
+        (keys::EXTRACT_ACTIVATE, _) if state.preview.mode == PreviewMode::Closed => {
+            open_extract_dialog(state);
+        }
+
+        _ => {}
+    }
+
+    std::ops::ControlFlow::Continue(())
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +287,7 @@ fn move_up(state: &mut AppState) {
         .map(|i| i.saturating_sub(1))
         .unwrap_or(0);
     state.table_state.select(Some(new));
-    if state.preview_mode != PreviewMode::Closed {
+    if state.preview.mode != PreviewMode::Closed {
         refresh_preview(state);
     }
 }
@@ -261,13 +303,20 @@ fn move_down(state: &mut AppState) {
         .map(|i| (i + 1).min(n - 1))
         .unwrap_or(0);
     state.table_state.select(Some(new));
-    if state.preview_mode != PreviewMode::Closed {
+    if state.preview.mode != PreviewMode::Closed {
         refresh_preview(state);
     }
 }
 
 /// Toggle expand/collapse on the currently selected directory node, then
 /// rebuild `visible` and keep the cursor on the same node.
+///
+/// # Panics
+///
+/// Does not panic in practice: the `unwrap_or(0)` is a safety fallback for
+/// the case where the toggled path is no longer in `visible` (should be
+/// impossible since toggle only expands/collapses — it never removes the
+/// directory node itself).
 fn toggle_at_cursor(state: &mut AppState) {
     let Some(idx) = state.table_state.selected() else {
         return;
@@ -298,7 +347,7 @@ fn toggle_at_cursor(state: &mut AppState) {
 /// nothing.
 fn open_or_switch_preview(state: &mut AppState, mode: PreviewMode) {
     // Toggle off if already in this mode.
-    if state.preview_mode == mode {
+    if state.preview.mode == mode {
         close_preview(state);
         return;
     }
@@ -317,33 +366,33 @@ fn open_or_switch_preview(state: &mut AppState, mode: PreviewMode) {
         return;
     };
 
-    if state.preview_mode == PreviewMode::Closed {
+    if state.preview.mode == PreviewMode::Closed {
         // Opening fresh: build cache and reset scroll.
         build_and_cache_preview(state, entry_idx);
     } else {
         // Switching between Metadata ↔ Content: cache is valid, just reset scroll.
-        state.preview_scroll = 0;
-        state.preview_line_count = 0;
-        state.preview_viewport_height = 0;
+        state.preview.scroll = 0;
+        state.preview.line_count = 0;
+        state.preview.viewport_height = 0;
     }
 
-    state.preview_mode = mode;
-    state.focus = Focus::Preview;
+    state.preview.mode = mode;
+    state.preview.focus = Focus::Preview;
 }
 
 /// Close whichever preview window is open and return focus to the list.
 fn close_preview(state: &mut AppState) {
-    state.preview_mode = PreviewMode::Closed;
-    state.focus = Focus::List;
-    state.preview_scroll = 0;
-    state.preview_line_count = 0;
-    state.preview_viewport_height = 0;
+    state.preview.mode = PreviewMode::Closed;
+    state.preview.focus = Focus::List;
+    state.preview.scroll = 0;
+    state.preview.line_count = 0;
+    state.preview.viewport_height = 0;
     // Keep the cache so it can be reused if the user reopens the same entry.
 }
 
-/// Rebuild `visible` from the current `search_query` and reset the cursor.
+/// Rebuild `visible` from the current `search.query` and reset the cursor.
 fn rebuild_visible_from_search(state: &mut AppState) {
-    state.visible = apply_fuzzy_filter(&state.search_query, &state.tree_root);
+    state.visible = apply_fuzzy_filter(&state.search.query, &state.tree_root);
     state.table_state.select(if state.visible.is_empty() {
         None
     } else {
@@ -351,15 +400,15 @@ fn rebuild_visible_from_search(state: &mut AppState) {
     });
 }
 
-/// Parse `meta_search_query` and rebuild `visible`; store any parse error.
+/// Parse `meta_search.query` and rebuild `visible`; store any parse error.
 fn rebuild_visible_from_meta_search(state: &mut AppState) {
-    match parse_meta_query(&state.meta_search_query, state.locale.as_str()) {
+    match parse_meta_query(&state.meta_search.query, state.locale.as_str()) {
         Ok(predicates) => {
-            state.meta_search_error = None;
+            state.meta_search.error = None;
             state.visible = apply_meta_filter(&predicates, &state.entries, &state.tree_root);
         }
         Err(e) => {
-            state.meta_search_error = Some(e);
+            state.meta_search.error = Some(e);
             // Keep the previous visible list so the display isn't jarring.
         }
     }
@@ -382,14 +431,14 @@ fn refresh_preview(state: &mut AppState) {
     if flat.is_dir {
         // Directories have no preview — close the floating window.
         close_preview(state);
-        state.preview_cache = None;
+        state.preview.cache = None;
         return;
     }
     let Some(entry_idx) = flat.entry_idx else {
         return;
     };
     // Reuse the cache if it already holds this entry.
-    if let Some((cached_idx, _)) = &state.preview_cache {
+    if let Some((cached_idx, _)) = &state.preview.cache {
         if *cached_idx == entry_idx {
             return;
         }
@@ -398,38 +447,51 @@ fn refresh_preview(state: &mut AppState) {
 }
 
 /// Read and decode the entry at `entry_idx`, storing the result in the cache.
+///
+/// Splits into two steps:
+/// 1. [`compute_preview_for_entry`] builds the [`EntryPreview`] from immutable state.
+/// 2. The result is stored in `state.preview.cache` and scroll counters are reset.
 fn build_and_cache_preview(state: &mut AppState, entry_idx: usize) {
-    let preview = {
-        let archive_path = state.archive_path.as_path();
-        let passphrase = state.passphrase.as_deref();
-        let locale = state.locale.as_str();
-        let entry = &state.entries[entry_idx];
-        let all_entries = state.entries.as_slice();
-        build_preview(archive_path, entry, all_entries, passphrase, locale)
-    };
-    state.preview_cache = Some((entry_idx, preview));
-    state.preview_scroll = 0;
-    state.preview_line_count = 0;
-    state.preview_viewport_height = 0;
+    let preview = compute_preview_for_entry(state, entry_idx);
+    state.preview.cache = Some((entry_idx, preview));
+    state.preview.scroll = 0;
+    state.preview.line_count = 0;
+    state.preview.viewport_height = 0;
 }
 
-/// Validate the currently typed extract path and update `extract_error` accordingly.
-/// When the path is valid and relative, `extract_path_resolved` is set to the
+/// Pure function: build an [`EntryPreview`] from immutable state without mutating anything.
+///
+/// Accepts a shared borrow of `AppState` so it can be called from test code
+/// without constructing a full mutable context.
+fn compute_preview_for_entry(
+    state: &AppState,
+    entry_idx: usize,
+) -> crate::tui::preview::EntryPreview {
+    let archive_path = state.archive_path.as_path();
+    let passphrase = state.passphrase.as_deref();
+    let locale = state.locale.as_str();
+    let entry = &state.entries[entry_idx];
+    let all_entries = state.entries.as_slice();
+    build_preview(archive_path, entry, all_entries, passphrase, locale)
+}
+
+/// Validate the currently typed extract path and update `extract.error` accordingly.
+/// When the path is valid and relative, `extract.resolved` is set to the
 /// canonicalized absolute path so the dialog can show a gray hint.
 /// Returns `true` when the path is valid (non-empty and the directory exists).
 fn validate_extract_path(state: &mut AppState) -> bool {
     let locale = state.locale.as_str().to_owned();
-    let trimmed = state.extract_path.trim().to_owned();
+    let trimmed = state.extract.path.trim().to_owned();
     if trimmed.is_empty() {
-        state.extract_error = Some(
+        state.extract.error = Some(
             rust_i18n::t!("tui.inspect.extract.error_empty", locale = locale.as_str()).into_owned(),
         );
-        state.extract_path_resolved = None;
+        state.extract.resolved = None;
         return false;
     }
     let p = std::path::Path::new(&trimmed);
     if !p.exists() {
-        state.extract_error = Some(
+        state.extract.error = Some(
             rust_i18n::t!(
                 "tui.inspect.extract.error_not_found",
                 locale = locale.as_str(),
@@ -437,18 +499,18 @@ fn validate_extract_path(state: &mut AppState) -> bool {
             )
             .into_owned(),
         );
-        state.extract_path_resolved = None;
+        state.extract.resolved = None;
         return false;
     }
     // Compute and store the absolute path when the user typed a relative path.
     if p.is_absolute() {
-        state.extract_path_resolved = None;
+        state.extract.resolved = None;
     } else {
         // `p.exists()` passed above, so canonicalize should succeed; if it
         // somehow fails we clear the hint rather than showing a misleading path.
-        state.extract_path_resolved = p.canonicalize().ok();
+        state.extract.resolved = p.canonicalize().ok();
     }
-    state.extract_error = None;
+    state.extract.error = None;
     true
 }
 
@@ -460,12 +522,12 @@ fn open_extract_dialog(state: &mut AppState) {
     if state.visible.get(idx).is_none() {
         return;
     }
-    state.extract_active = true;
-    state.extract_error = None;
+    state.extract.active = true;
+    state.extract.error = None;
 }
 
 /// Perform the actual extraction using the path currently typed in the dialog.
-/// On success the dialog is closed; on failure the error is stored in `extract_error`.
+/// On success the dialog is closed; on failure the error is stored in `extract.error`.
 fn do_extract(state: &mut AppState) {
     if !validate_extract_path(state) {
         return;
@@ -479,10 +541,10 @@ fn do_extract(state: &mut AppState) {
 
     // Use the canonicalized absolute path when one was computed from a relative input;
     // otherwise fall back to the trimmed typed path.
-    let dest_buf = if let Some(resolved) = state.extract_path_resolved.clone() {
+    let dest_buf = if let Some(resolved) = state.extract.resolved.clone() {
         resolved
     } else {
-        std::path::PathBuf::from(state.extract_path.trim())
+        std::path::PathBuf::from(state.extract.path.trim())
     };
     let dest = dest_buf.as_path();
     let passphrase = state.passphrase.as_deref();
@@ -516,8 +578,8 @@ fn do_extract(state: &mut AppState) {
 
     match result {
         Ok(()) => {
-            state.extract_active = false;
-            state.extract_error = None;
+            state.extract.active = false;
+            state.extract.error = None;
         }
         Err(e) => {
             let msg = rust_i18n::t!(
@@ -526,20 +588,21 @@ fn do_extract(state: &mut AppState) {
                 error = e.to_string().as_str()
             )
             .into_owned();
-            state.extract_error = Some(msg);
+            state.extract.error = Some(msg);
         }
     }
 }
 
 fn scroll_preview_up(state: &mut AppState, lines: u16) {
-    state.preview_scroll = state.preview_scroll.saturating_sub(lines);
+    state.preview.scroll = state.preview.scroll.saturating_sub(lines);
 }
 
 fn scroll_preview_down(state: &mut AppState, lines: u16) {
     let max_scroll = state
-        .preview_line_count
-        .saturating_sub(state.preview_viewport_height);
-    state.preview_scroll = state.preview_scroll.saturating_add(lines).min(max_scroll);
+        .preview
+        .line_count
+        .saturating_sub(state.preview.viewport_height);
+    state.preview.scroll = state.preview.scroll.saturating_add(lines).min(max_scroll);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,14 +620,14 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     // The list always fills the full main area; a preview floats on top.
     // When meta search is active, split horizontally: list on the left,
     // tag-search help panel on the right.
-    let (list_area, meta_help_area): (Rect, Option<Rect>) = if state.meta_search_active {
+    let (list_area, meta_help_area): (Rect, Option<Rect>) = if state.meta_search.active {
         let chunks =
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(34)]).split(main_area);
         (chunks[0], Some(chunks[1]))
     } else {
         (main_area, None)
     };
-    let preview_area: Option<Rect> = if state.preview_mode != PreviewMode::Closed {
+    let preview_area: Option<Rect> = if state.preview.mode != PreviewMode::Closed {
         Some(render_preview::centered_popup_rect(96, 94, list_area))
     } else {
         None
@@ -579,7 +642,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         render_preview::render_meta_search_help_panel(
             frame,
             help_area,
-            &state.meta_search_error,
+            &state.meta_search.error,
             &locale,
         );
     }
@@ -587,7 +650,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     // ── Preview floating window ────────────────────────────────────────────
     if let Some(area) = preview_area {
         frame.render_widget(Clear, area);
-        match state.preview_mode {
+        match state.preview.mode {
             PreviewMode::Metadata => render_preview::render_metadata_panel(frame, area, state),
             PreviewMode::Content => render_preview::render_content_panel(frame, area, state),
             PreviewMode::Closed => {}
@@ -598,7 +661,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     render_status::draw_status_bar(frame, status_area, state);
 
     // ── Extract dialog (floats above everything) ───────────────────────────
-    if state.extract_active {
+    if state.extract.active {
         render_extract::render_extract_dialog(frame, state);
     }
 }

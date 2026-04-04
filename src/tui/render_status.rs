@@ -14,7 +14,7 @@ pub(crate) fn draw_status_bar(
     state: &mut AppState,
 ) {
     // Extract dialog owns the status bar while it is open.
-    if state.extract_active {
+    if state.extract.active {
         crate::tui::render_extract::draw_extract_status_bar(frame, area, state);
         return;
     }
@@ -48,7 +48,7 @@ pub(crate) fn draw_status_bar(
     let meta_search_restore_hint =
         rust_i18n::t!("tui.inspect.hint_meta_search_restore", locale = locale);
 
-    if state.meta_search_active {
+    if state.meta_search.active {
         let prompt_style = Style::default()
             .fg(Color::Magenta)
             .add_modifier(Modifier::BOLD);
@@ -59,7 +59,7 @@ pub(crate) fn draw_status_bar(
         let input_spans = vec![
             Span::styled(" s ", prompt_style),
             Span::styled(
-                state.meta_search_query.clone(),
+                state.meta_search.query.clone(),
                 Style::default().fg(Color::White),
             ),
             Span::styled("█", cursor_style),
@@ -93,7 +93,7 @@ pub(crate) fn draw_status_bar(
                 .alignment(ratatui::layout::Alignment::Right),
             status_chunks[1],
         );
-    } else if state.search_active {
+    } else if state.search.active {
         let prompt_style = Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
@@ -104,7 +104,7 @@ pub(crate) fn draw_status_bar(
         let input_spans = vec![
             Span::styled(" / ", prompt_style),
             Span::styled(
-                state.search_query.clone(),
+                state.search.query.clone(),
                 Style::default().fg(Color::White),
             ),
             Span::styled("█", cursor_style),
@@ -167,7 +167,7 @@ pub(crate) fn draw_status_bar(
             })
             .unwrap_or(false);
 
-        let hints_vec: Vec<(&str, &str)> = match state.preview_mode {
+        let hints_vec: Vec<(&str, &str)> = match state.preview.mode {
             PreviewMode::Metadata => {
                 let mut hints = vec![("↑↓/PgUp/PgDn", scroll_hint.as_ref())];
                 if !selected_is_binary {

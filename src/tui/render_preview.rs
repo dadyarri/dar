@@ -174,7 +174,7 @@ pub(crate) fn render_metadata_panel(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let Some((_, ref entry_preview)) = state.preview_cache else {
+    let Some((_, ref entry_preview)) = state.preview.cache else {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 rust_i18n::t!("tui.inspect.panels.no_entry_selected", locale = locale).into_owned(),
@@ -276,16 +276,16 @@ pub(crate) fn render_metadata_panel(
     let viewport_width = area.width.saturating_sub(2);
     let viewport_height = area.height.saturating_sub(2);
     let line_count = count_rendered_lines(&lines, viewport_width);
-    state.preview_line_count = line_count;
-    state.preview_viewport_height = viewport_height;
+    state.preview.line_count = line_count;
+    state.preview.viewport_height = viewport_height;
     let max_scroll = line_count.saturating_sub(viewport_height);
-    state.preview_scroll = state.preview_scroll.min(max_scroll);
+    state.preview.scroll = state.preview.scroll.min(max_scroll);
 
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
             .wrap(Wrap { trim: false })
-            .scroll((state.preview_scroll, 0)),
+            .scroll((state.preview.scroll, 0)),
         area,
     );
 }
@@ -303,7 +303,7 @@ pub(crate) fn render_content_panel(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let Some((_, ref entry_preview)) = state.preview_cache else {
+    let Some((_, ref entry_preview)) = state.preview.cache else {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 rust_i18n::t!("tui.inspect.panels.no_entry_selected", locale = locale).into_owned(),
@@ -381,16 +381,16 @@ pub(crate) fn render_content_panel(
     let viewport_width = area.width.saturating_sub(2);
     let viewport_height = area.height.saturating_sub(2);
     let line_count = count_rendered_lines(&lines, viewport_width);
-    state.preview_line_count = line_count;
-    state.preview_viewport_height = viewport_height;
+    state.preview.line_count = line_count;
+    state.preview.viewport_height = viewport_height;
     let max_scroll = line_count.saturating_sub(viewport_height);
-    state.preview_scroll = state.preview_scroll.min(max_scroll);
+    state.preview.scroll = state.preview.scroll.min(max_scroll);
 
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
             .wrap(Wrap { trim: false })
-            .scroll((state.preview_scroll, 0)),
+            .scroll((state.preview.scroll, 0)),
         area,
     );
 }

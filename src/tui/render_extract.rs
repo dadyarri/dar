@@ -55,7 +55,7 @@ pub(crate) fn render_extract_dialog(frame: &mut ratatui::Frame, state: &AppState
 
     // Clamp the visible portion of the path to fit within the dialog width.
     let inner_width = popup_area.width.saturating_sub(4) as usize; // 2 borders + 2 padding
-    let path = &state.extract_path;
+    let path = &state.extract.path;
     let display_path = if path.chars().count() > inner_width {
         // Show only the tail that fits.
         let skip = path.chars().count() - inner_width;
@@ -75,7 +75,7 @@ pub(crate) fn render_extract_dialog(frame: &mut ratatui::Frame, state: &AppState
 
     // When the user typed a relative path that resolves to a known directory, show the
     // absolute path as a gray hint so they can confirm the destination.
-    if let Some(resolved) = &state.extract_path_resolved {
+    if let Some(resolved) = &state.extract.resolved {
         let hint_style = Style::default().fg(Color::DarkGray);
         let resolved_str = resolved.display().to_string();
         let resolved_char_count = resolved_str.chars().count();
@@ -93,7 +93,7 @@ pub(crate) fn render_extract_dialog(frame: &mut ratatui::Frame, state: &AppState
 
     lines.push(Line::from(""));
 
-    if let Some(err) = &state.extract_error {
+    if let Some(err) = &state.extract.error {
         // Wrap the error text to the inner width.
         let wrap = inner_width.max(1);
         let mut row = String::new();
@@ -149,7 +149,7 @@ pub(crate) fn draw_extract_status_bar(
     let input_spans = vec![
         Span::styled(format!(" {} ", label), prompt_style),
         Span::styled(
-            state.extract_path.clone(),
+            state.extract.path.clone(),
             Style::default().fg(Color::White),
         ),
         Span::styled("█", cursor_style),
