@@ -1,0 +1,16 @@
+# Summary
+
+- [Introduction](./introduction.md)
+- [Installation](./installation.md)
+- [Commands](./commands/index.md)
+  - [create](./commands/create.md)
+  - [append](./commands/append.md)
+  - [extract](./commands/extract.md)
+  - [inspect](./commands/inspect.md)
+  - [completions](./commands/completions.md)
+- [Archive Structure](archive_structure.md)
+- [Compression Algorithms](./compression.md)
+- [Encryption](./encryption.md)
+- [Deduplication](./deduplication.md)
+- [Ignore Rules](./ignore_rules.md)
+- [Extra Fields](./extra_fields.md)

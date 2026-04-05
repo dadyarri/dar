@@ -1,265 +1,225 @@
+use crate::extractor::{extract_entries, extract_entry};
+use crate::i18n::Locale;
+use crate::reader::load_archive;
 use clap::ArgMatches;
-use eyre::{Result, eyre};
-use filetime::{FileTime, set_file_mtime};
-use std::fs::{File, create_dir_all};
-use std::io::{Read, Seek, Write};
+use eyre::{Context, Result, eyre};
+use rust_i18n::t;
+use std::fs::File;
 use std::path::Path;
-use std::time::{Duration, UNIX_EPOCH};
 
-use crate::archive::{decompress_data, parse_index_entry};
-use crate::models::archive::{ArchiveHeader, ArchiveIndexEntry};
-use crate::terminal::success;
+pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
+    let file = matches.get_one::<String>("file").ok_or_else(|| {
+        eyre!(t!(
+            "cli.common.errors.file_required",
+            locale = locale.as_str()
+        ))
+    })?;
 
-/// Check if a path matches a glob pattern
-fn matches_glob(path: &str, pattern: &str) -> bool {
-    // Simple glob pattern matching
-    if pattern == "*" || pattern.is_empty() {
-        return true;
+    if !Path::new(file).exists() {
+        return Err(eyre!(t!(
+            "cli.extract.errors.archive_missing",
+            locale = locale.as_str(),
+            file = file
+        )));
     }
 
-    // Handle patterns like *.rs, dir/*.txt
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        match parts.len() {
-            2 => {
-                let prefix = parts[0];
-                let suffix = parts[1];
-                if !prefix.is_empty() && !path.starts_with(prefix) {
-                    return false;
-                }
-                if !suffix.is_empty() && !path.ends_with(suffix) {
-                    return false;
-                }
-                true
-            }
-            _ => {
-                // Multiple wildcards - for simplicity, just check containment
-                let mut current_pos = 0;
-                for part in parts {
-                    if part.is_empty() {
-                        continue;
-                    }
-                    match path[current_pos..].find(part) {
-                        Some(pos) => current_pos += pos + part.len(),
-                        None => return false,
-                    }
-                }
-                true
-            }
-        }
-    } else {
-        // Exact match or prefix match (directory)
-        path == pattern || path.starts_with(&format!("{}/", pattern))
-    }
-}
+    let output_dir = matches
+        .get_one::<String>("output-dir")
+        .map(|s| s.as_str())
+        .unwrap_or(".");
 
-/// Strip a prefix from a path
-fn strip_prefix(path: &str, prefix: &str) -> String {
-    let prefix_with_slash = if prefix.ends_with('/') {
-        prefix.to_string()
-    } else {
-        format!("{}/", prefix)
+    let passphrase = matches
+        .get_one::<String>("encrypt-passphrase")
+        .map(|s| s.as_str());
+
+    let filter_paths: Option<Vec<&str>> = matches
+        .get_many::<String>("paths")
+        .map(|v| v.map(|s| s.as_str()).collect());
+
+    let mut file_handle = File::open(file).wrap_err_with(|| {
+        t!(
+            "cli.extract.errors.open_failed",
+            locale = locale.as_str(),
+            file = file
+        )
+        .to_string()
+    })?;
+
+    let archive_state = load_archive(&mut file_handle, file, locale)?;
+    let created_at = archive_state.header.timestamp;
+
+    println!(
+        "{}",
+        t!(
+            "cli.extract.messages.extracting_archive",
+            locale = locale.as_str(),
+            file = file,
+            timestamp = created_at
+        )
+    );
+
+    let dest_dir = Path::new(output_dir);
+
+    let entries_to_extract: Vec<_> = match &filter_paths {
+        Some(paths) => archive_state
+            .entries
+            .iter()
+            .filter(|e| paths.contains(&e.path.as_str()))
+            .collect(),
+        None => archive_state.entries.iter().collect(),
     };
 
-    if let Some(stripped) = path.strip_prefix(&prefix_with_slash) {
-        stripped.to_string()
-    } else if path == prefix {
-        String::new()
-    } else if path.starts_with(prefix) {
-        path[prefix.len()..].to_string()
-    } else {
-        path.to_string()
-    }
-}
-
-pub fn call(matches: &ArgMatches) -> Result<()> {
-    let file_path = matches.get_one::<String>("file").expect("File required");
-    let out_dir = matches
-        .get_one::<String>("out")
-        .expect("Output directory required");
-    let verbose = matches.get_flag("verbose");
-    let _progress = matches.get_flag("progress");
-    let dry_run = matches.get_flag("dry-run");
-    let strip_path = matches.get_one::<String>("strip-path");
-
-    // Get patterns to match (if any provided)
-    let patterns: Vec<String> = matches
-        .get_many::<String>("entries")
-        .map(|vals| vals.cloned().collect())
-        .unwrap_or_default();
-
-    let mut archive_file =
-        File::open(file_path).map_err(|e| eyre!("Failed to open archive {}: {}", file_path, e))?;
-
-    // Read and parse header
-    let mut header_buf = [0u8; ArchiveHeader::SIZE];
-    archive_file
-        .read_exact(&mut header_buf)
-        .map_err(|e| eyre!("Failed to read archive header: {}", e))?;
-
-    // Verify magic
-    if &header_buf[0..4] != ArchiveHeader::MAGIC {
-        return Err(eyre!("Invalid archive format: wrong magic number"));
-    }
-
-    // Verify version
-    if &header_buf[4..8] != ArchiveHeader::VERSION {
-        return Err(eyre!("Unsupported archive version"));
-    }
-
-    // Parse header fields
-    let data_section_start = u64::from_be_bytes(header_buf[8..16].try_into().unwrap());
-    let index_section_start = u64::from_be_bytes(header_buf[16..24].try_into().unwrap());
-
-    if !dry_run {
-        println!("Extracting from {}", file_path);
-    } else {
-        println!("Preview: {}", file_path);
-    }
-
-    // Create output directory if it doesn't exist (skip for dry-run)
-    if !dry_run {
-        create_dir_all(out_dir).map_err(|e| eyre!("Failed to create output directory: {}", e))?;
-    }
-
-    // Seek to index section and read all entries
-    archive_file
-        .seek(std::io::SeekFrom::Start(index_section_start))
-        .map_err(|e| eyre!("Failed to seek to index section: {}", e))?;
-
-    // Read entry count
-    let mut entry_count_buf = [0u8; 4];
-    archive_file
-        .read_exact(&mut entry_count_buf)
-        .map_err(|e| eyre!("Failed to read entry count: {}", e))?;
-    let entry_count = u32::from_be_bytes(entry_count_buf);
-
-    let mut entries: Vec<ArchiveIndexEntry> = Vec::new();
-
-    (0..entry_count).for_each(|_| {
-        // Read entry length
-        let entry = parse_index_entry(&mut archive_file).unwrap();
-        entries.push(entry);
-    });
-
-    // Filter entries based on patterns
-    let matching_entries: Vec<ArchiveIndexEntry> = entries
-        .into_iter()
-        .filter(|entry| {
-            if patterns.is_empty() {
-                true
-            } else {
-                patterns.iter().any(|pattern| matches_glob(&entry.path, pattern))
-            }
-        })
-        .collect();
-
-    // Check if any entries matched
-    if matching_entries.is_empty() && !patterns.is_empty() {
-        let pattern_str = patterns.join(", ");
-        return Err(eyre!(
-            "No files matched the pattern(s): {}",
-            pattern_str
-        ));
-    }
-
-    // Print or extract matched entries
-    let mut extracted_count = 0;
-
-    for entry in matching_entries {
-        // Calculate output path
-        let output_path = if let Some(prefix) = strip_path {
-            strip_prefix(&entry.path, prefix)
-        } else {
-            entry.path.clone()
-        };
-
-        if output_path.is_empty() {
-            continue; // Skip if path after stripping is empty
+    match entries_to_extract.as_slice() {
+        [] => {}
+        [single] => {
+            extract_entry(
+                Path::new(file),
+                single,
+                &archive_state.entries,
+                dest_dir,
+                passphrase,
+            )?;
         }
-
-        let output_file_path = Path::new(out_dir).join(&output_path);
-        extracted_count += 1;
-
-        if dry_run {
-            println!("  {}", output_path);
-            continue;
+        multiple => {
+            extract_entries(
+                Path::new(file),
+                multiple,
+                &archive_state.entries,
+                dest_dir,
+                passphrase,
+            )?;
         }
-
-        // Create parent directories
-        if let Some(parent) = output_file_path.parent() {
-            create_dir_all(parent)
-                .map_err(|e| eyre!("Failed to create directories for {}: {}", entry.path, e))?;
-        }
-
-        // Read compressed data from archive
-        archive_file
-            .seek(std::io::SeekFrom::Start(
-                data_section_start + entry.data_offset,
-            ))
-            .map_err(|e| eyre!("Failed to seek to data offset for {}: {}", entry.path, e))?;
-
-        // Read entry length prefix (8 bytes)
-        let mut entry_size_buf = [0u8; 8];
-        archive_file.read_exact(&mut entry_size_buf).map_err(|e| {
-            eyre!(
-                "Failed to read compressed data size for {}: {}",
-                entry.path,
-                e
-            )
-        })?;
-        let _actual_compressed_size = u64::from_be_bytes(entry_size_buf);
-
-        // Read compressed data
-        let mut compressed_data = vec![0u8; entry.compressed_size as usize];
-        archive_file
-            .read_exact(&mut compressed_data)
-            .map_err(|e| eyre!("Failed to read compressed data for {}: {}", entry.path, e))?;
-
-        // Decompress data
-        let uncompressed_data = decompress_data(compressed_data, &entry).unwrap();
-
-        // Verify uncompressed size matches
-        if uncompressed_data.len() as u64 != entry.uncompressed_size {
-            return Err(eyre!(
-                "Decompressed size mismatch for {}: expected {}, got {}",
-                entry.path,
-                entry.uncompressed_size,
-                uncompressed_data.len()
-            ));
-        }
-
-        // Write file
-        let mut output_file = File::create(&output_file_path)
-            .map_err(|e| eyre!("Failed to create output file {}: {}", entry.path, e))?;
-        output_file
-            .write_all(&uncompressed_data)
-            .map_err(|e| eyre!("Failed to write to output file {}: {}", entry.path, e))?;
-
-        // Set modification time using filetime
-        #[cfg(unix)]
-        {
-            let mtime = UNIX_EPOCH + Duration::from_secs(entry.modification_time);
-            let filetime = FileTime::from_system_time(mtime);
-            let _ = set_file_mtime(&output_file_path, filetime);
-        }
-
-        if verbose {
-            println!("  {}", output_path);
-        }
-    }
-
-    // Print summary
-    if dry_run {
-        let file_word = if extracted_count == 1 { "file" } else { "files" };
-        println!("\nWould extract {} {}", extracted_count, file_word);
-    } else {
-        let file_word = if extracted_count == 1 { "file" } else { "files" };
-        success(&format!(
-            "Extracted {} {} to {}",
-            extracted_count, file_word, out_dir
-        ));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::build_archive;
+    use clap::{Arg, ArgAction, Command};
+    use tempfile::tempdir;
+
+    fn make_matches(args: &[&str]) -> ArgMatches {
+        let cmd = Command::new("dari").subcommand(
+            Command::new("extract")
+                .arg(
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("output-dir")
+                        .short('d')
+                        .long("output-dir")
+                        .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set),
+                )
+                .arg(Arg::new("paths").num_args(0..).action(ArgAction::Append)),
+        );
+        let mut full_args = vec!["dari", "extract"];
+        full_args.extend_from_slice(args);
+        let matches = cmd.get_matches_from(full_args);
+        matches.subcommand_matches("extract").unwrap().clone()
+    }
+
+    #[test]
+    fn test_extract_all_files() {
+        let dir = tempdir().unwrap();
+        let archive = build_archive(
+            &dir,
+            "test.dar",
+            &[("a.txt", b"hello"), ("b.txt", b"world")],
+            None,
+        );
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            "-d",
+            out_dir.to_str().unwrap(),
+        ]);
+
+        let locale = Locale::new("en");
+        call(&sub_matches, &locale).unwrap();
+
+        assert_eq!(std::fs::read(out_dir.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(out_dir.join("b.txt")).unwrap(), b"world");
+    }
+
+    #[test]
+    fn test_extract_specific_paths() {
+        let dir = tempdir().unwrap();
+        let archive = build_archive(
+            &dir,
+            "test2.dar",
+            &[("a.txt", b"aaa"), ("b.txt", b"bbb"), ("c.txt", b"ccc")],
+            None,
+        );
+        let out_dir = dir.path().join("out2");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            "-d",
+            out_dir.to_str().unwrap(),
+            "a.txt",
+            "c.txt",
+        ]);
+
+        let locale = Locale::new("en");
+        call(&sub_matches, &locale).unwrap();
+
+        assert_eq!(std::fs::read(out_dir.join("a.txt")).unwrap(), b"aaa");
+        assert_eq!(std::fs::read(out_dir.join("c.txt")).unwrap(), b"ccc");
+        // b.txt was not requested
+        assert!(!out_dir.join("b.txt").exists());
+    }
+
+    #[test]
+    fn test_extract_missing_archive_returns_error() {
+        let sub_matches = make_matches(&["-f", "/tmp/nonexistent_dari_test.dar"]);
+        let locale = Locale::new("en");
+        assert!(call(&sub_matches, &locale).is_err());
+    }
+
+    #[test]
+    fn test_extract_encrypted_with_passphrase() {
+        let dir = tempdir().unwrap();
+        let archive = build_archive(
+            &dir,
+            "enc.dar",
+            &[("secret.txt", b"secret data")],
+            Some("pass"),
+        );
+        let out_dir = dir.path().join("out_enc");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            "-d",
+            out_dir.to_str().unwrap(),
+            "--encrypt-passphrase",
+            "pass",
+        ]);
+
+        let locale = Locale::new("en");
+        call(&sub_matches, &locale).unwrap();
+
+        assert_eq!(
+            std::fs::read(out_dir.join("secret.txt")).unwrap(),
+            b"secret data"
+        );
+    }
 }

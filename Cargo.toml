@@ -1,32 +1,54 @@
 [package]
-name = "dar"
-description = "Dadyarri's Archiver"
-version = "0.4.6"
-authors = ["dadyarri <me@dadyarri.ru>"]
-autobins = false
-license = "MIT"
+name = "dari"
+version = "5.0.0"
 edition = "2024"
-
-[[bin]]
-name = "dar"
-path = "src/main.rs"
+authors = ["dadyarri <me@dadyarri.ru>"]
+description = "Archiver that combines multiple compression algorithms with some useful utilities, like respecting gitignore files"
 
 [dependencies]
-clap = { version = "4.5.54", features = ["cargo"] }
-term = "0.5"
-brotli = "8.0.2"
-clap_complete = "4.5.65"
 eyre = "0.6.12"
-color-eyre = "0.6.5"
-ignore = "0.4"
-zstd = "0.13"
-blake3 = "1.5"
-filetime = "0.2"
-xz2 = "0.1"
-ratatui = "0.27"
-crossterm = { version = "0.27", features = ["events"] }
-dirs = "5.0"
+clap = { version = "4.5.60", features = ["cargo"] }
+bytemuck = "1.25.0"
+ignore = "0.4.25"
+blake3 = "1.8.3"
+brotli = "8.0.2"
+zstd = "0.13.3"
+xz2 = "0.1.7"
+oxipng = { version = "10.1.0", default-features = false }
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["std"] }
+kamadak-exif = "0.6.1"
+lofty = { version = "0.23.3", default-features = true }
+rayon = "1"
+rust-i18n = "3.1.5"
+sys-locale = "0.3"
+color-print = "0.3.7"
+rpassword = "7.3.1"
+ratatui = "0.29"
+crossterm = "0.28"
+nucleo-matcher = "0.3"
+unicode-width = "0.2"
+encoding_rs = "0.8"
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+clap_complete = "4.5.66"
+serde_json = "1"
 
 [build-dependencies]
-clap = { version = "4.5.54", features = ["cargo"] }
-clap_complete = "4.5.65"
+rust-i18n = "3.1.5"
+toml = "0.9"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "compression"
+harness = false
+
+[[bench]]
+name = "reader"
+harness = false
+
+[[bench]]
+name = "search"
+harness = false

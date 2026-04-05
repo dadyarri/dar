@@ -1,191 +1,143 @@
-use std::io::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
-
+use crate::constants::format;
+use crate::utils::get_unix_timestamp;
+use bytemuck::{Pod, Zeroable};
 use eyre::{Error, Result, eyre};
+use rust_i18n::t;
+use std::io::Write;
 
-/// Archive header: 512 bytes fixed size
-/// Contains metadata for locating and validating archive sections
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug)]
 pub struct ArchiveHeader {
-    pub data_section_start: u64,
-    pub index_section_start: u64,
-    pub total_files: u32,
-    pub created_timestamp: u64,
-    pub archive_checksum: [u8; 32], // BLAKE3 hash (computed last)
+    pub signature: [u8; 4],
+    pub version: u8,
+    pub timestamp: u64,
 }
 
+unsafe impl Pod for ArchiveHeader {}
+unsafe impl Zeroable for ArchiveHeader {}
+
 impl ArchiveHeader {
-    pub const MAGIC: &'static [u8] = b"DAR\0";
-    pub const VERSION: &'static [u8] = b"0004";
-    pub const SIZE: usize = 512;
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            signature: *format::SIGNATURE,
+            version: format::VERSION,
+            timestamp: get_unix_timestamp()?,
+        })
+    }
 
-    pub fn new(data_section_start: u64, index_section_start: u64, total_files: u32) -> Self {
-        let created_timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(bytemuck::bytes_of(self))
+    }
+}
 
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug)]
+pub struct ArchiveFooter {
+    pub signature: [u8; 7],
+    pub index_offset: u32,
+    pub amount_of_files: u32,
+}
+
+unsafe impl Pod for ArchiveFooter {}
+unsafe impl Zeroable for ArchiveFooter {}
+
+impl ArchiveFooter {
+    pub fn new(index_offset: u32, amount_of_files: u32) -> Self {
         Self {
-            data_section_start,
-            index_section_start,
-            total_files,
-            created_timestamp,
-            archive_checksum: [0u8; 32],
+            signature: *format::FOOTER_SIGNATURE,
+            index_offset,
+            amount_of_files,
         }
     }
 
-    pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
-        let start_pos = buf.len();
-
-        buf.write_all(Self::MAGIC)?;
-        buf.write_all(Self::VERSION)?;
-        buf.write_all(&self.data_section_start.to_be_bytes())?;
-        buf.write_all(&self.index_section_start.to_be_bytes())?;
-        buf.write_all(&self.total_files.to_be_bytes())?;
-        buf.write_all(&self.created_timestamp.to_be_bytes())?;
-        buf.write_all(&self.archive_checksum)?;
-        buf.push(0u8); // flags (reserved)
-
-        // Pad to exactly 512 bytes from start position
-        let bytes_written = buf.len() - start_pos;
-        let padding = if bytes_written < Self::SIZE {
-            Self::SIZE - bytes_written
-        } else {
-            0
-        };
-        buf.write_all(&vec![0u8; padding])?;
-
-        Ok(())
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(bytemuck::bytes_of(self))
     }
-}
-
-/// Archive index entry: file metadata for later retrieval
-/// Each entry is prefixed with its length for safe parsing
-#[derive(Clone, Debug)]
-pub struct ArchiveIndexEntry {
-    pub path: String,
-    pub data_offset: u64,
-    pub uncompressed_size: u64,
-    pub compressed_size: u64,
-    pub compression_algorithm: CompressionAlgorithm,
-    pub modification_time: u64,
-    pub uid: u8,
-    pub gid: u8,
-    pub permissions: u16,
-    pub checksum: [u8; 32], // BLAKE3 of uncompressed data
 }
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
-pub enum CompressionAlgorithm {
+pub enum CompressionMethod {
     None,
     Brotli,
     Zstandard,
     Lzma,
 }
 
-impl TryFrom<u8> for CompressionAlgorithm {
+impl TryFrom<u8> for CompressionMethod {
     type Error = Error;
 
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
-        return match value {
-            0 => Ok(CompressionAlgorithm::None),
-            1 => Ok(CompressionAlgorithm::Brotli),
-            2 => Ok(CompressionAlgorithm::Zstandard),
-            3 => Ok(CompressionAlgorithm::Lzma),
-            _ => Err(eyre!("Invalid value for CompressionAlgorithm")),
-        };
-    }
-}
-
-impl Into<u8> for CompressionAlgorithm {
-    fn into(self: CompressionAlgorithm) -> u8 {
-        return match self {
-            CompressionAlgorithm::None => 0,
-            CompressionAlgorithm::Brotli => 1,
-            CompressionAlgorithm::Zstandard => 2,
-            CompressionAlgorithm::Lzma => 3,
-        };
-    }
-}
-
-impl CompressionAlgorithm {
-    pub fn as_byte(&self) -> u8 {
-        return *self as u8;
-    }
-}
-
-impl ArchiveIndexEntry {
-    /// Write entry to buffer in binary format
-    /// Format: [entry_length: u32][path_length: u32][path: utf8][data_offset: u64][uncompressed_size: u64]
-    ///         [compressed_size: u64][compression_algo: u8][mod_time: u64][uid: u8][gid: u8][perm: u16][checksum: 32bytes]
-    pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
-        let start_len = buf.len();
-
-        // Write placeholder for entry length (will be updated later)
-        buf.write_all(&0u32.to_be_bytes())?;
-
-        // Write path
-        let path_bytes = self.path.as_bytes();
-        buf.write_all(&(path_bytes.len() as u32).to_be_bytes())?;
-        buf.write_all(path_bytes)?;
-
-        // Write metadata
-        buf.write_all(&self.data_offset.to_be_bytes())?;
-        buf.write_all(&self.uncompressed_size.to_be_bytes())?;
-        buf.write_all(&self.compressed_size.to_be_bytes())?;
-        buf.write_all(&self.compression_algorithm.as_byte().to_be_bytes())?;
-        buf.write_all(&self.modification_time.to_be_bytes())?;
-        buf.write_all(&self.uid.to_be_bytes())?;
-        buf.write_all(&self.gid.to_be_bytes())?;
-        buf.write_all(&self.permissions.to_be_bytes())?;
-        buf.write_all(&self.checksum)?;
-
-        // Calculate and update entry length (excluding the 4-byte length field itself)
-        let entry_len = (buf.len() - start_len - 4) as u32;
-        buf[start_len..start_len + 4].copy_from_slice(&entry_len.to_be_bytes());
-
-        Ok(())
-    }
-}
-
-/// Archive end record: 64 bytes fixed size
-/// Located at the end of the archive for quick validation and index location
-pub struct ArchiveEndRecord {
-    pub index_offset: u64,
-    pub index_length: u64,
-    pub archive_checksum: [u8; 32], // BLAKE3 of entire archive
-}
-
-impl ArchiveEndRecord {
-    pub const MAGIC: &'static [u8] = b"DEND";
-    pub const SIZE: usize = 64;
-
-    pub fn new(index_offset: u64, index_length: u64) -> Self {
-        Self {
-            index_offset,
-            index_length,
-            archive_checksum: [0u8; 32],
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(CompressionMethod::None),
+            1 => Ok(CompressionMethod::Brotli),
+            2 => Ok(CompressionMethod::Zstandard),
+            3 => Ok(CompressionMethod::Lzma),
+            _ => Err(eyre!(t!(
+                "cli.common.errors.invalid_compression_method",
+                value = value
+            ))),
         }
     }
+}
 
-    pub fn write_to(&self, buf: &mut Vec<u8>) -> Result<()> {
-        let start_pos = buf.len();
+impl From<CompressionMethod> for u8 {
+    fn from(value: CompressionMethod) -> Self {
+        match value {
+            CompressionMethod::None => 0,
+            CompressionMethod::Brotli => 1,
+            CompressionMethod::Zstandard => 2,
+            CompressionMethod::Lzma => 3,
+        }
+    }
+}
 
-        buf.write_all(Self::MAGIC)?;
-        buf.write_all(&self.index_offset.to_be_bytes())?;
-        buf.write_all(&self.index_length.to_be_bytes())?;
-        buf.write_all(&self.archive_checksum)?;
-        buf.push(0u8); // flags (reserved)
+impl CompressionMethod {
+    /// Human-readable algorithm name used in display and metadata output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompressionMethod::None => "None",
+            CompressionMethod::Brotli => "Brotli",
+            CompressionMethod::Zstandard => "Zstandard",
+            CompressionMethod::Lzma => "LZMA",
+        }
+    }
+}
 
-        // Pad to exactly 64 bytes from start position
-        let bytes_written = buf.len() - start_pos;
-        let padding = if bytes_written < Self::SIZE {
-            Self::SIZE - bytes_written
-        } else {
-            0
-        };
-        buf.write_all(&vec![0u8; padding])?;
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub struct ArchiveIndexEntry {
+    pub offset: u64,
+    pub bitflags: u16,
+    pub compression_method: CompressionMethod,
+    pub modification_timestamp: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub perm: u16,
+    pub checksum: [u8; 32],
+    pub original_size: u64,
+    pub compressed_size: u64,
+    pub path_length: u32,
+    pub extra_length: u32,
+}
 
-        Ok(())
+unsafe impl Pod for ArchiveIndexEntry {}
+unsafe impl Zeroable for ArchiveIndexEntry {}
+
+impl ArchiveIndexEntry {
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(bytemuck::bytes_of(self))
+    }
+}
+
+pub struct ArchiveIndexEntryWrapper {
+    pub entry: ArchiveIndexEntry,
+    pub path: String,
+    pub extra: String,
+}
+
+impl ArchiveIndexEntryWrapper {
+    pub fn new(entry: ArchiveIndexEntry, path: String, extra: String) -> Self {
+        Self { entry, path, extra }
     }
 }

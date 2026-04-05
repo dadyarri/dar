@@ -1,0 +1,282 @@
+_version = 1
+
+[cli]
+about = "Архиватор, который сочетает несколько алгоритмов сжатия и полезные утилиты"
+
+[cli.prompts]
+enter_passphrase = "Введите парольную фразу для шифрования: "
+
+[cli.common.args]
+verbose = "Включить подробный вывод"
+content = "Файлы/папки для добавления в архив"
+help = "Показать справку по команде"
+version = "Показать информацию о версии"
+
+[cli.common.headings]
+usage = "Использование"
+commands = "Команды"
+arguments = "Аргументы"
+options = "Параметры"
+
+[cli.common.methods]
+stored = "без сжатия"
+brotli = "brotli"
+zstd = "zstd"
+lzma = "lzma"
+dedup = "дубликат"
+
+[cli.common.errors]
+file_required = "Не указан файл архива"
+content_required = "Нужно указать как минимум один каталог для архивации"
+canonicalize_failed = "Не удалось получить абсолютный путь: %{path}"
+header_write_failed = "Не удалось записать заголовок архива"
+get_write_position_failed = "Не удалось получить позицию записи"
+file_write_failed = "Не удалось записать данные файла: %{file}"
+get_index_offset_failed = "Не удалось получить позицию смещения индекса"
+index_entry_write_failed = "Не удалось записать запись индекса"
+entry_path_write_failed = "Не удалось записать путь записи"
+entry_extra_write_failed = "Не удалось записать дополнительные данные записи"
+footer_write_failed = "Не удалось записать футер архива"
+flush_archive_failed = "Не удалось завершить запись архива"
+brotli_compression_failed = "Ошибка сжатия Brotli: %{error}"
+zstd_compression_failed = "Ошибка сжатия ZStandard: %{error}"
+lzma_compression_failed = "Ошибка сжатия LZMA: %{error}"
+invalid_compression_method = "Некорректное значение CompressionMethod: %{value}"
+time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
+encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
+encrypt_prompt_empty = "Парольная фраза не может быть пустой"
+seek_failed = "Не удалось переместить указатель внутри архива %{file}"
+header_read_failed = "Не удалось прочитать заголовок архива %{file}"
+header_invalid = "Заголовок архива повреждён или версия не поддерживается"
+footer_read_failed = "Не удалось прочитать футер архива %{file}"
+footer_invalid = "Футер архива повреждён"
+index_decode_failed = "Не удалось разобрать индекс архива"
+mixed_encryption = "Архив содержит одновременно зашифрованные и незашифрованные записи — это не поддерживается"
+utf8_failed = "Поле %{field} в индексе архива содержит некорректный UTF-8"
+brotli_decompression_failed = "Ошибка распаковки Brotli: %{error}"
+zstd_decompression_failed = "Ошибка распаковки ZStandard: %{error}"
+lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
+
+[cli.common.messages]
+summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
+
+[cli.create]
+about = "Создает новый архив"
+
+[cli.create.args]
+file = "Путь к создаваемому архиву"
+overwrite = "Перезаписать существующий архив"
+compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
+encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
+passphrase_value = "ПАРОЛЬ"
+dry_run = "Предварительный просмотр добавляемых файлов без создания архива"
+
+[cli.create.messages]
+creating_archive = "Создание архива %{file}"
+dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
+dry_run_footer = "(пробный запуск — файл не записан)"
+
+[cli.create.errors]
+file_exists = "Файл %{file} уже существует"
+delete_failed = "Не удалось удалить файл"
+create_file_failed = "Не удалось создать файл"
+create_archive_failed = "Не удалось создать архив"
+
+[cli.append]
+about = "Добавляет данные в существующий архив"
+
+[cli.append.args]
+file = "Путь к существующему архивному файлу"
+compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
+encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
+dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"
+on_conflict = "Поведение при конфликте путей с существующими записями архива: error (по умолчанию), rename, overwrite"
+
+[cli.append.messages]
+appending_archive = "Добавление файлов в архив %{file}"
+dry_run_header = "Пробный запуск — файлы, которые будут добавлены в %{file}:"
+dry_run_footer = "(пробный запуск — файл не изменён)"
+dry_run_conflict_rename = "(конфликт → переименован в %{new_path})"
+dry_run_conflict_overwrite = "(конфликт → перезапишет существующую запись)"
+dry_run_conflict_error = "(конфликт — будет прерван)"
+
+[cli.append.errors]
+append_failed = "Не удалось добавить данные в архив"
+append_file_missing = "Архив %{file} не существует"
+append_open_failed = "Не удалось открыть архив %{file} для добавления"
+append_truncate_failed = "Не удалось усечь архив %{file} перед перезаписью индекса"
+append_seek_failed = "Не удалось переместить указатель внутри архива %{file}"
+append_read_failed = "Не удалось прочитать архив %{file}"
+append_requires_encryption = "Архив был создан с шифрованием: укажите исходную парольную фразу"
+append_disallows_encryption = "Архив был создан без шифрования: отключите шифрование для добавления файлов"
+append_passphrase_invalid = "Неверная парольная фраза для этого зашифрованного архива"
+append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
+append_conflict_error = "Добавление прервано: следующие пути уже существуют в архиве:\n  %{paths}"
+append_invalid_conflict_mode = "Недопустимое значение --on-conflict '%{value}': ожидается 'error', 'rename' или 'overwrite'"
+
+[cli.inspect]
+about = "Интерактивный просмотр содержимого архива"
+
+[cli.inspect.args]
+file = "Путь к архивному файлу для просмотра"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+
+[cli.inspect.errors]
+inspect_failed = "Не удалось открыть архив для просмотра"
+open_failed = "Не удалось открыть архив %{file}"
+
+[cli.extract]
+about = "Извлекает файлы из архива"
+
+[cli.extract.args]
+file = "Путь к архивному файлу для извлечения"
+output_dir = "Каталог для извлечения файлов (по умолчанию — текущий каталог)"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+paths = "Конкретные пути для извлечения (если не указано, извлекаются все файлы)"
+
+[cli.extract.messages]
+extracting_archive = "Извлечение файлов из архива %{file} (создан: %{timestamp})"
+
+[cli.extract.errors]
+extract_failed = "Не удалось извлечь файлы из архива"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архив %{file} не существует"
+
+[tui.inspect]
+status_total_one = "%{total} файл"
+status_total_few = "%{total} файла"
+status_total_many = "%{total} файлов"
+hint_navigate = "навигация"
+hint_toggle = "раскрыть"
+hint_quit = "выход"
+hint_metadata = "метаданные"
+hint_content = "содержимое"
+hint_close_preview = "закрыть"
+hint_scroll = "прокрутка"
+hint_search = "поиск"
+hint_meta_search = "поиск по тегам"
+hint_search_type = "вводите для фильтрации"
+hint_search_keep = "сохранить фильтр"
+hint_search_restore = "восстановить"
+hint_meta_search_keep = "сохранить фильтр"
+hint_meta_search_restore = "сбросить"
+hint_extract = "извлечь"
+col_file = "Файл"
+col_size = "Размер"
+col_compression = "Сжатие"
+
+[tui.inspect.extract]
+title = " Извлечь "
+prompt = "Путь назначения:"
+bar_label = "x"
+hint_confirm = "извлечь"
+hint_cancel = "отмена"
+error = "Ошибка извлечения: %{error}"
+error_empty = "Путь не может быть пустым"
+error_not_found = "Путь не существует: %{path}"
+
+[tui.inspect.panels]
+tag_search = " Поиск по тегам "
+metadata = " Метаданные "
+content = " Содержимое "
+no_entry_selected = " Файл не выбран"
+
+[tui.inspect.ratio]
+no_change = "без изменений"
+saved = "%{pct}% сохранено"
+larger = "на %{pct}% больше"
+
+[tui.inspect.preview]
+label_method = "Метод"
+label_original = "Исходный размер"
+label_compressed = "Сжатый размер"
+label_stored = "Сохранено"
+label_checksum = "Контрольная сумма"
+label_encoding = "Кодировка"
+encrypted_no_pass = "Зашифрованный файл — просмотр недоступен"
+encrypted_hint = "Укажите --encrypt-passphrase для расшифровки"
+wrong_passphrase = "Неверная парольная фраза — просмотр недоступен"
+binary = "Бинарный файл — просмотр содержимого недоступен"
+truncated = "(содержимое обрезано до 1 МиБ)"
+
+[tui.inspect.preview.tags]
+imk = "Производитель камеры"
+imd = "Модель камеры"
+idt = "Дата и время съёмки"
+atl = "Название трека"
+aar = "Исполнитель"
+aal = "Альбом"
+agn = "Жанр"
+
+[tui.meta_search.errors]
+unknown_tag = "Неизвестный тег '%{tag}'. Известные теги: %{known}"
+missing_value = "Тег '%{tag}' требует значения (например, %{tag}:пример)"
+bare_word = "Ожидалось 'тег:значение', получено '%{token}' — используйте формат 'artist:beatles'"
+
+[cli.extractor.errors]
+open_failed = "Не удалось открыть архив %{file}"
+seek_failed = "Не удалось переместить указатель внутри архива"
+read_failed = "Не удалось прочитать данные записи из архива"
+no_primary_for_linked = "Не найдена первичная запись для связанной записи '%{path}'"
+passphrase_required = "Запись '%{path}' зашифрована, но парольная фраза не предоставлена"
+decrypt_failed = "Не удалось расшифровать запись '%{path}': %{error}"
+decompress_failed = "Не удалось распаковать запись '%{path}': %{error}"
+create_dir_failed = "Не удалось создать каталог %{path}"
+write_failed = "Не удалось записать извлечённый файл %{path}"
+data_too_short = "Зашифрованные данные слишком короткие для корректного тега аутентификации"
+decrypt_invalid = "Ошибка расшифровки: парольная фраза неверна или данные повреждены"
+
+
+[cli.list]
+about = "Выводит содержимое архива"
+
+[cli.list.args]
+file = "Путь к архивному файлу"
+json = "Вывод в формате JSON"
+
+[cli.list.columns]
+path = "Путь"
+original_size = "Исх.размер"
+stored_size = "Хранится"
+method = "Метод"
+checksum = "Контрольная сумма"
+
+[cli.list.messages]
+header = "Содержимое %{file}:"
+
+[cli.list.errors]
+list_failed = "Не удалось вывести содержимое архива"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архив %{file} не существует"
+
+[cli.encrypt]
+about = "Шифрует существующий незашифрованный архив"
+
+[cli.encrypt.args]
+file = "Путь к архивному файлу для шифрования"
+encrypt = "Запросить парольную фразу интерактивно"
+encrypt_passphrase = "Шифровать с использованием указанной парольной фразы"
+output = "Сохранить зашифрованный архив по указанному пути (по умолчанию: <basename>.enc.dar)"
+in_place = "Перезаписать исходный архив на месте"
+
+[cli.encrypt.messages]
+encrypting_archive = "Шифрование архива %{file}"
+done = "Архив успешно зашифрован"
+
+[cli.encrypt.errors]
+encrypt_failed = "Не удалось зашифровать архив"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архив %{file} не существует"
+already_encrypted = "Архив %{file} уже зашифрован"
+passphrase_required = "Для шифрования необходима парольная фраза (используйте --encrypt или --encrypt-passphrase)"
+
+[cli.completions]
+about = "Генерирует скрипт автодополнения для оболочки и выводит его в stdout"
+
+[cli.completions.args]
+shell = "Оболочка для генерации автодополнения (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Не удалось сгенерировать скрипт автодополнения"

@@ -1,0 +1,282 @@
+_version = 1
+
+[cli]
+about = "Archiver that combines multiple compression algorithms with useful utilities"
+
+[cli.prompts]
+enter_passphrase = "Enter encryption passphrase: "
+
+[cli.common.args]
+verbose = "Enables verbose output"
+content = "Files/folders to add to archive"
+help = "Shows help of the command"
+version = "Shows version information"
+
+[cli.common.headings]
+usage = "Usage"
+commands = "Commands"
+arguments = "Arguments"
+options = "Options"
+
+[cli.common.methods]
+stored = "stored"
+brotli = "brotli"
+zstd = "zstd"
+lzma = "lzma"
+dedup = "dedup"
+
+[cli.common.errors]
+file_required = "File required"
+content_required = "At least one input directory is required"
+canonicalize_failed = "Failed to canonicalize path %{path}"
+header_write_failed = "Failed to write archive header"
+get_write_position_failed = "Failed to get current write position"
+file_write_failed = "Failed to write file data for %{file}"
+get_index_offset_failed = "Failed to get index offset position"
+index_entry_write_failed = "Failed to write index entry"
+entry_path_write_failed = "Failed to write entry path"
+entry_extra_write_failed = "Failed to write entry extra"
+footer_write_failed = "Failed to write archive footer"
+flush_archive_failed = "Failed to flush archive"
+brotli_compression_failed = "Brotli compression error: %{error}"
+zstd_compression_failed = "ZStandard compression error: %{error}"
+lzma_compression_failed = "LZMA compression error: %{error}"
+invalid_compression_method = "Invalid value for CompressionMethod: %{value}"
+time_before_unix_epoch = "Time is set before Unix Epoch"
+encrypt_prompt_failed = "Failed to read passphrase from the terminal"
+encrypt_prompt_empty = "Passphrase cannot be empty"
+seek_failed = "Failed to seek within archive %{file}"
+header_read_failed = "Failed to read archive header for %{file}"
+header_invalid = "Archive header is invalid or unsupported version"
+footer_read_failed = "Failed to read archive footer for %{file}"
+footer_invalid = "Archive footer is invalid"
+index_decode_failed = "Failed to decode archive index"
+mixed_encryption = "Archive contains both encrypted and unencrypted entries, which is unsupported"
+utf8_failed = "Archive index %{field} is not valid UTF-8"
+brotli_decompression_failed = "Brotli decompression error: %{error}"
+zstd_decompression_failed = "ZStandard decompression error: %{error}"
+lzma_decompression_failed = "LZMA decompression error: %{error}"
+
+[cli.common.messages]
+summary = "Done: %{count} file(s), %{original} original → %{stored} stored (%{ratio}%), elapsed: %{elapsed}"
+
+[cli.create]
+about = "Creates new archive"
+
+[cli.create.args]
+file = "The path to the resulting archive file"
+overwrite = "Overwrite existing archive file"
+compress_images = "Losslessly optimize PNG using OxiPNG"
+encrypt = "Prompt for passphrase interactively to encrypt file data"
+encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
+passphrase_value = "PASSPHRASE"
+dry_run = "Preview which files would be added without writing the archive"
+
+[cli.create.messages]
+creating_archive = "Creating archive %{file}"
+dry_run_header = "Dry run — files that would be added to %{file}:"
+dry_run_footer = "(dry run — no file written)"
+
+[cli.create.errors]
+file_exists = "File %{file} already exists"
+delete_failed = "Failed to delete file"
+create_file_failed = "Failed to create file"
+create_archive_failed = "Failed to create archive"
+
+[cli.append]
+about = "Appends data to existing archive"
+
+[cli.append.args]
+file = "The path to the existing archive file"
+compress_images = "Losslessly optimize PNG using OxiPNG"
+encrypt = "Prompt for passphrase interactively to encrypt appended file data"
+encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+dry_run = "Preview which files would be added without modifying the archive"
+on_conflict = "How to handle archive-relative path conflicts with existing entries: error (default), rename, overwrite"
+
+[cli.append.messages]
+appending_archive = "Appending into archive %{file}"
+dry_run_header = "Dry run — files that would be appended to %{file}:"
+dry_run_footer = "(dry run — no file modified)"
+dry_run_conflict_rename = "(conflict → renamed to %{new_path})"
+dry_run_conflict_overwrite = "(conflict → overwrites existing entry)"
+dry_run_conflict_error = "(conflict — would abort)"
+
+[cli.append.errors]
+append_failed = "Failed to append to archive"
+append_file_missing = "Archive file %{file} does not exist"
+append_open_failed = "Failed to open archive %{file} for appending"
+append_truncate_failed = "Failed to truncate archive %{file} before rewriting the index"
+append_seek_failed = "Failed to seek within archive %{file}"
+append_read_failed = "Failed to read archive %{file}"
+append_requires_encryption = "Archive was created with encryption; provide the original passphrase flags"
+append_disallows_encryption = "Archive was created without encryption; disable encryption to append"
+append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
+append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
+append_conflict_error = "Append aborted: the following path(s) already exist in the archive:\n  %{paths}"
+append_invalid_conflict_mode = "Invalid --on-conflict value '%{value}': expected 'error', 'rename', or 'overwrite'"
+
+[cli.inspect]
+about = "Interactively inspect the contents of an archive"
+
+[cli.inspect.args]
+file = "The path to the archive file to inspect"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+
+[cli.inspect.errors]
+inspect_failed = "Failed to inspect archive"
+open_failed = "Failed to open archive %{file}"
+
+[cli.extract]
+about = "Extracts files from an archive"
+
+[cli.extract.args]
+file = "The path to the archive file to extract from"
+output_dir = "Directory to extract files into (defaults to current directory)"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+paths = "Specific paths to extract (if omitted, all files are extracted)"
+
+[cli.extract.messages]
+extracting_archive = "Extracting from archive %{file} (created: %{timestamp})"
+
+[cli.extract.errors]
+extract_failed = "Failed to extract from archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+
+[tui.inspect]
+status_total_one = "1 file"
+status_total_other = "%{total} files"
+hint_navigate = "navigate"
+hint_toggle = "toggle dir"
+hint_quit = "quit"
+hint_metadata = "metadata"
+hint_content = "content"
+hint_close_preview = "close"
+hint_scroll = "scroll"
+hint_search = "search"
+hint_meta_search = "tag search"
+hint_search_type = "type to filter"
+hint_search_keep = "keep filter"
+hint_search_restore = "restore"
+hint_meta_search_keep = "keep filter"
+hint_meta_search_restore = "restore"
+hint_extract = "extract"
+col_file = "File"
+col_size = "Size"
+col_compression = "Compression"
+
+[tui.inspect.extract]
+title = " Extract "
+prompt = "Destination path:"
+bar_label = "x"
+hint_confirm = "extract"
+hint_cancel = "cancel"
+error = "Extraction failed: %{error}"
+error_empty = "Path must not be empty"
+error_not_found = "Path does not exist: %{path}"
+
+[tui.inspect.panels]
+tag_search = " Tag Search "
+metadata = " Metadata "
+content = " Content "
+no_entry_selected = " No entry selected"
+
+[tui.inspect.ratio]
+no_change = "no change"
+saved = "%{pct}% saved"
+larger = "%{pct}% larger"
+
+[tui.inspect.preview]
+label_method = "Method"
+label_original = "Original"
+label_compressed = "Compressed"
+label_stored = "Stored"
+label_checksum = "Checksum"
+label_encoding = "Encoding"
+encrypted_no_pass = "Encrypted file — preview unavailable"
+encrypted_hint = "Pass --encrypt-passphrase to decrypt"
+wrong_passphrase = "Incorrect passphrase — preview unavailable"
+binary = "Binary file — content preview unavailable"
+truncated = "(content truncated to 1 MiB)"
+
+[tui.inspect.preview.tags]
+imk = "Camera Make"
+imd = "Camera Model"
+idt = "Date/Time Original"
+atl = "Audio Title"
+aar = "Audio Artist"
+aal = "Audio Album"
+agn = "Audio Genre"
+
+[tui.meta_search.errors]
+unknown_tag = "Unknown tag '%{tag}'. Known tags: %{known}"
+missing_value = "Tag '%{tag}' requires a value (e.g. %{tag}:example)"
+bare_word = "Expected 'tag:value', got '%{token}' — use format like 'artist:beatles'"
+
+[cli.extractor.errors]
+open_failed = "Failed to open archive %{file}"
+seek_failed = "Failed to seek within archive"
+read_failed = "Failed to read entry data from archive"
+no_primary_for_linked = "No primary entry found for linked entry '%{path}'"
+passphrase_required = "Entry '%{path}' is encrypted but no passphrase was provided"
+decrypt_failed = "Failed to decrypt entry '%{path}': %{error}"
+decompress_failed = "Failed to decompress entry '%{path}': %{error}"
+create_dir_failed = "Failed to create directory %{path}"
+write_failed = "Failed to write extracted file %{path}"
+data_too_short = "Encrypted data is too short to contain a valid authentication tag"
+decrypt_invalid = "Decryption failed: passphrase is incorrect or data is corrupted"
+
+
+
+[cli.list]
+about = "Lists the contents of an archive"
+
+[cli.list.args]
+file = "The path to the archive file"
+json = "Output in JSON format"
+
+[cli.list.columns]
+path = "Path"
+original_size = "Orig.Size"
+stored_size = "Stored"
+method = "Method"
+checksum = "Checksum"
+
+[cli.list.messages]
+header = "Contents of %{file}:"
+
+[cli.list.errors]
+list_failed = "Failed to list archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+
+[cli.encrypt]
+about = "Encrypts an existing unencrypted archive"
+
+[cli.encrypt.args]
+file = "The path to the archive file to encrypt"
+encrypt = "Prompt for passphrase interactively"
+encrypt_passphrase = "Encrypt using the provided passphrase argument"
+output = "Save the encrypted archive to this path (default: <basename>.enc.dar)"
+in_place = "Overwrite the original archive in-place"
+
+[cli.encrypt.messages]
+encrypting_archive = "Encrypting archive %{file}"
+done = "Archive encrypted successfully"
+
+[cli.encrypt.errors]
+encrypt_failed = "Failed to encrypt archive"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+already_encrypted = "Archive %{file} is already encrypted"
+passphrase_required = "A passphrase is required for encryption (use --encrypt or --encrypt-passphrase)"
+
+[cli.completions]
+about = "Generates shell completion script and writes it to stdout"
+
+[cli.completions.args]
+shell = "Shell to generate completions for (bash, elvish, fish, powershell, zsh)"
+
+[cli.completions.errors]
+completions_failed = "Failed to generate shell completions"
