@@ -1,6 +1,6 @@
 [package]
 name = "dari"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2024"
 authors = ["dadyarri <me@dadyarri.ru>"]
 description = "Archiver that combines multiple compression algorithms with some useful utilities, like respecting gitignore files"
