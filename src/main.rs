@@ -1,35 +1,13 @@
+use dari::commands;
+use dari::i18n;
 use eyre::{Context, Result};
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-mod archive_builder;
-mod cli;
-mod commands;
-mod conflict;
-mod constants;
-mod counting_writer;
-mod encryption;
-mod errors;
-mod extra;
-mod extractor;
-mod file_reader;
-mod i18n;
-#[cfg(test)]
-mod integration_tests;
-mod models;
-mod pipeline;
-mod reader;
-#[cfg(test)]
-mod test_utils;
-mod traits;
-mod tui;
-mod utils;
-mod walker;
-
 fn main() -> Result<()> {
     let locale = i18n::detect_locale();
     rust_i18n::set_locale(locale.as_str());
-    let matches = cli::build_cli_with_translator(|key| {
+    let matches = dari::cli::build_cli_with_translator(|key| {
         rust_i18n::t!(key, locale = locale.as_str()).to_string()
     })
     .get_matches();

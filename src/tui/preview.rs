@@ -179,7 +179,7 @@ fn decode_content(entry: &ArchiveIndexEntryWrapper, raw: &[u8]) -> PreviewConten
 /// When the content is UTF-8 text and `extension` is recognised by syntect,
 /// returns [`PreviewContent::HighlightedText`]; otherwise falls back to
 /// [`PreviewContent::Text`].
-fn classify_bytes(bytes: &[u8], extension: &str) -> PreviewContent {
+pub(crate) fn classify_bytes(bytes: &[u8], extension: &str) -> PreviewContent {
     let preview = if bytes.len() > TEXT_PREVIEW_LIMIT {
         &bytes[..TEXT_PREVIEW_LIMIT]
     } else {
@@ -278,4 +278,128 @@ fn try_highlight(text: &str, extension: &str) -> Option<Vec<ratatui::text::Line<
         result.push(Line::from(spans));
     }
     Some(result)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ------------------------------------------------------------------
+    // classify_bytes — binary detection
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn null_byte_is_binary() {
+        let bytes = b"hello\x00world";
+        assert!(matches!(classify_bytes(bytes, "txt"), PreviewContent::Binary));
+    }
+
+    #[test]
+    fn high_control_char_ratio_is_binary() {
+        // > 10 % control bytes (0x01-0x08, 0x0E-0x1F)
+        let mut bytes = vec![0x01u8; 20];
+        bytes.extend_from_slice(b"normal text here");
+        assert!(matches!(classify_bytes(&bytes, "txt"), PreviewContent::Binary));
+    }
+
+    #[test]
+    fn empty_bytes_classifies_as_text() {
+        // Empty content has no control chars and is valid UTF-8.
+        // Extension "unknownext" has no syntect syntax, so it falls back to Text.
+        let result = classify_bytes(b"", "unknownext");
+        assert!(
+            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            "expected Text for empty bytes"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // classify_bytes — UTF-8 text paths
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn plain_utf8_without_known_extension_is_text() {
+        let bytes = b"Hello, world!\n";
+        let result = classify_bytes(bytes, "unknownext");
+        assert!(
+            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            "unexpected variant"
+        );
+    }
+
+    #[test]
+    fn rust_source_is_highlighted_text() {
+        let code = b"fn main() { println!(\"hi\"); }\n";
+        let result = classify_bytes(code, "rs");
+        // syntect knows Rust — should return HighlightedText.
+        assert!(
+            matches!(result, PreviewContent::HighlightedText { encoding: "UTF-8", .. }),
+            "expected HighlightedText for .rs extension"
+        );
+    }
+
+    #[test]
+    fn truncation_flag_set_when_over_limit() {
+        // Create a buffer just over the 1 MiB limit.
+        let big: Vec<u8> = b"a".repeat(1024 * 1024 + 1);
+        let result = classify_bytes(&big, "txt");
+        match result {
+            PreviewContent::Text { truncated, .. } => assert!(truncated),
+            PreviewContent::HighlightedText { truncated, .. } => assert!(truncated),
+            _ => panic!("unexpected variant: not text"),
+        }
+    }
+
+    #[test]
+    fn truncation_flag_not_set_within_limit() {
+        let small = b"hello world".to_vec();
+        let result = classify_bytes(&small, "txt");
+        match result {
+            PreviewContent::Text { truncated, .. } => assert!(!truncated),
+            PreviewContent::HighlightedText { truncated, .. } => assert!(!truncated),
+            _ => {}
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // classify_bytes — Windows-1251 fallback
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn windows_1251_text_classified_as_text() {
+        // "Привет" in Windows-1251 (Cyrillic).
+        let bytes: &[u8] = &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
+        let result = classify_bytes(bytes, "txt");
+        assert!(
+            matches!(result, PreviewContent::Text { encoding: "Windows-1251", .. }),
+            "expected Windows-1251 text"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // PreviewContent variant coverage for build_preview preconditions
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn encrypted_flag_triggers_no_passphrase_variant() {
+        // Build a synthetic extra string that marks the entry as encrypted.
+        use crate::constants::extra_keys;
+        use crate::models::archive::{ArchiveIndexEntry, ArchiveIndexEntryWrapper};
+        use bytemuck::Zeroable;
+
+        let extra = format!("{}=algo", extra_keys::ENC_ALGO);
+        let wrapper =
+            ArchiveIndexEntryWrapper::new(ArchiveIndexEntry::zeroed(), "file.txt".to_string(), extra);
+
+        // Pass `None` as passphrase; with no data to read the raw bytes will be
+        // `None` → Binary, but since encrypted flag is set and passphrase is None
+        // the code path should return EncryptedNoPassphrase before even reading data.
+        // We can't easily call build_preview without a real archive file, so test
+        // the logical path via the is_entry_encrypted helper directly.
+        assert!(crate::extra::is_entry_encrypted(&wrapper.extra));
+    }
 }

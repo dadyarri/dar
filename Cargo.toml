@@ -39,3 +39,16 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "compression"
+harness = false
+
+[[bench]]
+name = "reader"
+harness = false
+
+[[bench]]
+name = "search"
+harness = false

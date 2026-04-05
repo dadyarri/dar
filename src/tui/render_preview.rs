@@ -61,7 +61,12 @@ pub(crate) fn human_size(bytes: u64) -> String {
     }
 }
 
-fn ratio_label(compressed: u64, original: u64, locale: &str) -> String {
+/// Compute a human-readable compression ratio label.
+///
+/// Returns `"—"` when `original` is zero, a "X.X% saved" string when
+/// `compressed < original`, `"no change"` when equal, or "X.X% larger" otherwise.
+/// This is a pure function — it performs no I/O.
+pub(crate) fn ratio_label(compressed: u64, original: u64, locale: &str) -> String {
     if original == 0 {
         return String::from("—");
     }
@@ -161,6 +166,68 @@ pub(crate) fn render_meta_search_help_panel(
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+/// A single row in the metadata panel: `(label, value, is_dim)`.
+///
+/// `is_dim` is `true` for secondary values (e.g. the checksum) that should be
+/// rendered in a muted colour.
+pub type MetadataRow = (String, String, bool);
+
+/// Build the ordered list of metadata rows for the given entry preview.
+///
+/// Returns plain `String` tuples — no ratatui types.  The result is consumed
+/// by [`render_metadata_panel`] for rendering and by tests for assertions.
+pub(crate) fn build_metadata_rows_data(
+    meta: &crate::tui::preview::EntryMetadata,
+    content: &PreviewContent,
+    locale: &str,
+) -> Vec<MetadataRow> {
+    let encoding_opt = match content {
+        PreviewContent::Text { encoding, .. } => Some(*encoding),
+        PreviewContent::HighlightedText { encoding, .. } => Some(*encoding),
+        _ => None,
+    };
+
+    let label_method =
+        rust_i18n::t!("tui.inspect.preview.label_method", locale = locale).into_owned();
+    let label_original =
+        rust_i18n::t!("tui.inspect.preview.label_original", locale = locale).into_owned();
+    let label_checksum =
+        rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
+
+    let size_row: (String, String) = if meta.compressed_size == 0 {
+        let label =
+            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        (label, human_size(meta.original_size))
+    } else {
+        let label =
+            rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale).into_owned();
+        let ratio = ratio_label(meta.compressed_size, meta.original_size, locale);
+        (
+            label,
+            format!("{} ({})", human_size(meta.compressed_size), ratio),
+        )
+    };
+
+    let mut rows: Vec<MetadataRow> = vec![
+        (label_method, meta.compression_method.clone(), false),
+        (label_original, human_size(meta.original_size), false),
+        (size_row.0, size_row.1, false),
+        (
+            label_checksum,
+            format!("{}…", &meta.checksum_hex[..16]),
+            true,
+        ),
+    ];
+
+    if let Some(enc) = encoding_opt {
+        let label_encoding =
+            rust_i18n::t!("tui.inspect.preview.label_encoding", locale = locale).into_owned();
+        rows.push((label_encoding, enc.to_string(), false));
+    }
+
+    rows
+}
+
 /// Render the **metadata** floating window (compression stats + extra tags).
 pub(crate) fn render_metadata_panel(
     frame: &mut ratatui::Frame,
@@ -191,49 +258,7 @@ pub(crate) fn render_metadata_panel(
     let dim_style = Style::default().fg(Color::DarkGray);
 
     let meta = &entry_preview.metadata;
-
-    let encoding_opt = match &entry_preview.content {
-        PreviewContent::Text { encoding, .. } => Some(*encoding),
-        PreviewContent::HighlightedText { encoding, .. } => Some(*encoding),
-        _ => None,
-    };
-
-    let label_method =
-        rust_i18n::t!("tui.inspect.preview.label_method", locale = locale).into_owned();
-    let label_original =
-        rust_i18n::t!("tui.inspect.preview.label_original", locale = locale).into_owned();
-    let label_checksum =
-        rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
-
-    let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
-        (label, human_size(meta.original_size))
-    } else {
-        let label =
-            rust_i18n::t!("tui.inspect.preview.label_compressed", locale = locale).into_owned();
-        let ratio = ratio_label(meta.compressed_size, meta.original_size, locale);
-        (
-            label,
-            format!("{} ({})", human_size(meta.compressed_size), ratio),
-        )
-    };
-
-    let mut comp_rows: Vec<(String, String, bool)> = vec![
-        (label_method, meta.compression_method.clone(), false),
-        (label_original, human_size(meta.original_size), false),
-        (size_row.0, size_row.1, false),
-        (
-            label_checksum,
-            format!("{}…", &meta.checksum_hex[..16]),
-            true,
-        ),
-    ];
-
-    if let Some(enc) = encoding_opt {
-        let label_encoding =
-            rust_i18n::t!("tui.inspect.preview.label_encoding", locale = locale).into_owned();
-        comp_rows.push((label_encoding, enc.to_string(), false));
-    }
+    let comp_rows = build_metadata_rows_data(meta, &entry_preview.content, locale);
 
     let max_comp_key = comp_rows
         .iter()
@@ -393,4 +418,125 @@ pub(crate) fn render_content_panel(
             .scroll((state.preview.scroll, 0)),
         area,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ------------------------------------------------------------------
+    // human_size
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn human_size_bytes() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn human_size_kilobytes() {
+        assert_eq!(human_size(1024), "1.0 KB");
+        assert_eq!(human_size(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn human_size_megabytes() {
+        assert_eq!(human_size(1024 * 1024), "1.0 MB");
+        assert_eq!(human_size(2 * 1024 * 1024), "2.0 MB");
+    }
+
+    // ------------------------------------------------------------------
+    // ratio_label
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn ratio_label_zero_original() {
+        assert_eq!(ratio_label(0, 0, "en"), "—");
+    }
+
+    #[test]
+    fn ratio_label_no_change() {
+        let r = ratio_label(100, 100, "en");
+        // The en locale string for no_change should be non-empty.
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn ratio_label_saved() {
+        let r = ratio_label(50, 100, "en");
+        // 50 % saved — the result should mention a percentage.
+        assert!(r.contains("50.0"), "expected 50.0 in: {r}");
+    }
+
+    #[test]
+    fn ratio_label_larger() {
+        let r = ratio_label(150, 100, "en");
+        assert!(r.contains("50.0"), "expected 50.0 in: {r}");
+    }
+
+    // ------------------------------------------------------------------
+    // build_metadata_rows_data
+    // ------------------------------------------------------------------
+
+    fn make_meta(original: u64, compressed: u64) -> crate::tui::preview::EntryMetadata {
+        crate::tui::preview::EntryMetadata {
+            compression_method: "zstd".to_string(),
+            original_size: original,
+            compressed_size: compressed,
+            checksum_hex: "a".repeat(64),
+            extra_tags: vec![],
+        }
+    }
+
+    #[test]
+    fn metadata_rows_uncompressed_has_stored_label() {
+        let meta = make_meta(1024, 0);
+        let rows = build_metadata_rows_data(&meta, &PreviewContent::Binary, "en");
+        // Should have at least method, original, stored, checksum rows.
+        assert!(rows.len() >= 4);
+        // No encoding row for binary content.
+        assert_eq!(rows.len(), 4);
+    }
+
+    #[test]
+    fn metadata_rows_compressed_has_ratio() {
+        let meta = make_meta(1024, 512);
+        let rows = build_metadata_rows_data(&meta, &PreviewContent::Binary, "en");
+        // The size row value should contain "50.0" (50 % saved).
+        let size_row = &rows[2];
+        assert!(
+            size_row.1.contains("50.0"),
+            "expected ratio in: {}",
+            size_row.1
+        );
+    }
+
+    #[test]
+    fn metadata_rows_text_content_adds_encoding() {
+        let meta = make_meta(100, 0);
+        let content = PreviewContent::Text {
+            encoding: "UTF-8",
+            text: String::new(),
+            truncated: false,
+        };
+        let rows = build_metadata_rows_data(&meta, &content, "en");
+        // 4 base rows + 1 encoding row.
+        assert_eq!(rows.len(), 5);
+        let enc_row = rows.last().unwrap();
+        assert_eq!(enc_row.1, "UTF-8");
+    }
+
+    #[test]
+    fn metadata_rows_checksum_is_dimmed() {
+        let meta = make_meta(0, 0);
+        let rows = build_metadata_rows_data(&meta, &PreviewContent::Binary, "en");
+        // Checksum row (index 3) should have is_dim = true.
+        assert!(rows[3].2, "expected checksum row to be dimmed");
+    }
 }
