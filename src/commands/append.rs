@@ -4,6 +4,7 @@ use super::shared::{
 use crate::archive_builder::{ArchiveBuilder, ConflictMode, make_renamed_path};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::extractor::try_decrypt_bytes;
+use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
@@ -37,6 +38,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
+    let format_version = match matches
+        .get_one::<String>("format-version")
+        .map(String::as_str)
+    {
+        Some("6") => FormatVersion::V6,
+        _ => FormatVersion::V5,
+    };
     let content = matches.get_many::<String>("content").ok_or_else(|| {
         eyre!(t!(
             "cli.common.errors.content_required",
@@ -124,6 +132,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         config,
         conflict_mode,
         verbose,
+        format_version,
         locale,
     )
 }
@@ -249,6 +258,7 @@ fn execute_append_write(
     config: crate::pipeline::PipelineConfig,
     conflict_mode: ConflictMode,
     verbose: bool,
+    format_version: FormatVersion,
     locale: &Locale,
 ) -> Result<()> {
     println!(
@@ -277,7 +287,7 @@ fn execute_append_write(
         .to_string(),
     )?;
 
-    let mut builder = ArchiveBuilder::with_config(BufWriter::new(file_handle), config);
+    let mut builder = ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
 
@@ -424,6 +434,12 @@ mod tests {
                     Arg::new("dry-run")
                         .long("dry-run")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("format-version")
+                        .long("format-version")
+                        .action(ArgAction::Set)
+                        .default_value("5"),
                 )
                 .arg(
                     Arg::new("on-conflict")

@@ -34,7 +34,7 @@ order listed; each phase is a self-contained, reviewable PR boundary. Phases
 
 ---
 
-### Phase 0 — Multi-version dispatch infrastructure
+### Phase 0 — Multi-version dispatch infrastructure ✅
 
 **Goal:** Eliminate all hard-coded `VERSION = 5` assumptions and introduce a
 clean dispatch layer so that subsequent phases can add v6 code paths without
@@ -747,6 +747,12 @@ for such entries.
 
 **Depends on:** Phases 0, 1, 2.
 
+#### 7.5 new `compact` subcommand
+
+Merge multiple incremental archive layers into a single base archive,
+eliminating superseded entries and reclaiming dead data blocks. Analogous to
+`dar`'s catalogue merge.
+
 ---
 
 ### Phase 8 — `dari migrate` command
@@ -794,6 +800,21 @@ errors.already_v6 = "{file} is already format v6; nothing to do"
 
 ---
 
+### Phase 9 - Updating docs
+
+#### 9.1 - Clean up the docs
+
+1. Check that everything is up-do-date with version 5
+2. Move that to separate sub-folder V5
+
+#### 9.2 Write docs about V6
+
+1. Create separate folder for new archive format version
+2. Write there format specification, differences with V5, migration guide, implementation details for library in another
+   language
+
+---
+
 ### Phase dependency graph
 
 ```
@@ -806,6 +827,7 @@ Phase 0 — version dispatch
         ├── Phase 6 — xattr preservation (independent of Phases 2–5)
         └── Phase 7 — incremental backup ── also depends on Phase 2
               └── Phase 8 — dari migrate ── depends on all phases
+              └── Phase 9 — updating docs ── depends on all phases
 ```
 
 Phases 5, 6, and 7 are independent of each other once Phases 0 and 1 are
@@ -813,23 +835,3 @@ complete and can be worked in parallel.
 
 ---
 
-## Future Features (post-v6)
-
-### `dari compact`
-
-Merge multiple incremental archive layers into a single base archive,
-eliminating superseded entries and reclaiming dead data blocks. Analogous to
-`dar`'s catalogue merge. Requires Phase 7.
-
-### `dari mount` (FUSE)
-
-Read-only FUSE mount of a `.dar` archive (or archive set) as a virtual
-filesystem directory. Requires Phase 2 for fast listing without opening data
-volumes.
-
-### Streaming random-access AEAD (v7 candidate)
-
-Phase 5 chunked AEAD uses sequential per-segment nonce derivation. A v7
-extension would store per-segment byte offsets in the `.dari` to enable
-direct seek to any segment — relevant for the FUSE use case and for
-extracting specific byte ranges from large files.

@@ -3,6 +3,7 @@ use super::shared::{
 };
 use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
+use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
@@ -28,6 +29,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
+    let format_version = match matches
+        .get_one::<String>("format-version")
+        .map(String::as_str)
+    {
+        Some("6") => FormatVersion::V6,
+        _ => FormatVersion::V5,
+    };
     let content = matches.get_many::<String>("content").ok_or_else(|| {
         eyre!(t!(
             "cli.common.errors.content_required",
@@ -102,7 +110,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     )?;
     let writer = BufWriter::new(file_handle);
 
-    let mut builder = ArchiveBuilder::with_config(writer, config);
+    let mut builder = ArchiveBuilder::with_version(writer, config, format_version);
     builder.write_header()?;
 
     let start = Instant::now();

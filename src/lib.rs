@@ -11,6 +11,7 @@ pub mod cli;
 pub mod commands;
 pub mod conflict;
 pub mod constants;
+pub mod format_version;
 pub mod counting_writer;
 pub mod encryption;
 pub mod errors;

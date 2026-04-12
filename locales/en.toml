@@ -12,6 +12,10 @@ content = "Files/folders to add to archive"
 help = "Shows help of the command"
 version = "Shows version information"
 
+[cli.common.flags]
+format_version = "target archive format version (5 or 6, default 5)"
+format_version_auto = "format version forced to %{v} because %{reason} requires it"
+
 [cli.common.headings]
 usage = "Usage"
 commands = "Commands"

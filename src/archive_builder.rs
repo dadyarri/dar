@@ -3,6 +3,7 @@ pub use crate::conflict::{ConflictMode, make_renamed_path};
 pub use crate::file_reader::{PreparedFile, prepare_file_from_disk};
 
 use crate::constants::flags;
+use crate::format_version::FormatVersion;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
 };
@@ -33,6 +34,8 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     path_set: HashSet<String>,
     /// Conflict resolution strategy applied by [`Self::commit_prepared`].
     conflict_mode: ConflictMode,
+    /// Target on-disk format version.  Defaults to [`FormatVersion::V5`].
+    target_version: FormatVersion,
 }
 
 #[derive(Clone, Copy)]
@@ -92,6 +95,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             dedup_index: HashMap::new(),
             path_set: HashSet::new(),
             conflict_mode: ConflictMode::default(),
+            target_version: FormatVersion::default(),
+        }
+    }
+
+    /// Create a new builder targeting a specific format version.
+    ///
+    /// Use this constructor when the caller needs to write an archive in a
+    /// version other than the default (v5).  All behaviour is identical to
+    /// [`Self::with_config`] for v5; v6 write paths are added in Phase 1.
+    #[must_use]
+    pub fn with_version(writer: W, config: PipelineConfig, version: FormatVersion) -> Self {
+        Self {
+            target_version: version,
+            ..Self::with_config(writer, config)
         }
     }
 
@@ -127,11 +144,17 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     }
 
     pub fn write_header(&mut self) -> Result<()> {
-        ArchiveHeader::new()?
-            .write(&mut self.writer)
-            .wrap_err(t!("cli.common.errors.header_write_failed"))?;
-
-        Ok(())
+        match self.target_version {
+            FormatVersion::V5 => {
+                ArchiveHeader::new()?
+                    .write(&mut self.writer)
+                    .wrap_err(t!("cli.common.errors.header_write_failed"))?;
+                Ok(())
+            }
+            FormatVersion::V6 => {
+                todo!("v6 header — Phase 1")
+            }
+        }
     }
 
     /// Write a [`PreparedFile`] to the archive. Must be called from a single thread.
@@ -294,6 +317,15 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     ///
     /// Returns an error if any index entry, the footer, or the flush fails due to an I/O error.
     pub fn build(&mut self) -> Result<()> {
+        match self.target_version {
+            FormatVersion::V5 => self.build_v5(),
+            FormatVersion::V6 => {
+                todo!("v6 build — Phase 1")
+            }
+        }
+    }
+
+    fn build_v5(&mut self) -> Result<()> {
         // Record where the index section begins
         let index_offset =
             self.writer

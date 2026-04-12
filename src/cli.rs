@@ -114,6 +114,13 @@ where
                         .long("dry-run")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.create.args.dry_run")),
+                    Arg::new("format-version")
+                        .long("format-version")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .default_value("5")
+                        .value_parser(["5", "6"])
+                        .help(translate("cli.common.flags.format_version")),
                     Arg::new("content")
                         .num_args(0..)
                         .required(false)
@@ -162,6 +169,13 @@ where
                         .long("dry-run")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.append.args.dry_run")),
+                    Arg::new("format-version")
+                        .long("format-version")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .default_value("5")
+                        .value_parser(["5", "6"])
+                        .help(translate("cli.common.flags.format_version")),
                     Arg::new("on-conflict")
                         .long("on-conflict")
                         .action(ArgAction::Set)

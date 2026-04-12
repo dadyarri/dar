@@ -1,5 +1,7 @@
 use crate::constants::flags;
 use crate::constants::format;
+use crate::errors::DariError;
+use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
 use crate::models::archive::{
     ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
@@ -72,22 +74,41 @@ pub struct EncryptedEntryProbe {
     pub checksum: [u8; 32],
 }
 
-/// Parse the header, footer, and full index of a `.dar` archive source.
+/// Read the first 5 bytes of `source`, verify the `DARI` signature, and
+/// return the [`FormatVersion`] encoded in the version byte.
 ///
-/// `source` can be any [`ReadSeek`] implementation — typically a `std::fs::File`
-/// in production code or a `std::io::Cursor<Vec<u8>>` in unit tests.
+/// The cursor position after this call is unspecified; callers should seek
+/// before further I/O.
+pub fn read_version(source: &mut dyn ReadSeek, locale: &Locale) -> Result<FormatVersion> {
+    source.seek(SeekFrom::Start(0)).wrap_err(
+        t!(
+            "cli.common.errors.seek_failed",
+            locale = locale.as_str(),
+            file = "<archive>"
+        )
+        .to_string(),
+    )?;
+
+    let mut buf = [0u8; 5];
+    read_exact_ctx(source, &mut buf, "cli.common.errors.header_read_failed", locale)?;
+
+    if &buf[0..4] != format::SIGNATURE {
+        return Err(eyre!(t!(
+            "cli.common.errors.header_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    FormatVersion::try_from(buf[4]).map_err(eyre::Report::new)
+}
+
+/// Parse the header, footer, and full index of a v5 `.dar` archive source.
 ///
-/// The cursor position after this call is unspecified; callers should seek before further I/O.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - the source is too short to hold a valid header + footer,
-/// - the header signature or version is invalid,
-/// - the footer signature is invalid or `index_offset` is out of range,
-/// - any index entry cannot be read or decoded (truncated source, invalid UTF-8 path/extra),
-/// - entries mix encrypted and unencrypted data.
-pub fn load_archive(
+/// This is the verbatim body of the former `load_archive` and is only called
+/// after [`read_version`] has confirmed the archive is v5.  All existing call
+/// sites that previously called `load_archive` directly continue to work
+/// unchanged because [`load_archive`] now dispatches here for v5 archives.
+pub fn load_v5(
     source: &mut dyn ReadSeek,
     file_path: &str,
     locale: &Locale,
@@ -237,6 +258,41 @@ pub fn load_archive(
         index_offset,
         encryption_probe,
     })
+}
+
+/// Parse the header, footer, and full index of a `.dar` archive source.
+///
+/// Reads the version byte from the archive and dispatches to the appropriate
+/// version-specific loader.  Currently only v5 archives are supported;
+/// v6 support will be added in Phase 1.
+///
+/// `source` can be any [`ReadSeek`] implementation — typically a `std::fs::File`
+/// in production code or a `std::io::Cursor<Vec<u8>>` in unit tests.
+///
+/// The cursor position after this call is unspecified; callers should seek before further I/O.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - the source is too short to hold a valid header + footer,
+/// - the header signature or version is invalid,
+/// - the footer signature is invalid or `index_offset` is out of range,
+/// - any index entry cannot be read or decoded (truncated source, invalid UTF-8 path/extra),
+/// - entries mix encrypted and unencrypted data.
+pub fn load_archive(
+    source: &mut dyn ReadSeek,
+    file_path: &str,
+    locale: &Locale,
+) -> Result<ArchiveState> {
+    let version = read_version(source, locale)?;
+    match version {
+        FormatVersion::V5 => load_v5(source, file_path, locale),
+        FormatVersion::V6 => Err(eyre::Report::new(DariError::UnsupportedVersion {
+            found: 6,
+            // Only v5 reading is implemented in Phase 0; v6 reader arrives in Phase 1.
+            max_supported: 5,
+        })),
+    }
 }
 
 // ---------------------------------------------------------------------------
