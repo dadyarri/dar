@@ -1,10 +1,10 @@
 use crate::constants::flags;
 use crate::constants::format;
-use crate::errors::DariError;
 use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
 use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper,
+    ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
+    ArchiveIndexEntryV6, ArchiveIndexEntryWrapper,
 };
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
@@ -260,6 +260,209 @@ pub fn load_v5(
     })
 }
 
+/// Parse the header, footer, and full index of a v6 `.dar` archive source.
+///
+/// Mirror of [`load_v5`] using the updated v6 struct sizes and field layout.
+/// In particular:
+/// - The header is 17 bytes (`ArchiveHeaderV6`) and carries `volume_number` / `total_volumes`.
+/// - The footer is 19 bytes (`ArchiveFooterV6`) with `index_offset` widened to `u64`.
+/// - Each index entry is 123 bytes (`ArchiveIndexEntryV6`) and adds `stored_checksum`,
+///   `xattr_length`, and `volume_number`.
+/// - After the variable-length `extra` bytes, `xattr_length` additional bytes are present
+///   in the index tail (xattr blob); these are read and discarded unless Phase 6 is active.
+pub fn load_v6(
+    source: &mut dyn ReadSeek,
+    file_path: &str,
+    locale: &Locale,
+) -> Result<ArchiveState> {
+    let file_len = source.seek(SeekFrom::End(0)).wrap_err(
+        t!(
+            "cli.common.errors.seek_failed",
+            locale = locale.as_str(),
+            file = file_path
+        )
+        .to_string(),
+    )?;
+    let header_size = size_of::<ArchiveHeaderV6>() as u64;
+    let footer_size = size_of::<ArchiveFooterV6>() as u64;
+
+    if file_len < header_size + footer_size {
+        return Err(eyre!(t!(
+            "cli.common.errors.footer_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // --- Header (17 bytes) ---
+    seek_ctx(source, SeekFrom::Start(0), file_path, locale)?;
+    let mut header_buf = [0u8; size_of::<ArchiveHeaderV6>()];
+    read_exact_ctx(
+        source,
+        &mut header_buf,
+        "cli.common.errors.header_read_failed",
+        locale,
+    )?;
+    let v6_header = *bytemuck::from_bytes::<ArchiveHeaderV6>(&header_buf);
+
+    if v6_header.signature != *format::SIGNATURE || v6_header.version != 6 {
+        return Err(eyre!(t!(
+            "cli.common.errors.header_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // Synthesise a v5-layout ArchiveHeader for ArchiveState compatibility.
+    // Only `signature`, `version`, and `timestamp` are accessible through this path.
+    let header = ArchiveHeader {
+        signature: v6_header.signature,
+        version: v6_header.version,
+        timestamp: v6_header.timestamp,
+    };
+
+    // --- Footer (19 bytes) ---
+    let footer_pos = file_len - footer_size;
+    seek_ctx(source, SeekFrom::Start(footer_pos), file_path, locale)?;
+    let mut footer_buf = [0u8; size_of::<ArchiveFooterV6>()];
+    read_exact_ctx(
+        source,
+        &mut footer_buf,
+        "cli.common.errors.footer_read_failed",
+        locale,
+    )?;
+    let footer = *bytemuck::from_bytes::<ArchiveFooterV6>(&footer_buf);
+
+    if footer.signature != *format::FOOTER_SIGNATURE {
+        return Err(eyre!(t!(
+            "cli.common.errors.footer_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    let index_offset = footer.index_offset;
+    if index_offset < header_size || index_offset > footer_pos {
+        return Err(eyre!(t!(
+            "cli.common.errors.footer_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // --- Index entries (123 bytes each + variable tail) ---
+    seek_ctx(source, SeekFrom::Start(index_offset), file_path, locale)?;
+
+    let mut entries = Vec::with_capacity(footer.amount_of_files as usize);
+    let mut encryption_mode: Option<bool> = None;
+    let mut encryption_probe: Option<EncryptedEntryProbe> = None;
+
+    for _ in 0..footer.amount_of_files {
+        let mut entry_buf = [0u8; size_of::<ArchiveIndexEntryV6>()];
+        read_exact_ctx(
+            source,
+            &mut entry_buf,
+            "cli.common.errors.index_decode_failed",
+            locale,
+        )?;
+        let v6 = *bytemuck::from_bytes::<ArchiveIndexEntryV6>(&entry_buf);
+
+        // Map v6 on-disk struct → v5-compatible ArchiveIndexEntry (holds the common fields).
+        let entry = ArchiveIndexEntry {
+            offset: v6.offset,
+            bitflags: v6.bitflags,
+            compression_method: v6.compression_method,
+            modification_timestamp: v6.modification_timestamp,
+            uid: v6.uid,
+            gid: v6.gid,
+            perm: v6.perm,
+            checksum: v6.checksum,
+            original_size: v6.original_size,
+            compressed_size: v6.compressed_size,
+            path_length: v6.path_length,
+            extra_length: v6.extra_length,
+        };
+
+        let entry_encrypted = (v6.bitflags & flags::ENCRYPTED_DATA) != 0;
+        match encryption_mode {
+            None => encryption_mode = Some(entry_encrypted),
+            Some(expected) if expected != entry_encrypted => {
+                return Err(eyre!(t!(
+                    "cli.common.errors.mixed_encryption",
+                    locale = locale.as_str()
+                )));
+            }
+            _ => {}
+        }
+
+        if entry_encrypted && encryption_probe.is_none() {
+            encryption_probe = Some(EncryptedEntryProbe {
+                offset: v6.offset,
+                size: v6.compressed_size,
+                checksum: v6.checksum,
+            });
+        }
+
+        // Variable-length tail: path
+        let mut path_bytes = vec![0u8; v6.path_length as usize];
+        read_exact_ctx(
+            source,
+            &mut path_bytes,
+            "cli.common.errors.index_decode_failed",
+            locale,
+        )?;
+        let path = String::from_utf8(path_bytes).wrap_err_with(|| {
+            t!(
+                "cli.common.errors.utf8_failed",
+                locale = locale.as_str(),
+                field = "path"
+            )
+            .to_string()
+        })?;
+
+        // Variable-length tail: extra
+        let mut extra_bytes = vec![0u8; v6.extra_length as usize];
+        read_exact_ctx(
+            source,
+            &mut extra_bytes,
+            "cli.common.errors.index_decode_failed",
+            locale,
+        )?;
+        let extra = String::from_utf8(extra_bytes).wrap_err_with(|| {
+            t!(
+                "cli.common.errors.utf8_failed",
+                locale = locale.as_str(),
+                field = "extra"
+            )
+            .to_string()
+        })?;
+
+        // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
+        if v6.xattr_length > 0 {
+            let mut xattr_bytes = vec![0u8; v6.xattr_length as usize];
+            read_exact_ctx(
+                source,
+                &mut xattr_bytes,
+                "cli.common.errors.index_decode_failed",
+                locale,
+            )?;
+        }
+
+        entries.push(ArchiveIndexEntryWrapper::new_v6(
+            entry,
+            path,
+            extra,
+            v6.stored_checksum,
+            v6.xattr_length,
+            v6.volume_number,
+        ));
+    }
+
+    Ok(ArchiveState {
+        entries,
+        header,
+        encryption_mode,
+        index_offset,
+        encryption_probe,
+    })
+}
+
 /// Parse the header, footer, and full index of a `.dar` archive source.
 ///
 /// Reads the version byte from the archive and dispatches to the appropriate
@@ -287,11 +490,7 @@ pub fn load_archive(
     let version = read_version(source, locale)?;
     match version {
         FormatVersion::V5 => load_v5(source, file_path, locale),
-        FormatVersion::V6 => Err(eyre::Report::new(DariError::UnsupportedVersion {
-            found: 6,
-            // Only v5 reading is implemented in Phase 0; v6 reader arrives in Phase 1.
-            max_supported: 5,
-        })),
+        FormatVersion::V6 => load_v6(source, file_path, locale),
     }
 }
 
@@ -565,5 +764,95 @@ mod tests {
             state.encryption_mode.is_none(),
             "empty archive has no encryption mode"
         );
+    }
+
+    // ── Phase 1 — v6 reader tests ────────────────────────────────────────────
+
+    /// Build an in-memory v6 archive with the given files.
+    fn v6_archive(files: &[(&str, &[u8])]) -> Cursor<Vec<u8>> {
+        use crate::archive_builder::ArchiveBuilder;
+        use crate::format_version::FormatVersion;
+        use crate::pipeline::{CompressionPipeline, PipelineConfig};
+        use std::path::Path;
+
+        let cfg = PipelineConfig::default();
+        let pipeline = CompressionPipeline::new(cfg.clone());
+        let cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let mut builder = ArchiveBuilder::with_version(cursor, cfg, FormatVersion::V6);
+        builder.write_header().unwrap();
+        for (name, content) in files {
+            let pr = pipeline
+                .process_file(Path::new(name), content.to_vec())
+                .unwrap();
+            let prepared = crate::archive_builder::PreparedFile {
+                archive_path: name.to_string(),
+                pipeline_result: pr,
+                timestamp: 0,
+                uid: 1000,
+                gid: 1000,
+                perm: 0o644,
+            };
+            builder.commit_prepared(prepared).unwrap();
+        }
+        builder.build().unwrap();
+        builder.into_inner()
+    }
+
+    #[test]
+    fn test_v6_parses_single_entry_path() {
+        let mut src = v6_archive(&[("hello.txt", b"hello")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "hello.txt");
+        assert_eq!(state.header.version, 6, "loaded header should report v6");
+    }
+
+    #[test]
+    fn test_v6_parses_multiple_entries() {
+        let mut src = v6_archive(&[("a.txt", b"aaa"), ("b.txt", b"bbb")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        assert_eq!(state.entries.len(), 2);
+        let paths: Vec<&str> = state.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"a.txt"));
+        assert!(paths.contains(&"b.txt"));
+    }
+
+    #[test]
+    fn test_v6_stored_checksum_is_nonzero() {
+        let mut src = v6_archive(&[("data.bin", b"important content")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        let wrapper = &state.entries[0];
+        assert!(
+            wrapper.stored_checksum_v6().is_some(),
+            "v6 entry must carry a non-zero stored_checksum"
+        );
+    }
+
+    #[test]
+    fn test_v6_index_offset_uses_u64() {
+        let mut src = v6_archive(&[("f.txt", b"x")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        // index_offset is stored as u64 in v6; verify it's within the archive bounds
+        assert!(
+            state.index_offset >= 17, // v6 header is 17 bytes
+            "v6 index_offset must be past the 17-byte header"
+        );
+    }
+
+    #[test]
+    fn test_v6_unencrypted_archive_reports_false_mode() {
+        let mut src = v6_archive(&[("f.txt", b"x")]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        assert_eq!(state.encryption_mode, Some(false));
+        assert!(state.encryption_probe.is_none());
+    }
+
+    #[test]
+    fn test_v6_original_size_is_preserved() {
+        let content = b"0123456789";
+        let mut src = v6_archive(&[("data.bin", content)]);
+        let state = load_archive(&mut src, "<mem>", &en()).unwrap();
+        let original_size = state.entries[0].entry.original_size;
+        assert_eq!(original_size, content.len() as u64);
     }
 }

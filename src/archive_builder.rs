@@ -5,7 +5,8 @@ pub use crate::file_reader::{PreparedFile, prepare_file_from_disk};
 use crate::constants::flags;
 use crate::format_version::FormatVersion;
 use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
+    ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
+    ArchiveIndexEntryV6, ArchiveIndexEntryWrapper, CompressionMethod,
 };
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use eyre::{Context, Result, eyre};
@@ -44,6 +45,8 @@ struct ExistingFileData {
     compression_method: crate::models::archive::CompressionMethod,
     compressed_size: u64,
     bitflags: u16,
+    /// BLAKE3 of bytes as stored on disk; zero for entries imported from v5 archives.
+    stored_checksum: [u8; 32],
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +137,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                         compression_method: wrapper.entry.compression_method,
                         compressed_size: wrapper.entry.compressed_size,
                         bitflags: wrapper.entry.bitflags,
+                        stored_checksum: wrapper.stored_checksum,
                     },
                 );
             }
@@ -152,7 +156,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 Ok(())
             }
             FormatVersion::V6 => {
-                todo!("v6 header — Phase 1")
+                ArchiveHeaderV6::new()?
+                    .write(&mut self.writer)
+                    .wrap_err(t!("cli.common.errors.header_write_failed"))?;
+                Ok(())
             }
         }
     }
@@ -210,7 +217,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
             bitflags |= flags::LINKED_DATA;
 
-            self.entries.push(ArchiveIndexEntryWrapper::new(
+            self.entries.push(ArchiveIndexEntryWrapper::new_v6(
                 make_index_entry(
                     existing.offset,
                     bitflags | existing.bitflags,
@@ -227,6 +234,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 ),
                 archive_path.clone(),
                 pipeline_result.extra,
+                existing.stored_checksum,
+                0, // xattr_length — Phase 6
+                0, // volume_number — Phase 3
             ));
             self.path_set.insert(archive_path.clone());
 
@@ -258,8 +268,12 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             .write_all(bytes_to_write)
             .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = archive_path))?;
 
+        // Compute BLAKE3 of the bytes exactly as stored on disk (post-compression,
+        // post-encryption).  Used as `stored_checksum` in v6 index entries.
+        let stored_checksum = *blake3::hash(bytes_to_write).as_bytes();
+
         self.path_set.insert(archive_path.clone());
-        self.entries.push(ArchiveIndexEntryWrapper::new(
+        self.entries.push(ArchiveIndexEntryWrapper::new_v6(
             make_index_entry(
                 data_offset,
                 bitflags,
@@ -276,6 +290,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             ),
             archive_path.clone(),
             pipeline_result.extra,
+            stored_checksum,
+            0, // xattr_length — Phase 6
+            0, // volume_number — Phase 3
         ));
 
         self.dedup_index.insert(
@@ -285,6 +302,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 compression_method: pipeline_result.compression_method,
                 compressed_size,
                 bitflags,
+                stored_checksum,
             },
         );
 
@@ -319,9 +337,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn build(&mut self) -> Result<()> {
         match self.target_version {
             FormatVersion::V5 => self.build_v5(),
-            FormatVersion::V6 => {
-                todo!("v6 build — Phase 1")
-            }
+            FormatVersion::V6 => self.build_v6(),
         }
     }
 
@@ -348,6 +364,58 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
         // Write footer pointing at the index
         ArchiveFooter::new(index_offset, self.entries.len() as u32)
+            .write(&mut self.writer)
+            .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
+
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
+
+        Ok(())
+    }
+
+    /// Finalise a v6 archive: write `ArchiveIndexEntryV6` structs for all entries,
+    /// then an `ArchiveFooterV6` with a u64 index offset, then flush.
+    fn build_v6(&mut self) -> Result<()> {
+        // Record where the index section begins (u64 — no 4 GiB ceiling).
+        let index_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))?;
+
+        for wrapper in &self.entries {
+            // Copy packed fields to locals so we can safely read them.
+            let e = wrapper.entry;
+            let v6_entry = ArchiveIndexEntryV6 {
+                offset: e.offset,
+                bitflags: e.bitflags,
+                compression_method: e.compression_method,
+                modification_timestamp: e.modification_timestamp,
+                uid: e.uid,
+                gid: e.gid,
+                perm: e.perm,
+                checksum: e.checksum,
+                stored_checksum: wrapper.stored_checksum,
+                original_size: e.original_size,
+                compressed_size: e.compressed_size,
+                path_length: e.path_length,
+                extra_length: e.extra_length,
+                xattr_length: wrapper.xattr_length,
+                volume_number: wrapper.volume_number,
+            };
+            v6_entry
+                .write(&mut self.writer)
+                .wrap_err(t!("cli.common.errors.index_entry_write_failed"))?;
+            self.writer
+                .write_all(wrapper.path.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
+            self.writer
+                .write_all(wrapper.extra.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
+            // xattr_length == 0 for all current entries (Phase 6 adds xattr support).
+        }
+
+        ArchiveFooterV6::new(index_offset, self.entries.len() as u32)
             .write(&mut self.writer)
             .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
 
@@ -945,5 +1013,197 @@ mod tests {
         assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), content);
         assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), content);
         assert_eq!(std::fs::read(dest.join("c.txt")).unwrap(), content);
+    }
+
+    // ── Phase 1 — v6 format tests ────────────────────────────────────────────
+
+    /// Build a minimal v6 archive (header + one file + footer) and return the bytes.
+    fn build_v6_archive_with_file(path: &std::path::Path) -> Vec<u8> {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(buffer, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+        builder.write_header().unwrap();
+        builder.add_file(&path.to_path_buf(), &path.display().to_string()).unwrap();
+        builder.build().unwrap();
+        builder.writer.into_inner()
+    }
+
+    #[test]
+    fn test_v6_header_signature_and_version() {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(buffer, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+        builder.write_header().unwrap();
+        let data = builder.writer.into_inner();
+
+        assert_eq!(&data[0..4], b"DARI", "v6 signature mismatch");
+        assert_eq!(data[4], 6, "v6 version byte mismatch");
+        // volume_number and total_volumes at bytes 13..17
+        let volume_number = u16::from_le_bytes(data[13..15].try_into().unwrap());
+        let total_volumes = u16::from_le_bytes(data[15..17].try_into().unwrap());
+        assert_eq!(volume_number, 0, "volume_number should default to 0");
+        assert_eq!(total_volumes, 1, "total_volumes should default to 1");
+        assert!(data.len() >= std::mem::size_of::<crate::models::archive::ArchiveHeaderV6>());
+    }
+
+    #[test]
+    fn test_v6_footer_signature_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("hello.txt");
+        std::fs::write(&file_path, b"hello world").unwrap();
+
+        let data = build_v6_archive_with_file(&file_path);
+
+        let footer_offset = data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        assert_eq!(
+            &data[footer_offset..footer_offset + 7],
+            b"DARIEND",
+            "v6 footer signature mismatch"
+        );
+    }
+
+    #[test]
+    fn test_v6_footer_uses_u64_index_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.txt");
+        std::fs::write(&file_path, b"some data").unwrap();
+
+        let data = build_v6_archive_with_file(&file_path);
+
+        let footer_base = data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        // In v6 footer: sig(7) + index_offset(8 as u64) + amount_of_files(4)
+        let index_offset = read_bytes_as::<u64>(&data, footer_base + 7).unwrap();
+        assert!(
+            index_offset > 17, // must be past the 17-byte v6 header
+            "v6 index_offset ({index_offset}) must be past the v6 header"
+        );
+    }
+
+    #[test]
+    fn test_v6_footer_file_count_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, b"aaa").unwrap();
+        std::fs::write(&f2, b"fn main() {}").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(buffer, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+        builder.write_header().unwrap();
+        builder.add_file(&f1, &f1.display().to_string()).unwrap();
+        builder.add_file(&f2, &f2.display().to_string()).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        let footer_base = data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        // v6 footer: sig(7) + index_offset(8) = 15, then amount_of_files(4)
+        let file_count = read_bytes_as::<u32>(&data, footer_base + 15).unwrap();
+        assert_eq!(file_count, 2, "v6 footer file count should be 2");
+    }
+
+    #[test]
+    fn test_v6_round_trip_extract() {
+        use crate::extractor::extract_entries;
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"hello from v6 format";
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+
+        let archive_path = dir.path().join("v6_test.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(file_handle, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+            builder.write_header().unwrap();
+            builder.add_file(&f1, "a.txt").unwrap();
+            builder.add_file(&f2, "b.rs").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut f = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut f, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 2);
+        assert_eq!(state.header.version, 6, "loaded archive should report version 6");
+
+        let dest = dir.path().join("out_v6");
+        let refs: Vec<_> = state.entries.iter().collect();
+        extract_entries(&archive_path, &refs, &state.entries, &dest, None).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), content);
+        assert_eq!(std::fs::read(dest.join("b.rs")).unwrap(), content);
+    }
+
+    #[test]
+    fn test_v6_stored_checksum_is_populated() {
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"content for stored checksum test";
+        let f = dir.path().join("data.txt");
+        std::fs::write(&f, content).unwrap();
+
+        let archive_path = dir.path().join("stored_ck.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(file_handle, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+            builder.write_header().unwrap();
+            builder.add_file(&f, "data.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut fh = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 1);
+
+        let wrapper = &state.entries[0];
+        // stored_checksum_v6 must be Some (non-zero) for a v6 entry with actual content.
+        assert!(
+            wrapper.stored_checksum_v6().is_some(),
+            "v6 entry must carry a non-zero stored_checksum"
+        );
+    }
+
+    #[test]
+    fn test_v6_dedup_stored_checksum_propagated_to_linked_entry() {
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"deduped content";
+        let f1 = dir.path().join("copy1.txt");
+        let f2 = dir.path().join("copy2.txt");
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+
+        let archive_path = dir.path().join("dedup_v6.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(file_handle, PipelineConfig::default(), crate::format_version::FormatVersion::V6);
+            builder.write_header().unwrap();
+            builder.add_file(&f1, "copy1.txt").unwrap();
+            builder.add_file(&f2, "copy2.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut fh = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 2);
+
+        let primary = &state.entries[0];
+        let linked = &state.entries[1];
+        // Both entries should carry the same stored_checksum.
+        assert_eq!(
+            primary.stored_checksum, linked.stored_checksum,
+            "linked v6 entry must inherit primary's stored_checksum"
+        );
     }
 }

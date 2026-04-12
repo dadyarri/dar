@@ -119,6 +119,7 @@ append_passphrase_invalid = "Неверная парольная фраза дл
 append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
 append_conflict_error = "Добавление прервано: следующие пути уже существуют в архиве:\n  %{paths}"
 append_invalid_conflict_mode = "Недопустимое значение --on-conflict '%{value}': ожидается 'error', 'rename' или 'overwrite'"
+version_mismatch = "невозможно добавить: архив имеет формат v%{found}, но указан --format-version %{requested}; удалите флаг или используйте подходящую версию"
 
 [cli.inspect]
 about = "Интерактивный просмотр содержимого архива"

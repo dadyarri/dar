@@ -2,7 +2,10 @@
 pub mod format {
     pub const SIGNATURE: &[u8; 4] = b"DARI";
     pub const FOOTER_SIGNATURE: &[u8; 7] = b"DARIEND";
+    /// Default write version (v5 is the stable format).
     pub const VERSION: u8 = 5;
+    /// Maximum format version this binary can read.
+    pub const MAX_SUPPORTED_VERSION: u8 = 6;
     pub const CHUNK_SIZE: usize = 512 * 1024;
 }
 

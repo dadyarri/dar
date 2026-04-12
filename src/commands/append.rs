@@ -10,6 +10,7 @@ use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
 use clap::ArgMatches;
+use clap::parser::ValueSource;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -38,13 +39,17 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
-    let format_version = match matches
+
+    // Parse the CLI `--format-version` flag and remember if it was explicitly set.
+    let cli_format_version = match matches
         .get_one::<String>("format-version")
         .map(String::as_str)
     {
         Some("6") => FormatVersion::V6,
         _ => FormatVersion::V5,
     };
+    let version_explicitly_set =
+        matches.value_source("format-version") == Some(ValueSource::CommandLine);
     let content = matches.get_many::<String>("content").ok_or_else(|| {
         eyre!(t!(
             "cli.common.errors.content_required",
@@ -86,6 +91,24 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         )?;
 
     let existing_archive = load_archive(&mut file_handle, file, locale)?;
+
+    // Determine the format version of the existing archive.
+    let archive_format_version = FormatVersion::try_from(existing_archive.header.version)
+        .map_err(eyre::Report::new)?;
+
+    // If the user explicitly passed `--format-version` with a value that differs from
+    // the archive's own format, reject the request — mixing versions is not supported.
+    if version_explicitly_set && cli_format_version != archive_format_version {
+        return Err(eyre!(t!(
+            "cli.append.errors.version_mismatch",
+            locale = locale.as_str(),
+            found = existing_archive.header.version as u32,
+            requested = u8::from(cli_format_version) as u32
+        )));
+    }
+
+    // Always write using the archive's existing format version.
+    let format_version = archive_format_version;
 
     ensure_encryption_mode(
         existing_archive.encryption_mode,
@@ -682,5 +705,66 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // ── Phase 1 — version consistency tests ──────────────────────────────────
+
+    #[test]
+    fn test_version_mismatch_explicit_v6_on_v5_archive_returns_error() {
+        let dir = tempdir().unwrap();
+        let archive = build_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
+
+        let new_file = dir.path().join("new.txt");
+        std::fs::write(&new_file, b"new data").unwrap();
+
+        // Explicitly request format-version 6 on a v5 archive — must be rejected.
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            "--format-version",
+            "6",
+            new_file.to_str().unwrap(),
+        ]);
+
+        let locale = Locale::new("en");
+        let result = super::call(&sub_matches, &locale);
+        assert!(
+            result.is_err(),
+            "explicitly requesting v6 on a v5 archive must fail"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("v5") || msg.contains("v6") || msg.contains("version"),
+            "error message should mention version: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_append_to_v5_without_explicit_version_uses_archive_version() {
+        let dir = tempdir().unwrap();
+        let archive = build_archive(&dir, "v5_default.dar", &[("file.txt", b"original")], None);
+
+        let new_file = dir.path().join("new.txt");
+        std::fs::write(&new_file, b"appended content").unwrap();
+
+        // Do not specify --format-version → the archive's version (v5) is used.
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            new_file.to_str().unwrap(),
+        ]);
+
+        let locale = Locale::new("en");
+        // Should succeed and still be readable as a v5 archive.
+        super::call(&sub_matches, &locale).unwrap();
+
+        let mut fh = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&archive)
+            .unwrap();
+        let state = load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.header.version, 5, "archive should remain v5 after append");
+        assert_eq!(state.entries.len(), 2);
     }
 }

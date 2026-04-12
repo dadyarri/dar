@@ -126,7 +126,7 @@ format_version_auto = "format version forced to {v} because {reason} requires it
 
 ---
 
-### Phase 1 — v6 binary format specification
+### Phase 1 — v6 binary format specification ✅
 
 **Goal:** Define and implement the exact on-disk layout changes. All Phase 0
 dispatch stubs call functions that `todo!()` until this phase lands.

@@ -119,6 +119,7 @@ append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
 append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
 append_conflict_error = "Append aborted: the following path(s) already exist in the archive:\n  %{paths}"
 append_invalid_conflict_mode = "Invalid --on-conflict value '%{value}': expected 'error', 'rename', or 'overwrite'"
+version_mismatch = "cannot append: archive is format v%{found}, but --format-version %{requested} was requested; remove the flag or use a matching version"
 
 [cli.inspect]
 about = "Interactively inspect the contents of an archive"
