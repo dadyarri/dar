@@ -241,7 +241,7 @@ data files.
 
 The external index is a standalone binary file that lives alongside the base
 archive and shares its stem: `archive.dar` → `archive.dari`,
-`archive.dar.001` → `archive.daridx` (one index covers all volumes in a set).
+`archive.dar.001` → `archive.dari` (one index covers all volumes in a set).
 
 **`IndexFileHeader` — 17 bytes**
 
@@ -257,11 +257,11 @@ tail records as embedded in the archive (§1.1 above).
 
 **`IndexFileFooter` — 45 bytes**
 
-| Field         | Type       | Bytes | Notes                                                                                                                      |
-|---------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------|
-| `signature`   | `[u8; 9]`  | 9     | `b"DARIDXEND"`                                                                                                             |
-| `entry_count` | `u32`      | 4     | total number of index entries                                                                                              |
-| `checksum`    | `[u8; 32]` | 32    | BLAKE3 of all bytes from offset 0 up to (but not including) this footer; gives the `.daridx` file self-contained integrity |
+| Field         | Type       | Bytes | Notes                                                                                                                    |
+|---------------|------------|-------|--------------------------------------------------------------------------------------------------------------------------|
+| `signature`   | `[u8; 9]`  | 9     | `b"DARIDXEND"`                                                                                                           |
+| `entry_count` | `u32`      | 4     | total number of index entries                                                                                            |
+| `checksum`    | `[u8; 32]` | 32    | BLAKE3 of all bytes from offset 0 up to (but not including) this footer; gives the `.dari` file self-contained integrity |
 
 #### 2.2 — Writer: `src/index_writer.rs` (new file)
 
@@ -353,7 +353,7 @@ Given `-f archive.dar --split-size 2G`:
 - Volume 1: `archive.dar.001`
 - Volume 2: `archive.dar.002`
 - …up to `archive.dar.999` (zero-padded decimal, 3 digits)
-- External index: `archive.daridx` (one file covers the entire set)
+- External index: `archive.dari` (one file covers the entire set)
 
 For single-file archives (no `--split-size`), the file remains `archive.dar`
 with the index still embedded. A `archive.dar.b3` sidecar is written
@@ -389,8 +389,8 @@ new entry.
 `ArchiveBuilder::build` (final seal):
 
 1. Writes the embedded index into the last volume (allows single-volume
-   recovery without `.daridx`).
-2. Calls `IndexWriter::finish` to write the unified `.daridx`.
+   recovery without `.dari`).
+2. Calls `IndexWriter::finish` to write the unified `.dari`.
 3. Computes BLAKE3 of the last volume; writes its sidecar.
 4. Patches `total_volumes` in the headers of all prior volumes by seeking to
    byte offset 14 (the `volume_number`/`total_volumes` fields of the v6 header)
@@ -712,7 +712,7 @@ The walker filters out files whose `mtime <= since`; all other behaviour
 
 #### 7.3 — Snapshot section in `.dari`
 
-An optional snapshot section is appended to the `.daridx` body immediately
+An optional snapshot section is appended to the `.dari` body immediately
 before `IndexFileFooter`. A single `snapshot_present: u8` byte (`0` = absent,
 `1` = present) marks its start.
 
@@ -775,7 +775,7 @@ dari migrate -f old.dar -o new.dar [--split-size <N>] [--preserve-xattrs]
    re-encryption).
    d. Construct a v6 `ArchiveIndexEntry` from the v5 fields, setting
    `stored_checksum`, `volume_number = 0`, and `xattr_length = 0`.
-4. Call `build` to write the v6 embedded index, footer, `.daridx`, and `.b3`
+4. Call `build` to write the v6 embedded index, footer, `.dari`, and `.b3`
    sidecar.
 5. On success, print the output path; optionally replace `old.dar` with
    `new.dar` when `-o` is omitted (in-place mode with atomic rename).
@@ -820,7 +820,7 @@ errors.already_v6 = "{file} is already format v6; nothing to do"
 ```
 Phase 0 — version dispatch
   └── Phase 1 — v6 structs
-        ├── Phase 2 — external index (.daridx)
+        ├── Phase 2 — external index (.dari)
         │     └── Phase 3 — split volumes + per-volume .b3 sidecars
         │           └── Phase 4 — stored_checksum consumption (verify / TUI)
         ├── Phase 5 — chunked AEAD (independent of Phases 2–4)
