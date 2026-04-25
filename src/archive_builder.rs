@@ -10,6 +10,7 @@ use crate::models::archive::{
 };
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use crate::sidecar::write_b3_sidecar;
+use crate::xattrs::{XattrPair, encode_xattr_blob, hardlink_target, hardlink_target_xattr, inode_xattrs};
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::fs::File;
@@ -63,6 +64,8 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     current_volume_entry_count: usize,
     /// Re-opens the next numbered volume when split writing is enabled.
     volume_opener: Option<Box<dyn Fn(&Path) -> Result<W>>>,
+    /// Tracks already-seen Unix (device, inode) pairs when xattr preservation is enabled.
+    hardlink_index: HashMap<(u64, u64), String>,
 }
 
 #[derive(Clone, Copy)]
@@ -141,6 +144,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             volume_paths: Vec::new(),
             current_volume_entry_count: 0,
             volume_opener: None,
+            hardlink_index: HashMap::new(),
         }
     }
 
@@ -237,6 +241,14 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 );
             }
 
+            if let Some(target) = hardlink_target(&wrapper.xattrs) {
+                if let Some((device, inode)) = decode_inode_identity(&wrapper.xattrs) {
+                    self.hardlink_index.insert((device, inode), target.to_string());
+                }
+            } else if let Some((device, inode)) = decode_inode_identity(&wrapper.xattrs) {
+                self.hardlink_index.insert((device, inode), wrapper.path.clone());
+            }
+
             self.path_set.insert(wrapper.path.clone());
             self.entries.push(wrapper);
         }
@@ -288,6 +300,22 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let pipeline_result = prepared.pipeline_result;
         let mut bitflags = pipeline_result.bitflags;
         let original_size = pipeline_result.original_size;
+        let mut entry_xattrs = prepared.xattrs;
+
+        if self.pipeline.preserve_xattrs_enabled()
+            && self.target_version == FormatVersion::V6
+            && let Some((device, inode)) = prepared.device_inode
+        {
+            if let Some(target) = self.hardlink_index.get(&(device, inode)).cloned() {
+                entry_xattrs.push(hardlink_target_xattr(&target));
+            } else {
+                entry_xattrs.extend(inode_xattrs(device, inode));
+                self.hardlink_index
+                    .insert((device, inode), archive_path.clone());
+            }
+        }
+        let xattr_bytes = encode_xattr_blob(&entry_xattrs)?;
+        let xattr_length = xattr_bytes.len() as u32;
 
         // ── Conflict resolution ──────────────────────────────────────────────
         if self.path_set.contains(&archive_path) {
@@ -337,8 +365,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 ),
                 archive_path.clone(),
                 pipeline_result.extra,
+                entry_xattrs,
                 existing.stored_checksum,
-                0, // xattr_length — Phase 6
+                xattr_length,
                 existing.volume_number,
             ));
             self.path_set.insert(archive_path.clone());
@@ -395,8 +424,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             ),
             archive_path.clone(),
             pipeline_result.extra,
+            entry_xattrs,
             stored_checksum,
-            0, // xattr_length — Phase 6
+            xattr_length,
             self.current_volume,
         ));
         self.current_volume_entry_count += 1;
@@ -518,6 +548,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
             self.writer
                 .write_all(wrapper.extra.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
+            let xattr_bytes = encode_xattr_blob(&wrapper.xattrs)?;
+            self.writer
+                .write_all(&xattr_bytes)
                 .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
         }
 
@@ -657,6 +691,23 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn into_inner(self) -> W {
         self.writer
     }
+}
+
+fn decode_inode_identity(xattrs: &[XattrPair]) -> Option<(u64, u64)> {
+    let mut device = None;
+    let mut inode = None;
+    for (name, value) in xattrs {
+        if value.len() != 8 {
+            continue;
+        }
+        let decoded = u64::from_le_bytes(value.as_slice().try_into().ok()?);
+        if name == crate::xattrs::SYNTHETIC_DEVICE {
+            device = Some(decoded);
+        } else if name == crate::xattrs::SYNTHETIC_INODE {
+            inode = Some(decoded);
+        }
+    }
+    Some((device?, inode?))
 }
 
 #[cfg(test)]

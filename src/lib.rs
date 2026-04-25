@@ -28,6 +28,7 @@ pub mod traits;
 pub mod tui;
 pub mod utils;
 pub mod walker;
+pub mod xattrs;
 
 #[cfg(test)]
 pub mod integration_tests;

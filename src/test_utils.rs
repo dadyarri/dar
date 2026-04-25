@@ -22,6 +22,7 @@ pub fn build_archive(
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
             chunked_encryption: false,
+            preserve_xattrs: false,
         },
     );
     builder.write_header().unwrap();
@@ -45,6 +46,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
         compress_images: false,
         encryption_passphrase: passphrase.map(str::to_owned),
         chunked_encryption: false,
+        preserve_xattrs: false,
     });
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
     let mut builder = ArchiveBuilder::with_config(
@@ -53,6 +55,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
             chunked_encryption: false,
+            preserve_xattrs: false,
         },
     );
     builder.write_header().unwrap();
@@ -67,6 +70,8 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
             uid: 1000,
             gid: 1000,
             perm: 0o644,
+            xattrs: Vec::new(),
+            device_inode: None,
         };
         builder.commit_prepared(prepared).unwrap();
     }
@@ -93,6 +98,7 @@ pub fn build_v6_archive(
             compress_images: false,
             encryption_passphrase: None,
             chunked_encryption: false,
+            preserve_xattrs: false,
         },
         FormatVersion::V6,
     );

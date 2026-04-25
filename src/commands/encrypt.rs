@@ -158,6 +158,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         compress_images: false,
         encryption_passphrase: Some(passphrase),
         chunked_encryption: false,
+        preserve_xattrs: false,
     };
 
     let mut builder = ArchiveBuilder::with_config(BufWriter::new(temp_file), config);

@@ -17,6 +17,7 @@
 //! integrity.
 
 use crate::models::archive::{ArchiveIndexEntryV6, ArchiveIndexEntryWrapper};
+use crate::xattrs::encode_xattr_blob;
 use bytemuck::{Pod, Zeroable, bytes_of};
 use eyre::{Context, Result};
 use rust_i18n::t;
@@ -194,8 +195,10 @@ impl IndexWriter {
         self.writer
             .write_all(extra_bytes)
             .wrap_err(t!("cli.common.errors.index_file_entry_extra_write_failed"))?;
-
-        // xattr_length == 0 for all current entries; Phase 6 will write xattr bytes here.
+        let xattr_bytes = encode_xattr_blob(&wrapper.xattrs)?;
+        self.writer
+            .write_all(&xattr_bytes)
+            .wrap_err(t!("cli.common.errors.index_file_entry_extra_write_failed"))?;
 
         self.entry_count += 1;
         Ok(())
@@ -350,8 +353,9 @@ mod tests {
             entry,
             "test.txt".to_string(),
             String::new(),
+            vec![("user.dari.test".to_string(), b"value".to_vec())],
             [0xcd; 32],
-            0,
+            25,
             0,
         );
         iw.write_entry(&wrapper).unwrap();
@@ -363,6 +367,10 @@ mod tests {
 
         assert_eq!(state.entries.len(), 1);
         assert_eq!(state.entries[0].path, "test.txt");
+        assert_eq!(
+            state.entries[0].xattrs,
+            vec![("user.dari.test".to_string(), b"value".to_vec())]
+        );
         let ts = state.header.timestamp;
         assert_eq!(ts, archive_ts);
     }
@@ -426,6 +434,7 @@ mod tests {
                 entry,
                 name.to_string(),
                 String::new(),
+                Vec::new(),
                 [0x22; 32],
                 0,
                 0,

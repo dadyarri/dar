@@ -161,6 +161,7 @@ prepare_fixtures() {
         "$TEST_ROOT/fixtures/plain_small" \
         "$TEST_ROOT/fixtures/plain_in_place" \
         "$TEST_ROOT/fixtures/chunked_input" \
+        "$TEST_ROOT/fixtures/preserve_input" \
         "$TEST_ROOT/fixtures/v6_input/nested" \
         "$TEST_ROOT/fixtures/split_input/assets"
 
@@ -211,6 +212,15 @@ EOF
     cat >"$TEST_ROOT/fixtures/chunked_input/chunked.txt" <<'EOF'
 chunked encryption integration payload
 EOF
+    cat >"$TEST_ROOT/fixtures/preserve_input/base.txt" <<'EOF'
+xattr and hardlink payload
+EOF
+    ln "$TEST_ROOT/fixtures/preserve_input/base.txt" "$TEST_ROOT/fixtures/preserve_input/linked.txt"
+    if command -v setfattr >/dev/null 2>&1; then
+        setfattr -n user.dari.test -v roundtrip "$TEST_ROOT/fixtures/preserve_input/base.txt"
+    elif command -v xattr >/dev/null 2>&1; then
+        xattr -w user.dari.test roundtrip "$TEST_ROOT/fixtures/preserve_input/base.txt"
+    fi
     cat >"$TEST_ROOT/fixtures/v6_input/nested/data.txt" <<'EOF'
 v6 archive payload
 EOF
@@ -386,6 +396,34 @@ EOF
     run_cmd verify_chunked_full \
         "$BIN" verify -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret --full
     inspect_and_quit "$TEST_ROOT/chunked/live.dar" "--encrypt-passphrase secret"
+
+    next_step "Testing xattr preservation and hardlink reconstruction"
+    mkdir -p "$TEST_ROOT/preserve"
+    expect_fail append_preserve_xattrs_requires_v6 \
+        "$BIN" append -f "$TEST_ROOT/basic/basic.dar" --preserve-xattrs \
+        "$TEST_ROOT/fixtures/append_unique_input"
+    run_cmd create_preserve_archive \
+        "$BIN" create -f "$TEST_ROOT/preserve/live.dar" --preserve-xattrs \
+        "$TEST_ROOT/fixtures/preserve_input"
+    assert_file_exists "$TEST_ROOT/preserve/live.dar"
+    assert_file_exists "$TEST_ROOT/preserve/live.dari"
+    run_cmd extract_preserve_archive \
+        "$BIN" extract -f "$TEST_ROOT/preserve/live.dar" -d "$TEST_ROOT/preserve/out"
+    assert_files_equal \
+        "$TEST_ROOT/fixtures/preserve_input/base.txt" \
+        "$TEST_ROOT/preserve/out/base.txt"
+    assert_files_equal \
+        "$TEST_ROOT/fixtures/preserve_input/linked.txt" \
+        "$TEST_ROOT/preserve/out/linked.txt"
+    run_bash preserve_hardlink_check \
+        "[[ \"\$(stat -c %i \"$TEST_ROOT/preserve/out/base.txt\")\" == \"\$(stat -c %i \"$TEST_ROOT/preserve/out/linked.txt\")\" ]]"
+    if command -v getfattr >/dev/null 2>&1; then
+        run_bash preserve_xattr_check \
+            "getfattr --only-values -n user.dari.test \"$TEST_ROOT/preserve/out/base.txt\" | rg -Fq roundtrip"
+    elif command -v xattr >/dev/null 2>&1; then
+        run_bash preserve_xattr_check \
+            "[[ \"\$(xattr -p user.dari.test \"$TEST_ROOT/preserve/out/base.txt\")\" == \"roundtrip\" ]]"
+    fi
 
     next_step "Testing v6 archive creation, verify, reindex, no-index, and inspect"
     mkdir -p "$TEST_ROOT/v6"

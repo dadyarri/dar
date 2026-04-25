@@ -109,6 +109,10 @@ where
                         .long("chunked-encryption")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.create.args.chunked_encryption")),
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.create.args.preserve_xattrs")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -173,6 +177,10 @@ where
                         .long("chunked-encryption")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.append.args.chunked_encryption")),
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.append.args.preserve_xattrs")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -499,6 +507,24 @@ mod tests {
     }
 
     #[test]
+    fn test_preserve_xattrs_flag_is_accepted_for_create() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "create",
+                    "-f",
+                    "out.dar",
+                    "--preserve-xattrs",
+                    "src",
+                ])
+                .unwrap();
+
+        let create = matches.subcommand_matches("create").unwrap();
+        assert!(create.get_flag("preserve-xattrs"));
+    }
+
+    #[test]
     fn test_chunked_encryption_flag_is_accepted_for_append() {
         let matches =
             build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
@@ -516,6 +542,24 @@ mod tests {
 
         let append = matches.subcommand_matches("append").unwrap();
         assert!(append.get_flag("chunked-encryption"));
+    }
+
+    #[test]
+    fn test_preserve_xattrs_flag_is_accepted_for_append() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "append",
+                    "-f",
+                    "out.dar",
+                    "--preserve-xattrs",
+                    "src",
+                ])
+                .unwrap();
+
+        let append = matches.subcommand_matches("append").unwrap();
+        assert!(append.get_flag("preserve-xattrs"));
     }
 
     #[test]

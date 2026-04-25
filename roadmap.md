@@ -610,7 +610,7 @@ Old extractors that do not know `CHUNKED_ENCRYPTION` will fail to decrypt
 
 ---
 
-### Phase 6 — Unix inode and extended-attribute preservation
+### Phase 6 — Unix inode and extended-attribute preservation ✅
 
 **Motivation:** `dari` currently stores only `uid`, `gid`, and permission bits
 (via `get_mode` in `utils.rs`). Full backup fidelity on Linux and macOS

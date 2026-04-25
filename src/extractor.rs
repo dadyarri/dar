@@ -1,12 +1,13 @@
 use crate::constants::crypto;
 use crate::constants::flags;
-use crate::encryption::nonce_from_checksum;
-use crate::encryption::nonce_for_segment;
-use crate::extra::parse_extra_pairs;
 use crate::constants::extra_keys;
+use crate::encryption::nonce_for_segment;
+use crate::encryption::nonce_from_checksum;
+use crate::extra::parse_extra_pairs;
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::traits::decompress_bytes;
 use crate::utils::sanitize_path;
+use crate::xattrs::{hardlink_target, restore_xattrs};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use eyre::{Result, eyre};
@@ -52,7 +53,14 @@ pub fn extract_entries(
     passphrase: Option<&str>,
 ) -> Result<()> {
     for entry in entries_to_extract {
-        extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
+        if hardlink_target(&entry.xattrs).is_none() {
+            extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
+        }
+    }
+    for entry in entries_to_extract {
+        if hardlink_target(&entry.xattrs).is_some() {
+            extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
+        }
     }
     Ok(())
 }
@@ -68,6 +76,29 @@ fn extract_one(
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
+    let safe_path = sanitize_path(&entry.path);
+    let dest_path = dest_dir.join(&safe_path);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            eyre!(t!(
+                "cli.extractor.errors.create_dir_failed",
+                path = parent.display()
+            ))
+        })?;
+    }
+
+    if let Some(target) = hardlink_target(&entry.xattrs) {
+        let target_path = dest_dir.join(sanitize_path(target));
+        fs::hard_link(&target_path, &dest_path).map_err(|_| {
+            eyre!(t!(
+                "cli.extractor.errors.write_failed",
+                path = dest_path.display()
+            ))
+        })?;
+        restore_xattrs(&dest_path, &entry.xattrs)?;
+        return Ok(());
+    }
+
     // Copy packed fields to local variables before using them.
     let bitflags = entry.entry.bitflags;
     let checksum = entry.entry.checksum;
@@ -131,22 +162,13 @@ fn extract_one(
 
     // Write the recovered bytes to dest_dir / entry.path, creating dirs as needed.
     // Sanitize the stored path to prevent path traversal (strips `..`, `/`, Windows prefixes).
-    let safe_path = sanitize_path(&entry.path);
-    let dest_path = dest_dir.join(&safe_path);
-    if let Some(parent) = dest_path.parent() {
-        fs::create_dir_all(parent).map_err(|_| {
-            eyre!(t!(
-                "cli.extractor.errors.create_dir_failed",
-                path = parent.display()
-            ))
-        })?;
-    }
     fs::write(&dest_path, &plain).map_err(|_| {
         eyre!(t!(
             "cli.extractor.errors.write_failed",
             path = dest_path.display()
         ))
     })?;
+    restore_xattrs(&dest_path, &entry.xattrs)?;
 
     Ok(())
 }
@@ -423,6 +445,7 @@ mod tests {
                     compress_images: false,
                     encryption_passphrase: None,
                     chunked_encryption: false,
+                    preserve_xattrs: false,
                 },
             );
             builder.write_header().unwrap();
@@ -528,6 +551,7 @@ mod tests {
                     compress_images: false,
                     encryption_passphrase: Some("secret".to_string()),
                     chunked_encryption: true,
+                    preserve_xattrs: false,
                 },
                 crate::format_version::FormatVersion::V6,
             );
@@ -627,6 +651,7 @@ mod tests {
                 compress_images: false,
                 encryption_passphrase: None,
                 chunked_encryption: false,
+                preserve_xattrs: false,
             },
         );
         builder.write_header().unwrap();
@@ -701,5 +726,72 @@ mod tests {
             any_file_under(&dest),
             "extracted file should land somewhere inside dest"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_extract_preserves_hardlinks_and_xattrs_for_v6() {
+        use crate::format_version::FormatVersion;
+        use crate::xattrs::hardlink_target;
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("preserve.dar");
+        let source_a = dir.path().join("source-a.txt");
+        let source_b = dir.path().join("source-b.txt");
+        std::fs::write(&source_a, b"preserved payload").unwrap();
+        std::fs::hard_link(&source_a, &source_b).unwrap();
+        xattr::set(&source_a, "user.dari.test", b"roundtrip").unwrap();
+
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig {
+                    compress_images: false,
+                    encryption_passphrase: None,
+                    chunked_encryption: false,
+                    preserve_xattrs: true,
+                },
+                FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&source_a, "a.txt").unwrap();
+            builder.add_file(&source_b, "b.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let entries = load(&archive_path);
+        assert_eq!(
+            xattr::get(dir.path().join("source-a.txt"), "user.dari.test").unwrap(),
+            Some(b"roundtrip".to_vec())
+        );
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.path == "a.txt")
+                .is_some_and(|entry| !entry.xattrs.is_empty())
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry.path == "b.txt")
+                .and_then(|entry| hardlink_target(&entry.xattrs)),
+            Some("a.txt")
+        );
+
+        let dest = dir.path().join("out_preserve");
+        let refs: Vec<&ArchiveIndexEntryWrapper> = entries.iter().collect();
+        extract_entries(&archive_path, &refs, &entries, &dest, None).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"preserved payload");
+        assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), b"preserved payload");
+        assert_eq!(
+            xattr::get(dest.join("a.txt"), "user.dari.test").unwrap(),
+            Some(b"roundtrip".to_vec())
+        );
+        let a_meta = std::fs::metadata(dest.join("a.txt")).unwrap();
+        let b_meta = std::fs::metadata(dest.join("b.txt")).unwrap();
+        assert_eq!(a_meta.ino(), b_meta.ino(), "extracted files should be hard-linked");
     }
 }

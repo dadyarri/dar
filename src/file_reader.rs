@@ -1,6 +1,7 @@
 use crate::constants::format::CHUNK_SIZE;
 use crate::pipeline::{CompressionPipeline, PipelineFileData};
 use crate::utils::get_mode;
+use crate::xattrs::{XattrPair, collect_device_inode, collect_xattrs};
 use eyre::Result;
 use std::fs::{File, metadata};
 use std::io::Read;
@@ -19,6 +20,8 @@ pub struct PreparedFile {
     pub uid: u32,
     pub gid: u32,
     pub perm: u16,
+    pub xattrs: Vec<XattrPair>,
+    pub device_inode: Option<(u64, u64)>,
 }
 
 /// Read file content fully into memory.
@@ -74,6 +77,11 @@ pub fn prepare_file_from_disk(
 
     let file_content = read_file_content(file_path, file_size)?;
     let pipeline_result = pipeline.process_file(file_path, file_content)?;
+    let (xattrs, device_inode) = if pipeline.preserve_xattrs_enabled() {
+        (collect_xattrs(file_path), collect_device_inode(file_path))
+    } else {
+        (Vec::new(), None)
+    };
 
     Ok(PreparedFile {
         archive_path: archive_path.to_string(),
@@ -82,5 +90,7 @@ pub fn prepare_file_from_disk(
         uid,
         gid,
         perm,
+        xattrs,
+        device_inode,
     })
 }

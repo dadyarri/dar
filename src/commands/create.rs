@@ -31,6 +31,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
     let chunked_encryption = matches.get_flag("chunked-encryption");
+    let preserve_xattrs = matches.get_flag("preserve-xattrs");
     if chunked_encryption && encryption_passphrase.is_none() {
         return Err(eyre!(t!(
             "cli.common.errors.chunked_encryption_requires_encrypt",
@@ -52,6 +53,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         Some("--split-size")
     } else if chunked_encryption {
         Some("--chunked-encryption")
+    } else if preserve_xattrs {
+        Some("--preserve-xattrs")
     } else {
         None
     };
@@ -78,6 +81,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         compress_images,
         encryption_passphrase,
         chunked_encryption,
+        preserve_xattrs,
     };
 
     // Collect all files first so we can process them in parallel.

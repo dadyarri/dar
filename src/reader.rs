@@ -6,6 +6,7 @@ use crate::models::archive::{
     ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
     ArchiveIndexEntryV6, ArchiveIndexEntryWrapper,
 };
+use crate::xattrs::decode_xattr_blob;
 use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::io::{Read, Seek, SeekFrom};
@@ -280,7 +281,7 @@ pub fn load_v5(
 /// - Each index entry is 123 bytes (`ArchiveIndexEntryV6`) and adds `stored_checksum`,
 ///   `xattr_length`, and `volume_number`.
 /// - After the variable-length `extra` bytes, `xattr_length` additional bytes are present
-///   in the index tail (xattr blob); these are read and discarded unless Phase 6 is active.
+///   in the index tail (xattr blob) and are decoded into the wrapper's `xattrs`.
 pub fn load_v6(
     source: &mut dyn ReadSeek,
     file_path: &str,
@@ -446,21 +447,20 @@ pub fn load_v6(
             });
         }
 
-        // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
-        if v6.xattr_length > 0 {
-            let mut xattr_bytes = vec![0u8; v6.xattr_length as usize];
-            read_exact_ctx(
-                source,
-                &mut xattr_bytes,
-                "cli.common.errors.index_decode_failed",
-                locale,
-            )?;
-        }
+        let mut xattr_bytes = vec![0u8; v6.xattr_length as usize];
+        read_exact_ctx(
+            source,
+            &mut xattr_bytes,
+            "cli.common.errors.index_decode_failed",
+            locale,
+        )?;
+        let xattrs = decode_xattr_blob(&xattr_bytes)?;
 
         entries.push(ArchiveIndexEntryWrapper::new_v6(
             entry,
             path,
             extra,
+            xattrs,
             v6.stored_checksum,
             v6.xattr_length,
             v6.volume_number,
@@ -704,7 +704,6 @@ pub fn load_index(
             });
         }
 
-        // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
         let xattr_len = v6.xattr_length as usize;
         if pos + xattr_len > content.len() {
             return Err(eyre!(t!(
@@ -712,12 +711,14 @@ pub fn load_index(
                 locale = locale.as_str()
             )));
         }
+        let xattrs = decode_xattr_blob(&content[pos..pos + xattr_len])?;
         pos += xattr_len;
 
         entries.push(ArchiveIndexEntryWrapper::new_v6(
             entry,
             path,
             extra,
+            xattrs,
             v6.stored_checksum,
             v6.xattr_length,
             v6.volume_number,
@@ -1125,6 +1126,8 @@ mod tests {
                 uid: 1000,
                 gid: 1000,
                 perm: 0o644,
+                xattrs: Vec::new(),
+                device_inode: None,
             };
             builder.commit_prepared(prepared).unwrap();
         }

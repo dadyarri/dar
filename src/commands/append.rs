@@ -40,6 +40,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
     let chunked_encryption = matches.get_flag("chunked-encryption");
+    let preserve_xattrs = matches.get_flag("preserve-xattrs");
     if chunked_encryption && encryption_passphrase.is_none() {
         return Err(eyre!(t!(
             "cli.common.errors.chunked_encryption_requires_encrypt",
@@ -76,6 +77,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         compress_images,
         encryption_passphrase,
         chunked_encryption,
+        preserve_xattrs,
     };
 
     // Collect all files first so we can process them in parallel.
@@ -118,6 +120,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     if chunked_encryption && archive_format_version != FormatVersion::V6 {
         return Err(eyre!(t!(
             "cli.append.errors.append_chunked_requires_v6",
+            locale = locale.as_str()
+        )));
+    }
+    if preserve_xattrs && archive_format_version != FormatVersion::V6 {
+        return Err(eyre!(t!(
+            "cli.append.errors.append_preserve_xattrs_requires_v6",
             locale = locale.as_str()
         )));
     }
@@ -486,6 +494,11 @@ mod tests {
                 .arg(
                     Arg::new("chunked-encryption")
                         .long("chunked-encryption")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
                         .action(ArgAction::SetTrue),
                 )
                 .arg(

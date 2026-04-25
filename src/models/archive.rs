@@ -263,6 +263,7 @@ pub struct ArchiveIndexEntryWrapper {
     pub entry: ArchiveIndexEntry,
     pub path: String,
     pub extra: String,
+    pub xattrs: Vec<crate::xattrs::XattrPair>,
     // v6-only in-memory fields.  Zero-initialized for v5 entries.
     // An all-zero `stored_checksum` is the sentinel meaning "not computed / not present".
     pub stored_checksum: [u8; 32],
@@ -280,6 +281,7 @@ impl ArchiveIndexEntryWrapper {
             entry,
             path,
             extra,
+            xattrs: Vec::new(),
             stored_checksum: [0u8; 32],
             xattr_length: 0,
             volume_number: 0,
@@ -293,6 +295,7 @@ impl ArchiveIndexEntryWrapper {
         entry: ArchiveIndexEntry,
         path: String,
         extra: String,
+        xattrs: Vec<crate::xattrs::XattrPair>,
         stored_checksum: [u8; 32],
         xattr_length: u32,
         volume_number: u16,
@@ -301,6 +304,7 @@ impl ArchiveIndexEntryWrapper {
             entry,
             path,
             extra,
+            xattrs,
             stored_checksum,
             xattr_length,
             volume_number,

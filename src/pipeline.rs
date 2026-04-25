@@ -105,6 +105,7 @@ pub struct PipelineConfig {
     pub compress_images: bool,
     pub encryption_passphrase: Option<String>,
     pub chunked_encryption: bool,
+    pub preserve_xattrs: bool,
 }
 
 /// The main compression pipeline.
@@ -171,6 +172,10 @@ impl CompressionPipeline {
         self.encrypt_if_enabled(&mut file_data)?;
         self.populate_extra(file_path, &mut file_data);
         Ok(file_data)
+    }
+
+    pub fn preserve_xattrs_enabled(&self) -> bool {
+        self.config.preserve_xattrs
     }
 
     // -----------------------------------------------------------------------
@@ -412,6 +417,7 @@ mod tests {
             compress_images,
             encryption_passphrase: None,
             chunked_encryption: false,
+            preserve_xattrs: false,
         })
     }
 
@@ -602,6 +608,7 @@ mod tests {
             compress_images: false,
             encryption_passphrase: Some("secret".to_string()),
             chunked_encryption: false,
+            preserve_xattrs: false,
         });
 
         let result = pipeline
@@ -623,6 +630,7 @@ mod tests {
             compress_images: false,
             encryption_passphrase: Some("secret".to_string()),
             chunked_encryption: true,
+            preserve_xattrs: false,
         });
 
         let result = pipeline
