@@ -35,7 +35,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let archive_state =
         reader::load_with_auto_index(&mut file, Path::new(file_path), no_index, locale)?;
 
-    let tree_root = tree::build_tree(&archive_state.entries);
+    let archive_timestamp = archive_state.header.timestamp;
+    let tree_root = tree::build_tree(&archive_state.entries, archive_timestamp);
     let visible = tree::flatten_visible(&tree_root);
 
     let mut table_state = TableState::default();
@@ -45,6 +46,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let app_state = AppState {
         archive_path: PathBuf::from(file_path),
+        archive_timestamp,
         entries: archive_state.entries,
         passphrase,
         locale: locale.clone(),

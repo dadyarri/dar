@@ -25,6 +25,13 @@ use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotEntry {
+    pub path: String,
+    pub checksum: [u8; 32],
+    pub modification_timestamp: u64,
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Magic bytes at the start of a `.dari` index file.
@@ -123,6 +130,7 @@ pub struct IndexWriter {
     writer: BufWriter<File>,
     entry_count: u32,
     total_volumes: u16,
+    snapshots: Vec<SnapshotEntry>,
 }
 
 impl IndexWriter {
@@ -157,6 +165,7 @@ impl IndexWriter {
             writer,
             entry_count: 0,
             total_volumes,
+            snapshots: Vec::new(),
         })
     }
 
@@ -200,6 +209,12 @@ impl IndexWriter {
             .write_all(&xattr_bytes)
             .wrap_err(t!("cli.common.errors.index_file_entry_extra_write_failed"))?;
 
+        self.snapshots.push(SnapshotEntry {
+            path: wrapper.path.clone(),
+            checksum: e.checksum,
+            modification_timestamp: e.modification_timestamp,
+        });
+
         self.entry_count += 1;
         Ok(())
     }
@@ -227,6 +242,27 @@ impl IndexWriter {
         self.writer
             .seek(std::io::SeekFrom::End(0))
             .wrap_err(t!("cli.common.errors.index_file_seek_end_failed"))?;
+        self.writer
+            .write_all(&[1u8])
+            .wrap_err(t!("cli.common.errors.index_file_entry_write_failed"))?;
+        for snapshot in &self.snapshots {
+            let path_bytes = snapshot.path.as_bytes();
+            self.writer
+                .write_all(&(path_bytes.len() as u32).to_le_bytes())
+                .wrap_err(t!("cli.common.errors.index_file_entry_write_failed"))?;
+            self.writer
+                .write_all(path_bytes)
+                .wrap_err(t!("cli.common.errors.index_file_entry_path_write_failed"))?;
+            self.writer
+                .write_all(&snapshot.checksum)
+                .wrap_err(t!("cli.common.errors.index_file_entry_write_failed"))?;
+            self.writer
+                .write_all(&snapshot.modification_timestamp.to_le_bytes())
+                .wrap_err(t!("cli.common.errors.index_file_entry_write_failed"))?;
+        }
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.index_file_flush_before_patch_failed"))?;
 
         let checksum = *blake3::hash(
             &std::fs::read(&self.path)
@@ -366,7 +402,9 @@ mod tests {
         let state = load_index(&mut f, idx_path.to_str().unwrap(), &locale).unwrap();
 
         assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.snapshots.len(), 1);
         assert_eq!(state.entries[0].path, "test.txt");
+        assert_eq!(state.snapshots[0].path, "test.txt");
         assert_eq!(
             state.entries[0].xattrs,
             vec![("user.dari.test".to_string(), b"value".to_vec())]

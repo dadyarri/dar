@@ -74,6 +74,8 @@ pub struct PreviewState {
 pub struct AppState {
     /// Path to the `.dar` file being inspected (used for the title bar).
     pub archive_path: PathBuf,
+    /// Archive header timestamp used as the baseline for incremental markers.
+    pub archive_timestamp: u64,
     /// All parsed index entries from the archive (source of truth for metadata).
     pub entries: Vec<ArchiveIndexEntryWrapper>,
     /// Passphrase supplied on the CLI, forwarded to the extractor when needed.

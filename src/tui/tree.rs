@@ -8,6 +8,7 @@ pub struct TreeNode {
     pub is_dir: bool,
     pub expanded: bool,
     pub entry_idx: Option<usize>,
+    pub incremental: bool,
     pub children: Vec<TreeNode>,
 }
 
@@ -22,6 +23,7 @@ pub struct FlatNode {
     pub full_path: String,
     /// Index into the original `entries` slice; `None` for implicit directory nodes.
     pub entry_idx: Option<usize>,
+    pub incremental: bool,
     /// Character positions inside `display_name` that caused this node to match
     /// the fuzzy search query.  Empty when not in search mode.
     pub match_indices: Vec<u32>,
@@ -35,6 +37,7 @@ impl TreeNode {
             is_dir: true,
             expanded: true,
             entry_idx: None,
+            incremental: false,
             children: Vec::new(),
         }
     }
@@ -46,17 +49,19 @@ impl TreeNode {
             is_dir: true,
             expanded: false,
             entry_idx: None,
+            incremental: false,
             children: Vec::new(),
         }
     }
 
-    fn new_file(name: String, full_path: String, entry_idx: usize) -> Self {
+    fn new_file(name: String, full_path: String, entry_idx: usize, incremental: bool) -> Self {
         Self {
             name,
             full_path,
             is_dir: false,
             expanded: false,
             entry_idx: Some(entry_idx),
+            incremental,
             children: Vec::new(),
         }
     }
@@ -68,13 +73,19 @@ impl TreeNode {
 /// represent the top-level entries of the archive.  All directory nodes start
 /// in the expanded state.  Children at every level are sorted: directories
 /// first, then files, both alphabetically.
-pub fn build_tree(entries: &[ArchiveIndexEntryWrapper]) -> TreeNode {
+pub fn build_tree(entries: &[ArchiveIndexEntryWrapper], archive_timestamp: u64) -> TreeNode {
     let mut root = TreeNode::new_root();
 
     for (idx, wrapper) in entries.iter().enumerate() {
         let parts: Vec<&str> = wrapper.path.split('/').filter(|p| !p.is_empty()).collect();
         if !parts.is_empty() {
-            insert_node(&mut root, &parts, idx, &wrapper.path);
+            insert_node(
+                &mut root,
+                &parts,
+                idx,
+                &wrapper.path,
+                wrapper.entry.modification_timestamp > archive_timestamp,
+            );
         }
     }
 
@@ -82,13 +93,20 @@ pub fn build_tree(entries: &[ArchiveIndexEntryWrapper]) -> TreeNode {
     root
 }
 
-fn insert_node(parent: &mut TreeNode, parts: &[&str], entry_idx: usize, full_path: &str) {
+fn insert_node(
+    parent: &mut TreeNode,
+    parts: &[&str],
+    entry_idx: usize,
+    full_path: &str,
+    incremental: bool,
+) {
     if parts.len() == 1 {
         // Leaf: this is the actual file entry.
         parent.children.push(TreeNode::new_file(
             parts[0].to_string(),
             full_path.to_string(),
             entry_idx,
+            incremental,
         ));
         return;
     }
@@ -106,10 +124,10 @@ fn insert_node(parent: &mut TreeNode, parts: &[&str], entry_idx: usize, full_pat
         .iter_mut()
         .find(|c| c.is_dir && c.name == dir_name)
     {
-        insert_node(child, &parts[1..], entry_idx, full_path);
+        insert_node(child, &parts[1..], entry_idx, full_path, incremental);
     } else {
         let mut new_dir = TreeNode::new_dir(dir_name.to_string(), dir_full);
-        insert_node(&mut new_dir, &parts[1..], entry_idx, full_path);
+        insert_node(&mut new_dir, &parts[1..], entry_idx, full_path, incremental);
         parent.children.push(new_dir);
     }
 }
@@ -143,6 +161,7 @@ fn flatten_node(node: &TreeNode, depth: usize, out: &mut Vec<FlatNode>) {
         display_name: node.name.clone(),
         full_path: node.full_path.clone(),
         entry_idx: node.entry_idx,
+        incremental: node.incremental,
         match_indices: Vec::new(),
     });
     if node.is_dir && node.expanded {
@@ -193,7 +212,7 @@ mod tests {
     #[test]
     fn flat_files_at_root() {
         let entries = vec![make_entry("b.txt"), make_entry("a.txt")];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         // sorted alphabetically
         assert_eq!(root.children.len(), 2);
         assert_eq!(root.children[0].name, "a.txt");
@@ -210,7 +229,7 @@ mod tests {
             make_entry("src/lib.rs"),
             make_entry("README.md"),
         ];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         // dirs before files → src/ then README.md
         assert_eq!(root.children.len(), 2);
         let src = &root.children[0];
@@ -226,7 +245,7 @@ mod tests {
     fn flatten_collapsed_by_default() {
         // Dirs start collapsed, so only top-level nodes are visible.
         let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let visible = flatten_visible(&root);
         // src/ (collapsed, depth 0) + README.md (depth 0) — main.rs is hidden
         assert_eq!(visible.len(), 2);
@@ -242,7 +261,7 @@ mod tests {
     fn expand_dir_shows_children() {
         // After explicitly expanding src/, its child becomes visible.
         let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
-        let mut root = build_tree(&entries);
+        let mut root = build_tree(&entries, 0);
         toggle_expanded(&mut root, "src");
         let visible = flatten_visible(&root);
         // src/ (expanded, depth 0) + main.rs (depth 1) + README.md (depth 0)
@@ -261,7 +280,7 @@ mod tests {
     fn collapsed_dir_hides_children() {
         // Dirs are collapsed by default, so children are never visible without a toggle.
         let entries = vec![make_entry("src/main.rs"), make_entry("README.md")];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let visible = flatten_visible(&root);
         // src/ (collapsed) + README.md
         assert_eq!(visible.len(), 2);
@@ -273,7 +292,7 @@ mod tests {
     fn double_toggle_restores_collapsed() {
         // Start collapsed → expand → collapse again.
         let entries = vec![make_entry("src/main.rs")];
-        let mut root = build_tree(&entries);
+        let mut root = build_tree(&entries, 0);
         toggle_expanded(&mut root, "src"); // now expanded
         toggle_expanded(&mut root, "src"); // back to collapsed
         let visible = flatten_visible(&root);
@@ -285,7 +304,7 @@ mod tests {
     fn nested_collapse() {
         // Nested dirs all start collapsed; only the outermost dir is visible.
         let entries = vec![make_entry("a/b/c.txt")];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let visible = flatten_visible(&root);
         // Only a/ is visible (collapsed); a/b/ and a/b/c.txt are hidden.
         assert_eq!(visible.len(), 1);
@@ -297,7 +316,7 @@ mod tests {
     fn nested_expand_all_shows_file() {
         // After expanding every level, the file entry should be reachable.
         let entries = vec![make_entry("a/b/c.txt")];
-        let mut root = build_tree(&entries);
+        let mut root = build_tree(&entries, 0);
         toggle_expanded(&mut root, "a");
         toggle_expanded(&mut root, "a/b");
         let visible = flatten_visible(&root);

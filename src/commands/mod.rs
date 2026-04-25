@@ -4,6 +4,7 @@ pub mod create;
 pub mod encrypt;
 pub mod extract;
 pub mod inspect;
+pub mod incremental;
 pub mod list;
 pub mod reindex;
 pub mod shared;

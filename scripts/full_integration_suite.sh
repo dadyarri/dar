@@ -161,6 +161,7 @@ prepare_fixtures() {
         "$TEST_ROOT/fixtures/plain_small" \
         "$TEST_ROOT/fixtures/plain_in_place" \
         "$TEST_ROOT/fixtures/chunked_input" \
+        "$TEST_ROOT/fixtures/incremental_input" \
         "$TEST_ROOT/fixtures/preserve_input" \
         "$TEST_ROOT/fixtures/v6_input/nested" \
         "$TEST_ROOT/fixtures/split_input/assets"
@@ -211,6 +212,12 @@ EOF
     head -c 1572864 /dev/urandom >"$TEST_ROOT/fixtures/chunked_input/chunked.bin"
     cat >"$TEST_ROOT/fixtures/chunked_input/chunked.txt" <<'EOF'
 chunked encryption integration payload
+EOF
+    cat >"$TEST_ROOT/fixtures/incremental_input/keep.txt" <<'EOF'
+original keep payload
+EOF
+    cat >"$TEST_ROOT/fixtures/incremental_input/change.txt" <<'EOF'
+original change payload
 EOF
     cat >"$TEST_ROOT/fixtures/preserve_input/base.txt" <<'EOF'
 xattr and hardlink payload
@@ -396,6 +403,39 @@ EOF
     run_cmd verify_chunked_full \
         "$BIN" verify -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret --full
     inspect_and_quit "$TEST_ROOT/chunked/live.dar" "--encrypt-passphrase secret"
+
+    next_step "Testing incremental append workflow"
+    mkdir -p "$TEST_ROOT/incremental"
+    run_cmd create_incremental_base \
+        "$BIN" create -f "$TEST_ROOT/incremental/live.dar" --format-version 6 \
+        "$TEST_ROOT/fixtures/incremental_input"
+    local since_ts
+    since_ts="$(date +%s)"
+    sleep 1
+    cat >"$TEST_ROOT/fixtures/incremental_input/change.txt" <<'EOF'
+changed payload after base archive
+EOF
+    cat >"$TEST_ROOT/fixtures/incremental_input/newer.txt" <<'EOF'
+brand new incremental file
+EOF
+    run_cmd incremental_dry_run \
+        "$BIN" incremental -f "$TEST_ROOT/incremental/live.dar" --dry-run \
+        "$TEST_ROOT/fixtures/incremental_input"
+    assert_contains "$LOG_DIR/${STEP}_incremental_dry_run.log" "change.txt"
+    assert_contains "$LOG_DIR/${STEP}_incremental_dry_run.log" "newer.txt"
+    assert_not_contains "$LOG_DIR/${STEP}_incremental_dry_run.log" "keep.txt"
+    expect_fail incremental_append_conflict_default \
+        "$BIN" incremental -f "$TEST_ROOT/incremental/live.dar" --since "@$since_ts" \
+        "$TEST_ROOT/fixtures/incremental_input"
+    run_cmd incremental_append \
+        "$BIN" incremental -f "$TEST_ROOT/incremental/live.dar" --since "@$since_ts" \
+        --on-conflict overwrite \
+        "$TEST_ROOT/fixtures/incremental_input"
+    run_cmd extract_incremental_archive \
+        "$BIN" extract -f "$TEST_ROOT/incremental/live.dar" -d "$TEST_ROOT/incremental/out"
+    assert_contains "$TEST_ROOT/incremental/out/change.txt" "changed payload after base archive"
+    assert_contains "$TEST_ROOT/incremental/out/keep.txt" "original keep payload"
+    assert_contains "$TEST_ROOT/incremental/out/newer.txt" "brand new incremental file"
 
     next_step "Testing xattr preservation and hardlink reconstruction"
     mkdir -p "$TEST_ROOT/preserve"

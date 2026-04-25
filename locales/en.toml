@@ -177,6 +177,32 @@ encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
 inspect_failed = "Failed to inspect archive"
 open_failed = "Failed to open archive %{file}"
 
+[cli.incremental]
+about = "Append only files changed since a timestamp or the base archive creation time"
+
+[cli.incremental.args]
+file = "The path to the existing archive file"
+since = "Only include files newer than this RFC 3339 timestamp or @unix-seconds value"
+compress_images = "Losslessly optimize PNG using OxiPNG"
+encrypt = "Prompt for passphrase interactively to encrypt appended file data"
+encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+chunked_encryption = "Encrypt appended data using 1 MiB authenticated segments (requires encryption; v6 only)"
+preserve_xattrs = "Preserve Unix extended attributes and hard-link metadata for appended entries (v6 only)"
+dry_run = "Preview which files would be added without modifying the archive"
+on_conflict = "How to handle archive-relative path conflicts with existing entries: error (default), rename, overwrite"
+
+[cli.incremental.messages]
+incrementing_archive = "Appending incremental changes into archive %{file}"
+dry_run_header = "Dry run — files that would be appended incrementally to %{file}:"
+dry_run_footer = "(dry run — no file modified)"
+no_changes = "No files newer than the incremental cutoff were found for %{file}"
+
+[cli.incremental.errors]
+incremental_failed = "Failed to perform incremental append"
+archive_missing = "Archive file %{file} does not exist"
+open_failed = "Failed to open archive %{file} for incremental append"
+since_invalid = "Invalid --since value '%{value}'; expected RFC 3339 or @unix-seconds"
+
 [cli.extract]
 about = "Extracts files from an archive"
 

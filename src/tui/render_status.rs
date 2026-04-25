@@ -244,9 +244,14 @@ pub(crate) fn draw_status_bar(
         }
 
         let integrity_marker = preview_integrity_marker(state);
+        let incremental_marker = selected_incremental_marker(state);
         let right_text = format!(
-            " {}{} ",
+            " {}{}{} ",
             total_text,
+            incremental_marker
+                .as_ref()
+                .map(|(marker, _)| format!("{marker} "))
+                .unwrap_or_default(),
             integrity_marker
                 .as_ref()
                 .map(|(marker, _)| format!(" {marker}"))
@@ -263,6 +268,7 @@ pub(crate) fn draw_status_bar(
         frame.render_widget(
             Paragraph::new(Line::from(build_right_status_spans(
                 &total_text,
+                incremental_marker.as_ref(),
                 integrity_marker.as_ref(),
                 count_style,
             )))
@@ -293,12 +299,35 @@ fn preview_integrity_marker(state: &AppState) -> Option<(String, Style)> {
     }
 }
 
+fn selected_incremental_marker(state: &AppState) -> Option<(String, Style)> {
+    let selected = state
+        .table_state
+        .selected()
+        .and_then(|idx| state.visible.get(idx))?;
+    if selected.incremental {
+        Some((
+            String::from("Δ"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        None
+    }
+}
+
 fn build_right_status_spans<'a>(
     total_text: &'a str,
+    incremental_marker: Option<&(String, Style)>,
     integrity_marker: Option<&(String, Style)>,
     count_style: Style,
 ) -> Vec<Span<'a>> {
-    let mut spans = vec![Span::styled(format!(" {total_text}"), count_style)];
+    let mut spans = vec![Span::raw(" ")];
+    if let Some((marker, style)) = incremental_marker {
+        spans.push(Span::styled(marker.clone(), *style));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(total_text.to_string(), count_style));
     if let Some((marker, style)) = integrity_marker {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(marker.clone(), *style));
@@ -414,7 +443,7 @@ mod tests {
 
     #[test]
     fn build_right_status_spans_without_marker_is_plain_count() {
-        let spans = build_right_status_spans("3 files", None, Style::default());
+        let spans = build_right_status_spans("3 files", None, None, Style::default());
         let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(rendered, " 3 files ");
     }
@@ -423,6 +452,7 @@ mod tests {
     fn build_right_status_spans_with_marker_appends_suffix() {
         let spans = build_right_status_spans(
             "3 files",
+            None,
             Some(&(String::from("✓"), Style::default())),
             Style::default(),
         );
@@ -460,11 +490,12 @@ mod tests {
     fn make_state_with_integrity(integrity: PreviewIntegrity, powerline: bool) -> AppState {
         AppState {
             archive_path: std::path::PathBuf::from("archive.dar"),
+            archive_timestamp: 0,
             entries: vec![],
             passphrase: None,
             locale: crate::i18n::Locale::new("en"),
             powerline,
-            tree_root: crate::tui::tree::build_tree(&[]),
+            tree_root: crate::tui::tree::build_tree(&[], 0),
             visible: vec![],
             table_state: TableState::default(),
             search: SearchState {

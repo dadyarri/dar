@@ -689,7 +689,7 @@ testing is essential.
 
 ---
 
-### Phase 7 — Incremental backup
+### Phase 7 — Incremental backup ✅
 
 **Motivation:** Re-archiving a large directory tree after minor changes wastes
 time. An incremental mode appends only files whose content has changed since

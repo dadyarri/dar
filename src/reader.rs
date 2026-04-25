@@ -2,6 +2,7 @@ use crate::constants::flags;
 use crate::constants::format;
 use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
+use crate::index_writer::SnapshotEntry;
 use crate::models::archive::{
     ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
     ArchiveIndexEntryV6, ArchiveIndexEntryWrapper,
@@ -59,6 +60,7 @@ fn seek_ctx(
 /// Parsed state of an existing `.dar` archive.
 pub struct ArchiveState {
     pub entries: Vec<ArchiveIndexEntryWrapper>,
+    pub snapshots: Vec<SnapshotEntry>,
     pub header: ArchiveHeader,
     pub total_volumes: u16,
     pub encryption_mode: Option<bool>,
@@ -262,8 +264,10 @@ pub fn load_v5(
         entries.push(ArchiveIndexEntryWrapper::new(entry, path, extra));
     }
 
+    let snapshots = snapshot_entries_from_wrappers(&entries);
     Ok(ArchiveState {
         entries,
+        snapshots,
         header,
         total_volumes: 1,
         encryption_mode,
@@ -467,8 +471,10 @@ pub fn load_v6(
         ));
     }
 
+    let snapshots = snapshot_entries_from_wrappers(&entries);
     Ok(ArchiveState {
         entries,
+        snapshots,
         header,
         total_volumes: v6_header.total_volumes,
         encryption_mode,
@@ -725,7 +731,14 @@ pub fn load_index(
         ));
     }
 
+    let snapshots = parse_snapshot_section(&content[pos..])?;
+
     Ok(ArchiveState {
+        snapshots: if snapshots.is_empty() {
+            snapshot_entries_from_wrappers(&entries)
+        } else {
+            snapshots
+        },
         entries,
         header,
         total_volumes: idx_header.total_volumes,
@@ -733,6 +746,56 @@ pub fn load_index(
         index_offset: 0, // unused for external index
         encryption_probe,
     })
+}
+
+fn snapshot_entries_from_wrappers(entries: &[ArchiveIndexEntryWrapper]) -> Vec<SnapshotEntry> {
+    entries
+        .iter()
+        .map(|entry| SnapshotEntry {
+            path: entry.path.clone(),
+            checksum: entry.entry.checksum,
+            modification_timestamp: entry.entry.modification_timestamp,
+        })
+        .collect()
+}
+
+fn parse_snapshot_section(bytes: &[u8]) -> Result<Vec<SnapshotEntry>> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+    if bytes[0] == 0 {
+        return Ok(Vec::new());
+    }
+    if bytes[0] != 1 {
+        return Err(eyre!("invalid snapshot section marker"));
+    }
+
+    let mut pos = 1usize;
+    let mut snapshots = Vec::new();
+    while pos < bytes.len() {
+        if pos + 4 > bytes.len() {
+            return Err(eyre!("snapshot section truncated at path length"));
+        }
+        let path_len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+        pos += 4;
+        if pos + path_len + 32 + 8 > bytes.len() {
+            return Err(eyre!("snapshot section truncated at entry body"));
+        }
+        let path = String::from_utf8(bytes[pos..pos + path_len].to_vec())
+            .map_err(|_| eyre!("snapshot path is not valid UTF-8"))?;
+        pos += path_len;
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(&bytes[pos..pos + 32]);
+        pos += 32;
+        let modification_timestamp = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+        pos += 8;
+        snapshots.push(SnapshotEntry {
+            path,
+            checksum,
+            modification_timestamp,
+        });
+    }
+    Ok(snapshots)
 }
 
 /// Open an archive and load its index, preferring the external `.dari` index file

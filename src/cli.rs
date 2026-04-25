@@ -243,6 +243,80 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("incremental")
+                .about(translate("cli.incremental.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.incremental.args.file")),
+                    Arg::new("since")
+                        .long("since")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help(translate("cli.incremental.args.since")),
+                    Arg::new("compress-images")
+                        .long("compress-images")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.incremental.args.compress_images")),
+                    Arg::new("encrypt")
+                        .long("encrypt")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("encrypt-passphrase")
+                        .help(translate("cli.incremental.args.encrypt")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .conflicts_with("encrypt")
+                        .help(translate("cli.incremental.args.encrypt_passphrase")),
+                    Arg::new("chunked-encryption")
+                        .long("chunked-encryption")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.incremental.args.chunked_encryption")),
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.incremental.args.preserve_xattrs")),
+                    Arg::new("verbose")
+                        .short('v')
+                        .long("verbose")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.verbose")),
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.incremental.args.dry_run")),
+                    Arg::new("format-version")
+                        .long("format-version")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .default_value("5")
+                        .value_parser(["5", "6"])
+                        .help(translate("cli.common.flags.format_version")),
+                    Arg::new("on-conflict")
+                        .long("on-conflict")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .default_value("error")
+                        .value_parser(["error", "rename", "overwrite"])
+                        .help(translate("cli.incremental.args.on_conflict")),
+                    Arg::new("content")
+                        .num_args(0..)
+                        .required(false)
+                        .action(ArgAction::Append)
+                        .help(translate("cli.common.args.content")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
             Command::new("extract")
                 .short_flag('x')
                 .about(translate("cli.extract.about"))
@@ -560,6 +634,30 @@ mod tests {
 
         let append = matches.subcommand_matches("append").unwrap();
         assert!(append.get_flag("preserve-xattrs"));
+    }
+
+    #[test]
+    fn test_incremental_since_flag_is_accepted() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "incremental",
+                    "-f",
+                    "out.dar",
+                    "--since",
+                    "@42",
+                    "src",
+                ])
+                .unwrap();
+
+        let incremental = matches.subcommand_matches("incremental").unwrap();
+        assert_eq!(
+            incremental
+                .get_one::<String>("since")
+                .map(String::as_str),
+            Some("@42")
+        );
     }
 
     #[test]

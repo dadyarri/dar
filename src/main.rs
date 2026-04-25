@@ -37,6 +37,15 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("incremental", sub_matches)) => {
+            commands::incremental::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.incremental.errors.incremental_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
+            )?;
+        }
         Some(("extract", sub_matches)) => {
             commands::extract::call(sub_matches, &locale).wrap_err(
                 rust_i18n::t!(
