@@ -8,7 +8,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let shell = matches
         .get_one::<Shell>("shell")
         .copied()
-        .ok_or_else(|| eyre::eyre!("missing required argument: shell"))?;
+        .ok_or_else(|| {
+            eyre::eyre!(rust_i18n::t!(
+                "cli.common.errors.shell_required",
+                locale = locale.as_str()
+            ))
+        })?;
     let mut app =
         build_cli_with_translator(|key| rust_i18n::t!(key, locale = locale.as_str()).to_string());
     generate(shell, &mut app, "dari", &mut std::io::stdout());

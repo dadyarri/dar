@@ -79,6 +79,12 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("verify", sub_matches)) => {
+            commands::verify::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.verify.errors.verify_failed", locale = locale.as_str())
+                    .to_string(),
+            )?;
+        }
         _ => unreachable!(),
     }
 

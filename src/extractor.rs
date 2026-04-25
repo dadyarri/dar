@@ -8,9 +8,9 @@ use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use eyre::{Result, eyre};
 use rust_i18n::t;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Extract a single entry from an archive on disk.
 ///
@@ -27,13 +27,7 @@ pub fn extract_entry(
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
-    let mut file = File::open(archive_path).map_err(|_| {
-        eyre!(t!(
-            "cli.extractor.errors.open_failed",
-            file = archive_path.display()
-        ))
-    })?;
-    extract_one(&mut file, entry, all_entries, dest_dir, passphrase)
+    extract_one(archive_path, entry, all_entries, dest_dir, passphrase)
 }
 
 /// Extract multiple entries from an archive on disk.
@@ -54,14 +48,8 @@ pub fn extract_entries(
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
-    let mut file = File::open(archive_path).map_err(|_| {
-        eyre!(t!(
-            "cli.extractor.errors.open_failed",
-            file = archive_path.display()
-        ))
-    })?;
     for entry in entries_to_extract {
-        extract_one(&mut file, entry, all_entries, dest_dir, passphrase)?;
+        extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
     }
     Ok(())
 }
@@ -71,7 +59,7 @@ pub fn extract_entries(
 // ---------------------------------------------------------------------------
 
 fn extract_one(
-    file: &mut File,
+    archive_path: &Path,
     entry: &ArchiveIndexEntryWrapper,
     all_entries: &[ArchiveIndexEntryWrapper],
     dest_dir: &Path,
@@ -84,16 +72,24 @@ fn extract_one(
     let compressed_size = entry.entry.compressed_size;
 
     // Resolve the real data offset: linked entries share the primary's offset.
-    let data_offset = if bitflags & flags::LINKED_DATA != 0 {
-        resolve_primary_offset(&checksum, all_entries).ok_or_else(|| {
+    let (data_volume, data_offset) = if bitflags & flags::LINKED_DATA != 0 {
+        resolve_primary_location(&checksum, all_entries).ok_or_else(|| {
             eyre!(t!(
                 "cli.extractor.errors.no_primary_for_linked",
                 path = entry.path.as_str()
             ))
         })?
     } else {
-        entry.entry.offset
+        (entry.volume_number, entry.entry.offset)
     };
+
+    let volume_path = resolve_volume_path(archive_path, data_volume);
+    let mut file = std::fs::File::open(&volume_path).map_err(|_| {
+        eyre!(t!(
+            "cli.extractor.errors.open_failed",
+            file = volume_path.display()
+        ))
+    })?;
 
     // Seek to the data block and read all compressed bytes.
     file.seek(SeekFrom::Start(data_offset))
@@ -157,10 +153,35 @@ pub fn resolve_primary_offset(
     checksum: &[u8; 32],
     all_entries: &[ArchiveIndexEntryWrapper],
 ) -> Option<u64> {
+    resolve_primary_location(checksum, all_entries).map(|(_, offset)| offset)
+}
+
+pub fn resolve_primary_location(
+    checksum: &[u8; 32],
+    all_entries: &[ArchiveIndexEntryWrapper],
+) -> Option<(u16, u64)> {
     all_entries
         .iter()
         .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & flags::LINKED_DATA) == 0)
-        .map(|e| e.entry.offset)
+        .map(|e| (e.volume_number, e.entry.offset))
+}
+
+pub fn resolve_volume_path(base: &Path, volume: u16) -> PathBuf {
+    let has_numeric_suffix = base
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.len() == 3 && ext.chars().all(|c| c.is_ascii_digit()));
+
+    if volume == 0 && !has_numeric_suffix {
+        return base.to_path_buf();
+    }
+
+    let root = if has_numeric_suffix {
+        base.with_extension("")
+    } else {
+        base.to_path_buf()
+    };
+    PathBuf::from(format!("{}.{:03}", root.display(), u32::from(volume) + 1))
 }
 
 /// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
@@ -185,8 +206,8 @@ pub fn read_raw_entry_bytes(
 ) -> Option<Vec<u8>> {
     let debug = std::env::var("DARI_DEBUG").is_ok();
 
-    let offset = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
-        let primary = resolve_primary_offset(&entry.entry.checksum, all_entries);
+    let (volume, offset) = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
+        let primary = resolve_primary_location(&entry.entry.checksum, all_entries);
         if primary.is_none() && debug {
             eprintln!(
                 "[dari debug] read_raw_entry_bytes: no primary entry found for linked entry '{}'",
@@ -195,16 +216,17 @@ pub fn read_raw_entry_bytes(
         }
         primary?
     } else {
-        entry.entry.offset
+        (entry.volume_number, entry.entry.offset)
     };
 
-    let mut file = match File::open(archive_path) {
+    let volume_path = resolve_volume_path(archive_path, volume);
+    let mut file = match std::fs::File::open(&volume_path) {
         Ok(f) => f,
         Err(e) => {
             if debug {
                 eprintln!(
                     "[dari debug] read_raw_entry_bytes: failed to open '{}': {e}",
-                    archive_path.display()
+                    volume_path.display()
                 );
             }
             return None;
@@ -456,6 +478,18 @@ mod tests {
     #[test]
     fn test_resolve_primary_offset_returns_none_when_empty() {
         assert!(resolve_primary_offset(&[0u8; 32], &[]).is_none());
+    }
+
+    #[test]
+    fn test_resolve_volume_path_single_file_returns_base() {
+        let path = resolve_volume_path(Path::new("/tmp/archive.dar"), 0);
+        assert_eq!(path, Path::new("/tmp/archive.dar"));
+    }
+
+    #[test]
+    fn test_resolve_volume_path_split_volume_advances_suffix() {
+        let path = resolve_volume_path(Path::new("/tmp/archive.dar.001"), 1);
+        assert_eq!(path, Path::new("/tmp/archive.dar.002"));
     }
 
     // --- decrypt_data unit tests ---

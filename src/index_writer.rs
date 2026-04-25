@@ -17,11 +17,11 @@
 //! integrity.
 
 use crate::models::archive::{ArchiveIndexEntryV6, ArchiveIndexEntryWrapper};
-use blake3::Hasher;
 use bytemuck::{Pod, Zeroable, bytes_of};
 use eyre::{Context, Result};
+use rust_i18n::t;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -120,9 +120,8 @@ pub fn index_path_for_archive(archive_path: &Path) -> PathBuf {
 pub struct IndexWriter {
     path: PathBuf,
     writer: BufWriter<File>,
-    /// Running BLAKE3 hasher covering every byte written so far (header + entries).
-    hasher: Hasher,
     entry_count: u32,
+    total_volumes: u16,
 }
 
 impl IndexWriter {
@@ -133,10 +132,14 @@ impl IndexWriter {
     /// readers can detect a stale index.
     pub fn new(path: &Path, archive_timestamp: u64, total_volumes: u16) -> Result<Self> {
         let file = File::create(path)
-            .wrap_err_with(|| format!("Failed to create index file {}", path.display()))?;
+            .wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.index_file_create_failed",
+                    file = path.display().to_string()
+                )
+                .to_string()
+            })?;
         let mut writer = BufWriter::new(file);
-        let mut hasher = Hasher::new();
-
         let header = IndexFileHeader {
             signature: *INDEX_SIGNATURE,
             version: INDEX_VERSION,
@@ -146,14 +149,13 @@ impl IndexWriter {
         let header_bytes = bytes_of(&header);
         writer
             .write_all(header_bytes)
-            .wrap_err("Failed to write index file header")?;
-        hasher.update(header_bytes);
+            .wrap_err(t!("cli.common.errors.index_file_header_write_failed"))?;
 
         Ok(Self {
             path: path.to_path_buf(),
             writer,
-            hasher,
             entry_count: 0,
+            total_volumes,
         })
     }
 
@@ -181,20 +183,17 @@ impl IndexWriter {
         let entry_bytes = bytes_of(&v6_entry);
         self.writer
             .write_all(entry_bytes)
-            .wrap_err("Failed to write index entry")?;
-        self.hasher.update(entry_bytes);
+            .wrap_err(t!("cli.common.errors.index_file_entry_write_failed"))?;
 
         let path_bytes = wrapper.path.as_bytes();
         self.writer
             .write_all(path_bytes)
-            .wrap_err("Failed to write index entry path")?;
-        self.hasher.update(path_bytes);
+            .wrap_err(t!("cli.common.errors.index_file_entry_path_write_failed"))?;
 
         let extra_bytes = wrapper.extra.as_bytes();
         self.writer
             .write_all(extra_bytes)
-            .wrap_err("Failed to write index entry extra")?;
-        self.hasher.update(extra_bytes);
+            .wrap_err(t!("cli.common.errors.index_file_entry_extra_write_failed"))?;
 
         // xattr_length == 0 for all current entries; Phase 6 will write xattr bytes here.
 
@@ -202,9 +201,35 @@ impl IndexWriter {
         Ok(())
     }
 
+    /// Update the `total_volumes` field in the already-written header.
+    pub fn set_total_volumes(&mut self, total_volumes: u16) -> Result<()> {
+        self.total_volumes = total_volumes;
+        Ok(())
+    }
+
     /// Finalise the index file: write [`IndexFileFooter`] (BLAKE3 of all preceding bytes) and flush.
     pub fn finish(mut self) -> Result<()> {
-        let checksum = *self.hasher.finalize().as_bytes();
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.index_file_flush_before_patch_failed"))?;
+        self.writer
+            .seek(std::io::SeekFrom::Start(15))
+            .wrap_err(t!("cli.common.errors.index_file_total_volumes_seek_failed"))?;
+        self.writer
+            .write_all(&self.total_volumes.to_le_bytes())
+            .wrap_err(t!("cli.common.errors.index_file_total_volumes_patch_failed"))?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.index_file_flush_patched_header_failed"))?;
+        self.writer
+            .seek(std::io::SeekFrom::End(0))
+            .wrap_err(t!("cli.common.errors.index_file_seek_end_failed"))?;
+
+        let checksum = *blake3::hash(
+            &std::fs::read(&self.path)
+                .wrap_err(t!("cli.common.errors.index_file_read_for_checksum_failed"))?,
+        )
+        .as_bytes();
         let footer = IndexFileFooter {
             signature: *INDEX_FOOTER_SIGNATURE,
             entry_count: self.entry_count,
@@ -212,8 +237,10 @@ impl IndexWriter {
         };
         self.writer
             .write_all(bytes_of(&footer))
-            .wrap_err("Failed to write index footer")?;
-        self.writer.flush().wrap_err("Failed to flush index file")?;
+            .wrap_err(t!("cli.common.errors.index_file_footer_write_failed"))?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.index_file_flush_failed"))?;
         Ok(())
     }
 
@@ -519,4 +546,3 @@ mod tests {
         assert_eq!(total_volumes, 3, "total_volumes must be stored correctly");
     }
 }
-

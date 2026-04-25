@@ -59,6 +59,7 @@ fn seek_ctx(
 pub struct ArchiveState {
     pub entries: Vec<ArchiveIndexEntryWrapper>,
     pub header: ArchiveHeader,
+    pub total_volumes: u16,
     pub encryption_mode: Option<bool>,
     /// Byte offset where the index section starts; used by `append` to truncate before rewriting.
     pub index_offset: u64,
@@ -259,6 +260,7 @@ pub fn load_v5(
     Ok(ArchiveState {
         entries,
         header,
+        total_volumes: 1,
         encryption_mode,
         index_offset,
         encryption_probe,
@@ -462,6 +464,7 @@ pub fn load_v6(
     Ok(ArchiveState {
         entries,
         header,
+        total_volumes: v6_header.total_volumes,
         encryption_mode,
         index_offset,
         encryption_probe,
@@ -570,10 +573,11 @@ pub fn load_index(
     // Verify self-integrity BLAKE3 checksum.
     let computed_hash = *blake3::hash(&content).as_bytes();
     if computed_hash != footer.checksum {
-        return Err(eyre!(
-            "Index file integrity check failed: BLAKE3 checksum mismatch in {}",
-            file_path
-        ));
+        return Err(eyre!(t!(
+            "cli.common.errors.index_checksum_mismatch",
+            locale = locale.as_str(),
+            file = file_path
+        )));
     }
 
     // --- Header (first 17 bytes) ---
@@ -715,6 +719,7 @@ pub fn load_index(
     Ok(ArchiveState {
         entries,
         header,
+        total_volumes: idx_header.total_volumes,
         encryption_mode,
         index_offset: 0, // unused for external index
         encryption_probe,
@@ -783,7 +788,12 @@ pub fn load_with_auto_index(
                     Some(ts) if ts == archive_ts => {
                         // Fresh index — load from it.
                         let mut idx_f = File::open(&idx_path).wrap_err_with(|| {
-                            format!("Failed to open index file {}", idx_path.display())
+                            t!(
+                                "cli.common.errors.index_open_failed",
+                                locale = locale.as_str(),
+                                file = idx_path.display().to_string()
+                            )
+                            .to_string()
                         })?;
                         return load_index(&mut idx_f, idx_path.to_str().unwrap_or(""), locale);
                     }

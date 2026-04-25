@@ -7,3 +7,4 @@ pub mod inspect;
 pub mod list;
 pub mod reindex;
 pub mod shared;
+pub mod verify;

@@ -340,7 +340,7 @@ errors.reindex_failed = "failed to rebuild index for {file}"
 
 ---
 
-### Phase 3 — Split archive + per-volume sidecar checksums
+### Phase 3 — Split archive + per-volume sidecar checksums ✅
 
 **Goal:** Allow `dari create --split-size` to produce multi-volume archives
 with a per-volume BLAKE3 sidecar file, eliminating the FAT32/optical-media

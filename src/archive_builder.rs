@@ -9,11 +9,13 @@ use crate::models::archive::{
     ArchiveIndexEntryV6, ArchiveIndexEntryWrapper, CompressionMethod,
 };
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
+use crate::sidecar::write_b3_sidecar;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
+use std::fs::File;
 use std::collections::{HashMap, HashSet};
 use std::io::{Seek, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Returned by [`ArchiveBuilder::commit_prepared`] with metadata suitable for
 /// verbose progress reporting.
@@ -44,6 +46,23 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     /// When set, [`Self::build_v6`] writes all entries to this writer and calls
     /// [`crate::index_writer::IndexWriter::finish`] before returning.
     index_writer: Option<crate::index_writer::IndexWriter>,
+    /// Absolute or relative path of the primary archive output.
+    archive_output_path: Option<PathBuf>,
+    /// Optional split threshold in bytes. When set, v6 archives are written as
+    /// numbered volumes (`.001`, `.002`, ...).
+    split_threshold: Option<u64>,
+    /// 0-based current volume number.
+    current_volume: u16,
+    /// Base archive path used to derive numbered volume file names.
+    volume_base_path: Option<PathBuf>,
+    /// Filesystem path of the volume currently held by `writer`.
+    current_volume_path: Option<PathBuf>,
+    /// All volume paths written so far, in order.
+    volume_paths: Vec<PathBuf>,
+    /// Number of entries whose primary storage lives in the current volume.
+    current_volume_entry_count: usize,
+    /// Re-opens the next numbered volume when split writing is enabled.
+    volume_opener: Option<Box<dyn Fn(&Path) -> Result<W>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,6 +73,7 @@ struct ExistingFileData {
     bitflags: u16,
     /// BLAKE3 of bytes as stored on disk; zero for entries imported from v5 archives.
     stored_checksum: [u8; 32],
+    volume_number: u16,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +115,11 @@ fn make_index_entry(
     }
 }
 
+fn volume_path_for(base_path: &Path, volume_number: u16) -> PathBuf {
+    let suffix = format!("{:03}", u32::from(volume_number) + 1);
+    PathBuf::from(format!("{}.{}", base_path.display(), suffix))
+}
+
 impl<W: Write + Seek> ArchiveBuilder<W> {
     #[must_use]
     pub fn with_config(writer: W, config: PipelineConfig) -> Self {
@@ -108,6 +133,14 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             target_version: FormatVersion::default(),
             header_timestamp: 0,
             index_writer: None,
+            archive_output_path: None,
+            split_threshold: None,
+            current_volume: 0,
+            volume_base_path: None,
+            current_volume_path: None,
+            volume_paths: Vec::new(),
+            current_volume_entry_count: 0,
+            volume_opener: None,
         }
     }
 
@@ -139,6 +172,39 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         self.index_writer = Some(iw);
     }
 
+    /// Set the output archive path. Used for single-file v6 sidecar creation.
+    pub fn set_archive_output_path(&mut self, path: impl Into<PathBuf>) {
+        let path = path.into();
+        self.archive_output_path = Some(path.clone());
+        if self.current_volume_path.is_none() {
+            self.current_volume_path = Some(path.clone());
+        }
+        if self.volume_paths.is_empty() {
+            self.volume_paths.push(path);
+        }
+    }
+
+    /// Enable split-volume output for v6 archives.
+    pub fn enable_split<F>(
+        &mut self,
+        base_path: impl Into<PathBuf>,
+        split_threshold: u64,
+        opener: F,
+    ) where
+        F: Fn(&Path) -> Result<W> + 'static,
+    {
+        let base_path = base_path.into();
+        let first_volume = volume_path_for(&base_path, 0);
+        self.split_threshold = Some(split_threshold);
+        self.volume_base_path = Some(base_path);
+        self.current_volume_path = Some(first_volume.clone());
+        self.archive_output_path = Some(first_volume.clone());
+        self.volume_paths.clear();
+        self.volume_paths.push(first_volume);
+        self.volume_opener = Some(Box::new(opener));
+        self.current_volume = 0;
+    }
+
     /// Returns the Unix timestamp written into the archive header by the most
     /// recent call to [`Self::write_header`].
     ///
@@ -166,6 +232,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                         compressed_size: wrapper.entry.compressed_size,
                         bitflags: wrapper.entry.bitflags,
                         stored_checksum: wrapper.stored_checksum,
+                        volume_number: wrapper.volume_number,
                     },
                 );
             }
@@ -185,8 +252,14 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 Ok(())
             }
             FormatVersion::V6 => {
-                let h = ArchiveHeaderV6::new()?;
-                self.header_timestamp = h.timestamp;
+                let mut h = ArchiveHeaderV6::new()?;
+                if self.header_timestamp != 0 {
+                    h.timestamp = self.header_timestamp;
+                } else {
+                    self.header_timestamp = h.timestamp;
+                }
+                h.volume_number = self.current_volume;
+                h.total_volumes = 1;
                 h.write(&mut self.writer)
                     .wrap_err(t!("cli.common.errors.header_write_failed"))?;
                 Ok(())
@@ -266,7 +339,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 pipeline_result.extra,
                 existing.stored_checksum,
                 0, // xattr_length — Phase 6
-                0, // volume_number — Phase 3
+                existing.volume_number,
             ));
             self.path_set.insert(archive_path.clone());
 
@@ -279,12 +352,6 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             });
         }
 
-        // Record byte offset where this file's data block begins
-        let data_offset = self
-            .writer
-            .stream_position()
-            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
-
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
             Some(compressed) => (compressed.as_slice(), compressed.len() as u64),
@@ -293,6 +360,14 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 pipeline_result.original_size,
             ),
         };
+
+        self.maybe_rotate_volume(compressed_size)?;
+
+        // Record byte offset where this file's data block begins.
+        let data_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
 
         self.writer
             .write_all(bytes_to_write)
@@ -322,8 +397,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             pipeline_result.extra,
             stored_checksum,
             0, // xattr_length — Phase 6
-            0, // volume_number — Phase 3
+            self.current_volume,
         ));
+        self.current_volume_entry_count += 1;
 
         self.dedup_index.insert(
             pipeline_result.checksum,
@@ -333,6 +409,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 compressed_size,
                 bitflags,
                 stored_checksum,
+                volume_number: self.current_volume,
             },
         );
 
@@ -355,6 +432,143 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn add_file(&mut self, file_path: &PathBuf, archive_path: &str) -> Result<FileAddOutcome> {
         let prepared = prepare_file_from_disk(&self.pipeline, file_path, archive_path)?;
         self.commit_prepared(prepared)
+    }
+
+    fn maybe_rotate_volume(&mut self, next_stored_size: u64) -> Result<()> {
+        if self.target_version != FormatVersion::V6 {
+            return Ok(());
+        }
+        let Some(split_threshold) = self.split_threshold else {
+            return Ok(());
+        };
+        let current_pos = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
+        if self.current_volume_entry_count == 0 || current_pos + next_stored_size <= split_threshold {
+            return Ok(());
+        }
+
+        self.seal_current_volume()?;
+        self.current_volume = self.current_volume.saturating_add(1);
+        let base_path = self
+            .volume_base_path
+            .as_ref()
+            .ok_or_else(|| eyre!(t!("cli.common.errors.split_volume_base_missing")))?
+            .clone();
+        let next_path = volume_path_for(&base_path, self.current_volume);
+        let opener = self
+            .volume_opener
+            .as_ref()
+            .ok_or_else(|| eyre!(t!("cli.common.errors.split_volume_opener_missing")))?;
+        self.writer = opener(&next_path)?;
+        self.current_volume_path = Some(next_path.clone());
+        self.volume_paths.push(next_path);
+        self.current_volume_entry_count = 0;
+        self.write_header()?;
+
+        if let Some(iw) = self.index_writer.as_mut() {
+            iw.set_total_volumes(self.current_volume + 1)?;
+        }
+
+        Ok(())
+    }
+
+    fn seal_current_volume(&mut self) -> Result<()> {
+        self.write_v6_embedded_index_and_footer()?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
+        if let Some(path) = self.current_volume_path.as_ref() {
+            write_b3_sidecar(path)?;
+        }
+        Ok(())
+    }
+
+    fn write_v6_embedded_index_and_footer(&mut self) -> Result<()> {
+        let index_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))?;
+
+        for wrapper in &self.entries {
+            let e = wrapper.entry;
+            let v6_entry = ArchiveIndexEntryV6 {
+                offset: e.offset,
+                bitflags: e.bitflags,
+                compression_method: e.compression_method,
+                modification_timestamp: e.modification_timestamp,
+                uid: e.uid,
+                gid: e.gid,
+                perm: e.perm,
+                checksum: e.checksum,
+                stored_checksum: wrapper.stored_checksum,
+                original_size: e.original_size,
+                compressed_size: e.compressed_size,
+                path_length: e.path_length,
+                extra_length: e.extra_length,
+                xattr_length: wrapper.xattr_length,
+                volume_number: wrapper.volume_number,
+            };
+            v6_entry
+                .write(&mut self.writer)
+                .wrap_err(t!("cli.common.errors.index_entry_write_failed"))?;
+            self.writer
+                .write_all(wrapper.path.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
+            self.writer
+                .write_all(wrapper.extra.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
+        }
+
+        ArchiveFooterV6::new(index_offset, self.entries.len() as u32)
+            .write(&mut self.writer)
+            .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
+        Ok(())
+    }
+
+    fn patch_total_volumes(&self, total_volumes: u16) -> Result<()> {
+        if self.target_version != FormatVersion::V6 {
+            return Ok(());
+        }
+        for path in &self.volume_paths {
+            let mut file = File::options()
+                .read(true)
+                .write(true)
+                .open(path)
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_patch_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+            file.seek(std::io::SeekFrom::Start(15))
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_seek_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+            file.write_all(&total_volumes.to_le_bytes())
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_patch_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+            file.flush()
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_flush_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+        }
+        Ok(())
     }
 
     /// Finalise the archive by writing all index entries and the footer, then flushing.
@@ -410,48 +624,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     /// [`Self::set_index_writer`], all entries are also written there and the
     /// writer is finalised.
     fn build_v6(&mut self) -> Result<()> {
-        // Record where the index section begins (u64 — no 4 GiB ceiling).
-        let index_offset = self
-            .writer
-            .stream_position()
-            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))?;
-
-        for wrapper in &self.entries {
-            // Copy packed fields to locals so we can safely read them.
-            let e = wrapper.entry;
-            let v6_entry = ArchiveIndexEntryV6 {
-                offset: e.offset,
-                bitflags: e.bitflags,
-                compression_method: e.compression_method,
-                modification_timestamp: e.modification_timestamp,
-                uid: e.uid,
-                gid: e.gid,
-                perm: e.perm,
-                checksum: e.checksum,
-                stored_checksum: wrapper.stored_checksum,
-                original_size: e.original_size,
-                compressed_size: e.compressed_size,
-                path_length: e.path_length,
-                extra_length: e.extra_length,
-                xattr_length: wrapper.xattr_length,
-                volume_number: wrapper.volume_number,
-            };
-            v6_entry
-                .write(&mut self.writer)
-                .wrap_err(t!("cli.common.errors.index_entry_write_failed"))?;
-            self.writer
-                .write_all(wrapper.path.as_bytes())
-                .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
-            self.writer
-                .write_all(wrapper.extra.as_bytes())
-                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
-            // xattr_length == 0 for all current entries (Phase 6 adds xattr support).
-        }
-
-        ArchiveFooterV6::new(index_offset, self.entries.len() as u32)
-            .write(&mut self.writer)
-            .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
-
+        self.write_v6_embedded_index_and_footer()?;
         self.writer
             .flush()
             .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
@@ -459,12 +632,18 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         // Write external index file if one was attached.
         let iw_opt = self.index_writer.take();
         if let Some(mut iw) = iw_opt {
+            iw.set_total_volumes(self.current_volume + 1)?;
             for wrapper in &self.entries {
                 iw.write_entry(wrapper)
-                    .wrap_err("Failed to write entry to external index file")?;
+                    .wrap_err(t!("cli.common.errors.external_index_entry_write_failed"))?;
             }
             iw.finish()
-                .wrap_err("Failed to finalise external index file")?;
+                .wrap_err(t!("cli.common.errors.external_index_finish_failed"))?;
+        }
+
+        self.patch_total_volumes(self.current_volume + 1)?;
+        for path in &self.volume_paths {
+            write_b3_sidecar(path)?;
         }
 
         Ok(())

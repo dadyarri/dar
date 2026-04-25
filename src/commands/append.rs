@@ -315,6 +315,7 @@ fn execute_append_write(
     )?;
 
     let mut builder = ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
+    builder.set_archive_output_path(file);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
 

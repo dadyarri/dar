@@ -23,6 +23,7 @@ pub mod i18n;
 pub mod models;
 pub mod pipeline;
 pub mod reader;
+pub mod sidecar;
 pub mod traits;
 pub mod tui;
 pub mod utils;

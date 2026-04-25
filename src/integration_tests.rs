@@ -400,6 +400,46 @@ fn make_v6_archive(dir: &tempfile::TempDir, name: &str, files: &[(&str, &[u8])])
     crate::test_utils::build_v6_archive(dir, name, files)
 }
 
+fn make_split_v6_archive(
+    dir: &tempfile::TempDir,
+    name: &str,
+    files: &[(&str, &[u8])],
+    split_threshold: u64,
+) -> PathBuf {
+    use crate::format_version::FormatVersion;
+    use crate::index_writer::{IndexWriter, index_path_for_archive};
+    use std::io::BufWriter;
+
+    let base = dir.path().join(name);
+    let first_volume = PathBuf::from(format!("{}.001", base.display()));
+    let fh = File::create(&first_volume).unwrap();
+    let mut builder = ArchiveBuilder::with_version(
+        BufWriter::new(fh),
+        PipelineConfig {
+            compress_images: false,
+            encryption_passphrase: None,
+        },
+        FormatVersion::V6,
+    );
+    builder.set_archive_output_path(first_volume.clone());
+    builder.enable_split(base.clone(), split_threshold, |path| {
+        Ok(BufWriter::new(File::create(path)?))
+    });
+    builder.write_header().unwrap();
+
+    let idx_path = index_path_for_archive(&base);
+    let iw = IndexWriter::new(&idx_path, builder.header_timestamp(), 1).unwrap();
+    builder.set_index_writer(iw);
+
+    for (archive_name, content) in files {
+        let src = dir.path().join(archive_name);
+        fs::write(&src, content).unwrap();
+        builder.add_file(&src, archive_name).unwrap();
+    }
+    builder.build().unwrap();
+    first_volume
+}
+
 /// Write a .dari sidecar for an existing archive.
 fn make_dari(archive_path: &Path) {
     crate::test_utils::write_dari_sidecar(archive_path);
@@ -630,4 +670,127 @@ fn test_v6_append_regenerates_dari_with_all_entries() {
     let paths: Vec<&str> = state.entries.iter().map(|e| e.path.as_str()).collect();
     assert!(paths.contains(&"orig.txt"));
     assert!(paths.contains(&"appended.txt"));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Split volumes + sidecars + verify
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_v6_split_archive_writes_volumes_indexes_and_sidecars() {
+    let dir = tempfile::tempdir().unwrap();
+    let first_volume = make_split_v6_archive(
+        &dir,
+        "split.dar",
+        &[
+            ("a.jpg", &[1u8; 96]),
+            ("b.jpg", &[2u8; 96]),
+            ("c.jpg", &[3u8; 96]),
+        ],
+        140,
+    );
+
+    assert!(first_volume.exists());
+    assert!(dir.path().join("split.dar.002").exists());
+    assert!(dir.path().join("split.dari").exists());
+    assert!(dir.path().join("split.dar.001.b3").exists());
+    assert!(dir.path().join("split.dar.002.b3").exists());
+}
+
+#[test]
+fn test_v6_split_archive_extracts_across_volumes() {
+    use crate::reader::load_with_auto_index;
+
+    let dir = tempfile::tempdir().unwrap();
+    let first_volume = make_split_v6_archive(
+        &dir,
+        "extract_split.dar",
+        &[("one.jpg", &[11u8; 96]), ("two.jpg", &[22u8; 96])],
+        120,
+    );
+
+    let locale = en();
+    let mut fh = File::open(&first_volume).unwrap();
+    let state = load_with_auto_index(&mut fh, &first_volume, false, &locale).unwrap();
+    assert_eq!(state.total_volumes, 2);
+
+    let dest = dir.path().join("out_split_extract");
+    let refs: Vec<_> = state.entries.iter().collect();
+    extract_entries(&first_volume, &refs, &state.entries, &dest, None).unwrap();
+
+    assert_eq!(fs::read(dest.join("one.jpg")).unwrap(), vec![11u8; 96]);
+    assert_eq!(fs::read(dest.join("two.jpg")).unwrap(), vec![22u8; 96]);
+}
+
+#[test]
+fn test_verify_command_succeeds_for_split_archive() {
+    use crate::commands::verify;
+    use clap::{Arg, ArgAction, Command};
+
+    let dir = tempfile::tempdir().unwrap();
+    let first_volume = make_split_v6_archive(
+        &dir,
+        "verify_ok.dar",
+        &[("one.jpg", &[7u8; 96]), ("two.jpg", &[8u8; 96])],
+        120,
+    );
+
+    let cmd = Command::new("dari").subcommand(
+        Command::new("verify")
+            .arg(
+                Arg::new("file")
+                    .short('f')
+                    .long("file")
+                    .action(ArgAction::Set)
+                    .required(true),
+            )
+            .arg(Arg::new("full").long("full").action(ArgAction::SetTrue))
+            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue))
+            .arg(
+                Arg::new("no-index")
+                    .long("no-index")
+                    .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("encrypt-passphrase")
+                    .long("encrypt-passphrase")
+                    .action(ArgAction::Set),
+            ),
+    );
+    let args = ["dari", "verify", "-f", first_volume.to_str().unwrap()];
+    let matches = cmd.get_matches_from(args);
+    let sub = matches.subcommand_matches("verify").unwrap();
+
+    verify::call(sub, &en()).unwrap();
+}
+
+#[test]
+fn test_verify_command_detects_tampered_split_volume() {
+    use crate::commands::verify;
+    use clap::{Arg, ArgAction, Command};
+
+    let dir = tempfile::tempdir().unwrap();
+    let first_volume = make_split_v6_archive(
+        &dir,
+        "verify_bad.dar",
+        &[("one.jpg", &[5u8; 96]), ("two.jpg", &[6u8; 96])],
+        120,
+    );
+    let second_volume = dir.path().join("verify_bad.dar.002");
+    fs::write(&second_volume, b"tampered volume").unwrap();
+
+    let cmd = Command::new("dari").subcommand(
+        Command::new("verify").arg(
+            Arg::new("file")
+                .short('f')
+                .long("file")
+                .action(ArgAction::Set)
+                .required(true),
+        ),
+    );
+    let args = ["dari", "verify", "-f", first_volume.to_str().unwrap()];
+    let matches = cmd.get_matches_from(args);
+    let sub = matches.subcommand_matches("verify").unwrap();
+
+    assert!(verify::call(sub, &en()).is_err());
 }

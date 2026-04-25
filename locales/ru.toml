@@ -53,6 +53,38 @@ invalid_compression_method = "Некорректное значение Compress
 time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
 encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
 encrypt_prompt_empty = "Парольная фраза не может быть пустой"
+sidecar_open_volume_failed = "Не удалось открыть том архива %{file}"
+sidecar_read_volume_failed = "Не удалось прочитать том архива %{file}"
+sidecar_create_failed = "Не удалось создать файл sidecar %{file}"
+sidecar_write_failed = "Не удалось записать файл sidecar %{file}"
+sidecar_open_failed = "Не удалось открыть файл sidecar %{file}"
+sidecar_read_failed = "Не удалось прочитать файл sidecar %{file}"
+index_file_create_failed = "Не удалось создать внешний файл индекса %{file}"
+index_file_header_write_failed = "Не удалось записать заголовок внешнего индекса"
+index_file_entry_write_failed = "Не удалось записать запись внешнего индекса"
+index_file_entry_path_write_failed = "Не удалось записать путь записи внешнего индекса"
+index_file_entry_extra_write_failed = "Не удалось записать метаданные записи внешнего индекса"
+index_file_flush_before_patch_failed = "Не удалось сбросить внешний индекс перед исправлением заголовка"
+index_file_total_volumes_seek_failed = "Не удалось перейти к полю общего числа томов во внешнем индексе"
+index_file_total_volumes_patch_failed = "Не удалось обновить общее число томов во внешнем индексе"
+index_file_flush_patched_header_failed = "Не удалось сбросить исправленный заголовок внешнего индекса"
+index_file_seek_end_failed = "Не удалось перейти в конец внешнего индекса"
+index_file_read_for_checksum_failed = "Не удалось прочитать внешний индекс для вычисления контрольной суммы"
+index_file_footer_write_failed = "Не удалось записать футер внешнего индекса"
+index_file_flush_failed = "Не удалось сбросить внешний индекс"
+index_checksum_mismatch = "Проверка целостности внешнего индекса %{file} не прошла: несовпадение BLAKE3"
+index_open_failed = "Не удалось открыть внешний файл индекса %{file}"
+split_volume_base_missing = "Не задан базовый путь для разделённого архива"
+split_volume_opener_missing = "Не настроен writer для разделённого архива"
+volume_header_patch_failed = "Не удалось обновить заголовок тома архива %{file}"
+volume_header_seek_failed = "Не удалось перейти к заголовку тома архива %{file}"
+volume_header_flush_failed = "Не удалось сбросить обновлённый заголовок тома архива %{file}"
+external_index_entry_write_failed = "Не удалось записать запись во внешний индекс"
+external_index_finish_failed = "Не удалось завершить запись внешнего индекса"
+split_size_empty = "Размер разбиения не должен быть пустым"
+split_size_invalid = "Некорректный размер разбиения"
+split_size_suffix_invalid = "Неподдерживаемый суффикс размера разбиения: %{suffix}"
+shell_required = "Необходимо указать shell"
 seek_failed = "Не удалось переместить указатель внутри архива %{file}"
 header_read_failed = "Не удалось прочитать заголовок архива %{file}"
 header_invalid = "Заголовок архива повреждён или версия не поддерживается"
@@ -79,6 +111,7 @@ encrypt = "Запросить парольную фразу интерактив
 encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
 passphrase_value = "ПАРОЛЬ"
 dry_run = "Предварительный просмотр добавляемых файлов без создания архива"
+split_size = "Разбить вывод v6 на нумерованные тома, когда размер тома превышает это значение (например: 2G, 512M)"
 
 [cli.create.messages]
 creating_archive = "Создание архива %{file}"
@@ -258,6 +291,28 @@ header = "Содержимое %{file}:"
 
 [cli.list.errors]
 list_failed = "Не удалось вывести содержимое архива"
+archive_missing = "Архив %{file} не существует"
+open_failed = "Не удалось открыть архив %{file}"
+
+[cli.verify]
+about = "Проверяет тома архива и целостность записей"
+
+[cli.verify.args]
+file = "Путь к архивному файлу или первому тому разделённого архива"
+encrypt_passphrase = "Парольная фраза для расшифровки записей при проверке с --full"
+full = "Проверять контрольные суммы исходного содержимого после расшифровки и распаковки"
+json = "Выводить результаты проверки в JSON"
+
+[cli.verify.messages]
+layer1_ok = "том %{v}: OK (%{bytes} байт)"
+layer1_fail = "том %{v}: НЕСОВПАДЕНИЕ BLAKE3"
+layer2_ok = "запись %{path}: сохранённые байты OK"
+layer2_fail = "запись %{path}: сохранённые байты ПОВРЕЖДЕНЫ (том %{v} смещение %{off})"
+layer3_ok = "запись %{path}: содержимое OK"
+layer3_fail = "запись %{path}: содержимое ПОВРЕЖДЕНО (контрольная сумма распакованного содержимого не совпала)"
+
+[cli.verify.errors]
+verify_failed = "Проверка архива завершилась с ошибкой"
 open_failed = "Не удалось открыть архив %{file}"
 archive_missing = "Архив %{file} не существует"
 
@@ -306,4 +361,3 @@ reindex_failed = "Не удалось пересоздать индекс для
 open_failed = "Не удалось открыть архив %{file}"
 archive_missing = "Архив %{file} не существует"
 v5_unsupported = "Архив %{file} имеет формат v5; reindex работает только с архивами v6"
-

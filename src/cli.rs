@@ -114,6 +114,11 @@ where
                         .long("dry-run")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.create.args.dry_run")),
+                    Arg::new("split-size")
+                        .long("split-size")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help(translate("cli.create.args.split_size")),
                     Arg::new("format-version")
                         .long("format-version")
                         .action(ArgAction::Set)
@@ -362,6 +367,41 @@ where
                         .num_args(1)
                         .value_name(passphrase_value)
                         .help(translate("cli.reindex.args.encrypt_passphrase")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
+            Command::new("verify")
+                .about(translate("cli.verify.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.verify.args.file")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .help(translate("cli.verify.args.encrypt_passphrase")),
+                    Arg::new("full")
+                        .long("full")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.verify.args.full")),
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.verify.args.json")),
+                    Arg::new("no-index")
+                        .long("no-index")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.no_index")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
