@@ -242,6 +242,8 @@ encrypted_hint = "Pass --encrypt-passphrase to decrypt"
 wrong_passphrase = "Incorrect passphrase — preview unavailable"
 binary = "Binary file — content preview unavailable"
 truncated = "(content truncated to 1 MiB)"
+stored_checksum_mismatch = "Stored bytes are corrupted — preview blocked"
+stored_checksum_hint = "Run 'dari verify -f <archive>' to inspect integrity"
 
 [tui.inspect.preview.tags]
 imk = "Camera Make"

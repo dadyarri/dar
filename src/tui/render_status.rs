@@ -1,5 +1,8 @@
 use crate::models::archive::CompressionMethod;
-use crate::tui::state::{AppState, PreviewMode};
+use crate::tui::{
+    preview::PreviewIntegrity,
+    state::{AppState, PreviewMode},
+};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
@@ -240,7 +243,15 @@ pub(crate) fn draw_status_bar(
             hint_spans.push(Span::styled(format!(" {desc}"), desc_style));
         }
 
-        let right_text = format!(" {} ", total_text);
+        let integrity_marker = preview_integrity_marker(state);
+        let right_text = format!(
+            " {}{} ",
+            total_text,
+            integrity_marker
+                .as_ref()
+                .map(|(marker, _)| format!(" {marker}"))
+                .unwrap_or_default()
+        );
         let right_width = right_text.chars().count() as u16;
         let status_chunks =
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)]).split(area);
@@ -250,10 +261,50 @@ pub(crate) fn draw_status_bar(
             status_chunks[0],
         );
         frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(right_text, count_style)])).style(bar_bg),
+            Paragraph::new(Line::from(build_right_status_spans(
+                &total_text,
+                integrity_marker.as_ref(),
+                count_style,
+            )))
+            .style(bar_bg),
             status_chunks[1],
         );
     }
+}
+
+fn preview_integrity_marker(state: &AppState) -> Option<(String, Style)> {
+    let (_, preview) = state.preview.cache.as_ref()?;
+    match preview.integrity {
+        PreviewIntegrity::Verified => Some((
+            if state.powerline {
+                String::from("🛡")
+            } else {
+                String::from("✓")
+            },
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )),
+        PreviewIntegrity::Mismatch => Some((
+            String::from("!"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        PreviewIntegrity::NotChecked => None,
+    }
+}
+
+fn build_right_status_spans<'a>(
+    total_text: &'a str,
+    integrity_marker: Option<&(String, Style)>,
+    count_style: Style,
+) -> Vec<Span<'a>> {
+    let mut spans = vec![Span::styled(format!(" {total_text}"), count_style)];
+    if let Some((marker, style)) = integrity_marker {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(marker.clone(), *style));
+    }
+    spans.push(Span::raw(" "));
+    spans
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +314,11 @@ pub(crate) fn draw_status_bar(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::{
+        preview::{EntryMetadata, EntryPreview, PreviewContent, PreviewIntegrity},
+        state::{ExtractDialog, Focus, MetaSearchState, PreviewState, SearchState},
+    };
+    use ratatui::widgets::TableState;
 
     fn hint_keys(hints: &[(&'static str, &'static str)]) -> Vec<&'static str> {
         hints.iter().map(|(k, _)| *k).collect()
@@ -353,6 +409,100 @@ mod tests {
                     assert!(!i18n_key.is_empty());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn build_right_status_spans_without_marker_is_plain_count() {
+        let spans = build_right_status_spans("3 files", None, Style::default());
+        let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(rendered, " 3 files ");
+    }
+
+    #[test]
+    fn build_right_status_spans_with_marker_appends_suffix() {
+        let spans = build_right_status_spans(
+            "3 files",
+            Some(&(String::from("✓"), Style::default())),
+            Style::default(),
+        );
+        let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(rendered, " 3 files ✓ ");
+    }
+
+    #[test]
+    fn preview_integrity_marker_uses_powerline_variant() {
+        let state = make_state_with_integrity(PreviewIntegrity::Verified, true);
+        let marker = preview_integrity_marker(&state).unwrap();
+        assert_eq!(marker.0, "🛡");
+    }
+
+    #[test]
+    fn preview_integrity_marker_uses_ascii_fallback_variant() {
+        let state = make_state_with_integrity(PreviewIntegrity::Verified, false);
+        let marker = preview_integrity_marker(&state).unwrap();
+        assert_eq!(marker.0, "✓");
+    }
+
+    #[test]
+    fn preview_integrity_marker_uses_warning_on_mismatch() {
+        let state = make_state_with_integrity(PreviewIntegrity::Mismatch, false);
+        let marker = preview_integrity_marker(&state).unwrap();
+        assert_eq!(marker.0, "!");
+    }
+
+    #[test]
+    fn preview_integrity_marker_absent_when_not_checked() {
+        let state = make_state_with_integrity(PreviewIntegrity::NotChecked, false);
+        assert!(preview_integrity_marker(&state).is_none());
+    }
+
+    fn make_state_with_integrity(integrity: PreviewIntegrity, powerline: bool) -> AppState {
+        AppState {
+            archive_path: std::path::PathBuf::from("archive.dar"),
+            entries: vec![],
+            passphrase: None,
+            locale: crate::i18n::Locale::new("en"),
+            powerline,
+            tree_root: crate::tui::tree::build_tree(&[]),
+            visible: vec![],
+            table_state: TableState::default(),
+            search: SearchState {
+                query: String::new(),
+                active: false,
+            },
+            meta_search: MetaSearchState {
+                query: String::new(),
+                active: false,
+                error: None,
+            },
+            extract: ExtractDialog {
+                active: false,
+                path: String::new(),
+                resolved: None,
+                error: None,
+            },
+            preview: PreviewState {
+                mode: PreviewMode::Closed,
+                focus: Focus::List,
+                scroll: 0,
+                line_count: 0,
+                viewport_height: 0,
+                cache: Some((
+                    0,
+                    EntryPreview {
+                        metadata: EntryMetadata {
+                            compression_method: String::new(),
+                            original_size: 0,
+                            compressed_size: 0,
+                            checksum_hex: "0".repeat(64),
+                            extra_tags: vec![],
+                        },
+                        content: PreviewContent::Binary,
+                        integrity,
+                    },
+                )),
+            },
         }
     }
 }

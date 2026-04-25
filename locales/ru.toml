@@ -243,6 +243,8 @@ encrypted_hint = "Укажите --encrypt-passphrase для расшифров�
 wrong_passphrase = "Неверная парольная фраза — просмотр недоступен"
 binary = "Бинарный файл — просмотр содержимого недоступен"
 truncated = "(содержимое обрезано до 1 МиБ)"
+stored_checksum_mismatch = "Сохранённые байты повреждены — просмотр заблокирован"
+stored_checksum_hint = "Запустите 'dari verify -f <архив>' для проверки целостности"
 
 [tui.inspect.preview.tags]
 imk = "Производитель камеры"
