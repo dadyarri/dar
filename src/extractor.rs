@@ -1,6 +1,9 @@
 use crate::constants::crypto;
 use crate::constants::flags;
 use crate::encryption::nonce_from_checksum;
+use crate::encryption::nonce_for_segment;
+use crate::extra::parse_extra_pairs;
+use crate::constants::extra_keys;
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::traits::decompress_bytes;
 use crate::utils::sanitize_path;
@@ -106,7 +109,7 @@ fn extract_one(
                 path = entry.path.as_str()
             ))
         })?;
-        decrypt_data(&raw, &checksum, pass).map_err(|e| {
+        decrypt_data(&raw, &checksum, bitflags, &entry.extra, pass).map_err(|e| {
             eyre!(t!(
                 "cli.extractor.errors.decrypt_failed",
                 path = entry.path.as_str(),
@@ -263,15 +266,66 @@ pub fn read_raw_entry_bytes(
 /// passphrase).  Use this when only a success/failure answer is needed; `decrypt_data`
 /// wraps this for the extractor where a proper `Result` with a user-facing message
 /// is expected.
-pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<Vec<u8>> {
+pub fn try_decrypt_bytes(
+    data: &[u8],
+    checksum: &[u8; 32],
+    bitflags: u16,
+    extra: &str,
+    passphrase: &str,
+) -> Option<Vec<u8>> {
+    let nonce = nonce_from_checksum(checksum);
+    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
+    let cipher = ChaCha20Poly1305::new((&key).into());
+
+    if bitflags & flags::CHUNKED_ENCRYPTION != 0 {
+        let segments = parse_chunked_segment_count(extra)?;
+        let total_tag_bytes = segments.checked_mul(crypto::TAG_LEN)?;
+        if data.len() < total_tag_bytes {
+            return None;
+        }
+        let total_plain_len = data.len() - total_tag_bytes;
+        let mut remaining_plain = total_plain_len;
+        let mut cursor = 0usize;
+        let mut plaintext = Vec::with_capacity(total_plain_len);
+
+        for segment_idx in 0..segments {
+            let segment_plain_len = if segment_idx + 1 == segments {
+                remaining_plain
+            } else {
+                remaining_plain.min(crypto::SEGMENT_SIZE)
+            };
+            let next = cursor.checked_add(segment_plain_len + crypto::TAG_LEN)?;
+            if next > data.len() {
+                return None;
+            }
+
+            let mut ciphertext = data[cursor..cursor + segment_plain_len].to_vec();
+            let tag_bytes = &data[cursor + segment_plain_len..next];
+            cipher
+                .decrypt_in_place_detached(
+                    Nonce::from_slice(&nonce_for_segment(&nonce, segment_idx as u64)),
+                    b"",
+                    &mut ciphertext,
+                    Tag::from_slice(tag_bytes),
+                )
+                .ok()?;
+            plaintext.extend_from_slice(&ciphertext);
+            cursor = next;
+            remaining_plain = remaining_plain.saturating_sub(segment_plain_len);
+        }
+
+        if cursor != data.len() || remaining_plain != 0 {
+            return None;
+        }
+
+        return Some(plaintext);
+    }
+
     if data.len() < crypto::TAG_LEN {
         return None;
     }
     let tag_bytes = &data[data.len() - crypto::TAG_LEN..];
     let mut ciphertext = data[..data.len() - crypto::TAG_LEN].to_vec();
-    let nonce = nonce_from_checksum(checksum);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
     cipher
         .decrypt_in_place_detached(
             Nonce::from_slice(&nonce),
@@ -288,12 +342,31 @@ pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> 
 /// The nonce is the first `crypto::NONCE_LEN` bytes of `checksum` (matching the
 /// encoding in `pipeline.rs`).  The authentication tag occupies the last
 /// `crypto::TAG_LEN` bytes of `data`; the rest is the actual ciphertext.
-fn decrypt_data(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Result<Vec<u8>> {
-    if data.len() < crypto::TAG_LEN {
+fn decrypt_data(
+    data: &[u8],
+    checksum: &[u8; 32],
+    bitflags: u16,
+    extra: &str,
+    passphrase: &str,
+) -> Result<Vec<u8>> {
+    if bitflags & flags::CHUNKED_ENCRYPTION == 0 && data.len() < crypto::TAG_LEN {
         return Err(eyre!(t!("cli.extractor.errors.data_too_short")));
     }
-    try_decrypt_bytes(data, checksum, passphrase)
+    if bitflags & flags::CHUNKED_ENCRYPTION != 0 && parse_chunked_segment_count(extra).is_none() {
+        return Err(eyre!(t!(
+            "cli.extractor.errors.chunked_segments_missing"
+        )));
+    }
+    try_decrypt_bytes(data, checksum, bitflags, extra, passphrase)
         .ok_or_else(|| eyre!(t!("cli.extractor.errors.decrypt_invalid")))
+}
+
+fn parse_chunked_segment_count(extra: &str) -> Option<usize> {
+    parse_extra_pairs(extra)
+        .into_iter()
+        .find(|(key, _)| key == extra_keys::ENC_SEGMENTS)
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .filter(|count| *count > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +422,7 @@ mod tests {
                 PipelineConfig {
                     compress_images: false,
                     encryption_passphrase: None,
+                    chunked_encryption: false,
                 },
             );
             builder.write_header().unwrap();
@@ -438,6 +512,39 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_extract_chunked_encrypted_v6_file_with_correct_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("chunked.dar");
+        let source = dir.path().join("chunked.txt");
+        let content = b"chunked payload ".repeat(100_000);
+        std::fs::write(&source, &content).unwrap();
+
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig {
+                    compress_images: false,
+                    encryption_passphrase: Some("secret".to_string()),
+                    chunked_encryption: true,
+                },
+                crate::format_version::FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&source, "chunked.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let entries = load(&archive_path);
+        let dest = dir.path().join("out_chunked");
+
+        extract_entry(&archive_path, &entries[0], &entries, &dest, Some("secret")).unwrap();
+
+        let result = std::fs::read(dest.join("chunked.txt")).unwrap();
+        assert_eq!(result, content);
+    }
+
     // --- deduplication / linked data ---
 
     #[test]
@@ -496,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_data_rejects_too_short_input() {
-        let result = decrypt_data(&[0u8; 10], &[0u8; 32], "pass");
+        let result = decrypt_data(&[0u8; 10], &[0u8; 32], 0, "", "pass");
         assert!(result.is_err());
     }
 
@@ -519,6 +626,7 @@ mod tests {
             PipelineConfig {
                 compress_images: false,
                 encryption_passphrase: None,
+                chunked_encryption: false,
             },
         );
         builder.write_header().unwrap();

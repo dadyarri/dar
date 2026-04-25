@@ -96,6 +96,7 @@ utf8_failed = "Поле %{field} в индексе архива содержит
 brotli_decompression_failed = "Ошибка распаковки Brotli: %{error}"
 zstd_decompression_failed = "Ошибка распаковки ZStandard: %{error}"
 lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
+chunked_encryption_requires_encrypt = "--chunked-encryption требует --encrypt или --encrypt-passphrase"
 
 [cli.common.messages]
 summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
@@ -109,6 +110,7 @@ overwrite = "Перезаписать существующий архив"
 compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
 encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
+chunked_encryption = "Шифровать аутентифицированными сегментами по 1 МиБ (требует шифрования; включает v6)"
 passphrase_value = "ПАРОЛЬ"
 dry_run = "Предварительный просмотр добавляемых файлов без создания архива"
 split_size = "Разбить вывод v6 на нумерованные тома, когда размер тома превышает это значение (например: 2G, 512M)"
@@ -133,6 +135,7 @@ file = "Путь к существующему архивному файлу"
 compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
 encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
+chunked_encryption = "Шифровать добавляемые данные сегментами по 1 МиБ (требует шифрования; только v6)"
 dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"
 on_conflict = "Поведение при конфликте путей с существующими записями архива: error (по умолчанию), rename, overwrite"
 
@@ -158,6 +161,7 @@ append_encryption_probe_missing = "Не удалось найти зашифро
 append_conflict_error = "Добавление прервано: следующие пути уже существуют в архиве:\n  %{paths}"
 append_invalid_conflict_mode = "Недопустимое значение --on-conflict '%{value}': ожидается 'error', 'rename' или 'overwrite'"
 version_mismatch = "невозможно добавить: архив имеет формат v%{found}, но указан --format-version %{requested}; удалите флаг или используйте подходящую версию"
+append_chunked_requires_v6 = "Для chunked-шифрования требуется архив формата v6"
 
 [cli.inspect]
 about = "Интерактивный просмотр содержимого архива"
@@ -272,6 +276,7 @@ create_dir_failed = "Не удалось создать каталог %{path}"
 write_failed = "Не удалось записать извлечённый файл %{path}"
 data_too_short = "Зашифрованные данные слишком короткие для корректного тега аутентификации"
 decrypt_invalid = "Ошибка расшифровки: парольная фраза неверна или данные повреждены"
+chunked_segments_missing = "Для записи с chunked-шифрованием отсутствуют метаданные о числе сегментов"
 
 
 [cli.list]

@@ -490,7 +490,7 @@ open the correct file. For single-volume archives `volume_number == 0` and
 
 ---
 
-### Phase 4 — Per-entry stored checksum (integrity gap closure)
+### Phase 4 — Per-entry stored checksum (integrity gap closure) ✅
 
 > The `stored_checksum` field is defined in the Phase 1 struct layout and
 > computed in `ArchiveBuilder::commit_prepared`. This phase covers the
@@ -529,7 +529,7 @@ instead of the file contents.
 
 ---
 
-### Phase 5 — Chunked AEAD encryption (streaming)
+### Phase 5 — Chunked AEAD encryption (streaming) ✅
 
 **Motivation:** Resolves roadmap item 7.2. Each file's compressed stream is
 split into 1 MiB segments encrypted independently, bounding peak RAM usage to
@@ -682,6 +682,10 @@ After writing file data, in a second pass over all extracted entries:
 `--preserve-xattrs` on `create` / `append` (implies `--format-version 6`).
 
 **Depends on:** Phases 0, 1.
+
+**Note:** Ensure this functionality will not break Windows support - both for creating archives on Windows and
+extracting archives created on Unix. The `xattr` crate is a no-op on Windows, so it should not cause any issues, but
+testing is essential.
 
 ---
 

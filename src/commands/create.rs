@@ -30,6 +30,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
+    let chunked_encryption = matches.get_flag("chunked-encryption");
+    if chunked_encryption && encryption_passphrase.is_none() {
+        return Err(eyre!(t!(
+            "cli.common.errors.chunked_encryption_requires_encrypt",
+            locale = locale.as_str()
+        )));
+    }
     let mut format_version = match matches
         .get_one::<String>("format-version")
         .map(String::as_str)
@@ -41,7 +48,14 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .get_one::<String>("split-size")
         .map(|s| parse_split_size(s, locale))
         .transpose()?;
-    if split_size.is_some() && format_version != FormatVersion::V6 {
+    let auto_v6_reason = if split_size.is_some() {
+        Some("--split-size")
+    } else if chunked_encryption {
+        Some("--chunked-encryption")
+    } else {
+        None
+    };
+    if auto_v6_reason.is_some() && format_version != FormatVersion::V6 {
         format_version = FormatVersion::V6;
         println!(
             "{}",
@@ -49,7 +63,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
                 "cli.common.flags.format_version_auto",
                 locale = locale.as_str(),
                 v = 6,
-                reason = "--split-size"
+                reason = auto_v6_reason.unwrap_or("--format-version")
             )
         );
     }
@@ -63,6 +77,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let config = PipelineConfig {
         compress_images,
         encryption_passphrase,
+        chunked_encryption,
     };
 
     // Collect all files first so we can process them in parallel.

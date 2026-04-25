@@ -160,6 +160,7 @@ prepare_fixtures() {
         "$TEST_ROOT/fixtures/append_conflict_overwrite" \
         "$TEST_ROOT/fixtures/plain_small" \
         "$TEST_ROOT/fixtures/plain_in_place" \
+        "$TEST_ROOT/fixtures/chunked_input" \
         "$TEST_ROOT/fixtures/v6_input/nested" \
         "$TEST_ROOT/fixtures/split_input/assets"
 
@@ -205,6 +206,10 @@ very secret text
 EOF
     cat >"$TEST_ROOT/fixtures/plain_in_place/in_place.txt" <<'EOF'
 encrypt me in place
+EOF
+    head -c 1572864 /dev/urandom >"$TEST_ROOT/fixtures/chunked_input/chunked.bin"
+    cat >"$TEST_ROOT/fixtures/chunked_input/chunked.txt" <<'EOF'
+chunked encryption integration payload
 EOF
     cat >"$TEST_ROOT/fixtures/v6_input/nested/data.txt" <<'EOF'
 v6 archive payload
@@ -347,6 +352,40 @@ EOF
         "$TEST_ROOT/fixtures/plain_in_place/in_place.txt" \
         "$TEST_ROOT/encrypt/in_place_out/in_place.txt"
     inspect_and_quit "$TEST_ROOT/encrypt/plain.enc.dar" "--encrypt-passphrase secret"
+
+    next_step "Testing chunked encryption validation and round-trip"
+    mkdir -p "$TEST_ROOT/chunked"
+    expect_fail create_chunked_requires_encrypt \
+        "$BIN" create -f "$TEST_ROOT/chunked/invalid.dar" --chunked-encryption \
+        "$TEST_ROOT/fixtures/chunked_input"
+    expect_fail append_chunked_requires_v5_rejection \
+        "$BIN" append -f "$TEST_ROOT/basic/basic.dar" --encrypt-passphrase secret \
+        --chunked-encryption "$TEST_ROOT/fixtures/append_unique_input"
+    run_cmd create_chunked_archive \
+        "$BIN" create -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret \
+        --chunked-encryption "$TEST_ROOT/fixtures/chunked_input"
+    assert_file_exists "$TEST_ROOT/chunked/live.dar"
+    assert_file_exists "$TEST_ROOT/chunked/live.dari"
+    assert_file_exists "$TEST_ROOT/chunked/live.dar.b3"
+    expect_fail extract_chunked_wrong_pass \
+        "$BIN" extract -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase wrong \
+        -d "$TEST_ROOT/chunked/out_wrong"
+    run_cmd extract_chunked_correct_pass \
+        "$BIN" extract -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret \
+        -d "$TEST_ROOT/chunked/out_ok"
+    assert_files_equal \
+        "$TEST_ROOT/fixtures/chunked_input/chunked.bin" \
+        "$TEST_ROOT/chunked/out_ok/chunked.bin"
+    run_cmd append_chunked_archive \
+        "$BIN" append -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret \
+        --chunked-encryption "$TEST_ROOT/fixtures/append_unique_input"
+    run_cmd extract_chunked_after_append \
+        "$BIN" extract -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret \
+        -d "$TEST_ROOT/chunked/out_after_append"
+    assert_file_exists "$TEST_ROOT/chunked/out_after_append/newdir/after.txt"
+    run_cmd verify_chunked_full \
+        "$BIN" verify -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret --full
+    inspect_and_quit "$TEST_ROOT/chunked/live.dar" "--encrypt-passphrase secret"
 
     next_step "Testing v6 archive creation, verify, reindex, no-index, and inspect"
     mkdir -p "$TEST_ROOT/v6"

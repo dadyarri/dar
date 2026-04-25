@@ -21,6 +21,7 @@ pub fn build_archive(
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
+            chunked_encryption: false,
         },
     );
     builder.write_header().unwrap();
@@ -43,6 +44,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
     let pipeline = CompressionPipeline::new(PipelineConfig {
         compress_images: false,
         encryption_passphrase: passphrase.map(str::to_owned),
+        chunked_encryption: false,
     });
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
     let mut builder = ArchiveBuilder::with_config(
@@ -50,6 +52,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
+            chunked_encryption: false,
         },
     );
     builder.write_header().unwrap();
@@ -89,6 +92,7 @@ pub fn build_v6_archive(
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: None,
+            chunked_encryption: false,
         },
         FormatVersion::V6,
     );

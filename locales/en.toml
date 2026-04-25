@@ -96,6 +96,7 @@ utf8_failed = "Archive index %{field} is not valid UTF-8"
 brotli_decompression_failed = "Brotli decompression error: %{error}"
 zstd_decompression_failed = "ZStandard decompression error: %{error}"
 lzma_decompression_failed = "LZMA decompression error: %{error}"
+chunked_encryption_requires_encrypt = "--chunked-encryption requires --encrypt or --encrypt-passphrase"
 
 [cli.common.messages]
 summary = "Done: %{count} file(s), %{original} original → %{stored} stored (%{ratio}%), elapsed: %{elapsed}"
@@ -109,6 +110,7 @@ overwrite = "Overwrite existing archive file"
 compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt file data"
 encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
+chunked_encryption = "Encrypt using 1 MiB authenticated segments (requires encryption; implies v6)"
 passphrase_value = "PASSPHRASE"
 dry_run = "Preview which files would be added without writing the archive"
 split_size = "Split v6 output into numbered volumes once a volume exceeds this size (for example: 2G, 512M)"
@@ -133,6 +135,7 @@ file = "The path to the existing archive file"
 compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt appended file data"
 encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+chunked_encryption = "Encrypt appended data using 1 MiB authenticated segments (requires encryption; v6 only)"
 dry_run = "Preview which files would be added without modifying the archive"
 on_conflict = "How to handle archive-relative path conflicts with existing entries: error (default), rename, overwrite"
 
@@ -158,6 +161,7 @@ append_encryption_probe_missing = "Unable to locate encrypted data to verify pas
 append_conflict_error = "Append aborted: the following path(s) already exist in the archive:\n  %{paths}"
 append_invalid_conflict_mode = "Invalid --on-conflict value '%{value}': expected 'error', 'rename', or 'overwrite'"
 version_mismatch = "cannot append: archive is format v%{found}, but --format-version %{requested} was requested; remove the flag or use a matching version"
+append_chunked_requires_v6 = "chunked encryption requires a v6 archive"
 
 [cli.inspect]
 about = "Interactively inspect the contents of an archive"
@@ -271,6 +275,7 @@ create_dir_failed = "Failed to create directory %{path}"
 write_failed = "Failed to write extracted file %{path}"
 data_too_short = "Encrypted data is too short to contain a valid authentication tag"
 decrypt_invalid = "Decryption failed: passphrase is incorrect or data is corrupted"
+chunked_segments_missing = "Chunked encrypted entry is missing its segment count metadata"
 
 
 

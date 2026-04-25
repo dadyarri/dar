@@ -13,6 +13,7 @@ pub mod format {
 pub mod flags {
     pub const LINKED_DATA: u16 = 0b0000_0000_0000_0001;
     pub const ENCRYPTED_DATA: u16 = 0b0000_0000_0000_0010;
+    pub const CHUNKED_ENCRYPTION: u16 = 0b0000_0000_0000_0100;
 }
 
 /// Short string keys used in the `extra` field of index entries.
@@ -21,6 +22,7 @@ pub mod extra_keys {
     pub const ENC_ALGO: &str = "e";
     pub const ENC_NONCE: &str = "en";
     pub const ENC_TAG: &str = "et";
+    pub const ENC_SEGMENTS: &str = "es";
 
     // Image EXIF
     pub const IMG_MAKE: &str = "imk";
@@ -38,4 +40,5 @@ pub mod extra_keys {
 pub mod crypto {
     pub const NONCE_LEN: usize = 12;
     pub const TAG_LEN: usize = 16;
+    pub const SEGMENT_SIZE: usize = 1_048_576;
 }

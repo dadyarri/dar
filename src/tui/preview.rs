@@ -22,6 +22,7 @@ const ENCRYPTION_KEYS: &[&str] = &[
     extra_keys::ENC_ALGO,
     extra_keys::ENC_NONCE,
     extra_keys::ENC_TAG,
+    extra_keys::ENC_SEGMENTS,
 ];
 
 /// Mapping of short extra-field keys to their `rust_i18n` key paths.
@@ -137,7 +138,13 @@ pub fn build_preview(
             } else if encrypted {
                 match passphrase {
                     None => (PreviewContent::EncryptedNoPassphrase, integrity),
-                    Some(pass) => match try_decrypt_bytes(&raw, &entry.entry.checksum, pass) {
+                    Some(pass) => match try_decrypt_bytes(
+                        &raw,
+                        &entry.entry.checksum,
+                        entry.entry.bitflags,
+                        &entry.extra,
+                        pass,
+                    ) {
                         None => (PreviewContent::EncryptedWrongPassphrase, integrity),
                         Some(decrypted) => (decode_content(entry, &decrypted), integrity),
                     },

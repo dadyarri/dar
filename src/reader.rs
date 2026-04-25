@@ -68,11 +68,13 @@ pub struct ArchiveState {
 }
 
 /// Enough information to decrypt one entry and verify that a passphrase is correct.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct EncryptedEntryProbe {
     pub offset: u64,
     pub size: u64,
     pub checksum: [u8; 32],
+    pub bitflags: u16,
+    pub extra: String,
 }
 
 /// Read the first 5 bytes of `source`, verify the `DARI` signature, and
@@ -214,14 +216,6 @@ pub fn load_v5(
             _ => {}
         }
 
-        if entry_encrypted && encryption_probe.is_none() {
-            encryption_probe = Some(EncryptedEntryProbe {
-                offset: entry.offset,
-                size: entry.compressed_size,
-                checksum: entry.checksum,
-            });
-        }
-
         let mut path_bytes = vec![0u8; entry.path_length as usize];
         read_exact_ctx(
             source,
@@ -253,6 +247,16 @@ pub fn load_v5(
             )
             .to_string()
         })?;
+
+        if entry_encrypted && encryption_probe.is_none() {
+            encryption_probe = Some(EncryptedEntryProbe {
+                offset: entry.offset,
+                size: entry.compressed_size,
+                checksum: entry.checksum,
+                bitflags: entry.bitflags,
+                extra: extra.clone(),
+            });
+        }
 
         entries.push(ArchiveIndexEntryWrapper::new(entry, path, extra));
     }
@@ -398,14 +402,6 @@ pub fn load_v6(
             _ => {}
         }
 
-        if entry_encrypted && encryption_probe.is_none() {
-            encryption_probe = Some(EncryptedEntryProbe {
-                offset: v6.offset,
-                size: v6.compressed_size,
-                checksum: v6.checksum,
-            });
-        }
-
         // Variable-length tail: path
         let mut path_bytes = vec![0u8; v6.path_length as usize];
         read_exact_ctx(
@@ -439,6 +435,16 @@ pub fn load_v6(
             )
             .to_string()
         })?;
+
+        if entry_encrypted && encryption_probe.is_none() {
+            encryption_probe = Some(EncryptedEntryProbe {
+                offset: v6.offset,
+                size: v6.compressed_size,
+                checksum: v6.checksum,
+                bitflags: v6.bitflags,
+                extra: extra.clone(),
+            });
+        }
 
         // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
         if v6.xattr_length > 0 {
@@ -650,14 +656,6 @@ pub fn load_index(
             _ => {}
         }
 
-        if entry_encrypted && encryption_probe.is_none() {
-            encryption_probe = Some(EncryptedEntryProbe {
-                offset: v6.offset,
-                size: v6.compressed_size,
-                checksum: v6.checksum,
-            });
-        }
-
         // Variable-length tail: path
         let path_len = v6.path_length as usize;
         if pos + path_len > content.len() {
@@ -695,6 +693,16 @@ pub fn load_index(
                 .to_string()
             })?;
         pos += extra_len;
+
+        if entry_encrypted && encryption_probe.is_none() {
+            encryption_probe = Some(EncryptedEntryProbe {
+                offset: v6.offset,
+                size: v6.compressed_size,
+                checksum: v6.checksum,
+                bitflags: v6.bitflags,
+                extra: extra.clone(),
+            });
+        }
 
         // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
         let xattr_len = v6.xattr_length as usize;

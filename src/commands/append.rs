@@ -39,6 +39,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
+    let chunked_encryption = matches.get_flag("chunked-encryption");
+    if chunked_encryption && encryption_passphrase.is_none() {
+        return Err(eyre!(t!(
+            "cli.common.errors.chunked_encryption_requires_encrypt",
+            locale = locale.as_str()
+        )));
+    }
 
     // Parse the CLI `--format-version` flag and remember if it was explicitly set.
     let cli_format_version = match matches
@@ -68,6 +75,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let config = PipelineConfig {
         compress_images,
         encryption_passphrase,
+        chunked_encryption,
     };
 
     // Collect all files first so we can process them in parallel.
@@ -104,6 +112,13 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
             locale = locale.as_str(),
             found = existing_archive.header.version as u32,
             requested = u8::from(cli_format_version) as u32
+        )));
+    }
+
+    if chunked_encryption && archive_format_version != FormatVersion::V6 {
+        return Err(eyre!(t!(
+            "cli.append.errors.append_chunked_requires_v6",
+            locale = locale.as_str()
         )));
     }
 
@@ -423,7 +438,7 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    try_decrypt_bytes(&data, &probe.checksum, passphrase).ok_or_else(|| {
+    try_decrypt_bytes(&data, &probe.checksum, probe.bitflags, &probe.extra, passphrase).ok_or_else(|| {
         eyre!(t!(
             "cli.append.errors.append_passphrase_invalid",
             locale = locale.as_str()
@@ -467,6 +482,11 @@ mod tests {
                     Arg::new("encrypt-passphrase")
                         .long("encrypt-passphrase")
                         .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("chunked-encryption")
+                        .long("chunked-encryption")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("verbose")

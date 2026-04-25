@@ -146,7 +146,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
                     path = entry.path.as_str()
                 ))
             })?;
-            try_decrypt_bytes(&raw, &entry.entry.checksum, pass).ok_or_else(|| {
+            try_decrypt_bytes(&raw, &entry.entry.checksum, entry.entry.bitflags, &entry.extra, pass).ok_or_else(|| {
                 eyre!(t!(
                     "cli.extractor.errors.decrypt_invalid",
                     locale = locale.as_str()

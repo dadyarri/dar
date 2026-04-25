@@ -1,6 +1,6 @@
 use crate::constants::extra_keys;
 use crate::constants::flags;
-use crate::encryption::nonce_from_checksum;
+use crate::encryption::{nonce_for_segment, nonce_from_checksum};
 use crate::extra::{encode_extra_pairs, upsert_extra_pair};
 use crate::models::archive::CompressionMethod;
 use crate::traits::{Compressor, compressor_for_extension};
@@ -77,6 +77,7 @@ pub struct PipelineFileData {
     pub extra: String,
     pub encryption_nonce_hex: Option<String>,
     pub encryption_tag_hex: Option<String>,
+    pub encryption_segment_count: Option<u64>,
 }
 
 impl PipelineFileData {
@@ -93,6 +94,7 @@ impl PipelineFileData {
             extra: String::new(),
             encryption_nonce_hex: None,
             encryption_tag_hex: None,
+            encryption_segment_count: None,
         }
     }
 }
@@ -102,6 +104,7 @@ impl PipelineFileData {
 pub struct PipelineConfig {
     pub compress_images: bool,
     pub encryption_passphrase: Option<String>,
+    pub chunked_encryption: bool,
 }
 
 /// The main compression pipeline.
@@ -233,15 +236,55 @@ impl CompressionPipeline {
             .take()
             .unwrap_or_else(|| file_data.original_content.clone());
 
-        let tag =
-            cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
+        if self.config.chunked_encryption {
+            let segment_count = encrypted
+                .len()
+                .div_ceil(crate::constants::crypto::SEGMENT_SIZE)
+                .max(1) as u64;
+            let mut chunked = Vec::with_capacity(
+                encrypted.len() + segment_count as usize * crate::constants::crypto::TAG_LEN,
+            );
 
-        encrypted.extend_from_slice(tag.as_slice());
-        file_data.compressed_size = encrypted.len() as u64;
-        file_data.compressed_content = Some(encrypted);
+            if encrypted.is_empty() {
+                let mut segment = Vec::new();
+                let tag = cipher.encrypt_in_place_detached(
+                    Nonce::from_slice(&nonce_for_segment(&nonce, 0)),
+                    b"",
+                    &mut segment,
+                )?;
+                chunked.extend_from_slice(tag.as_slice());
+            } else {
+                for (idx, slice) in encrypted
+                    .chunks(crate::constants::crypto::SEGMENT_SIZE)
+                    .enumerate()
+                {
+                    let mut segment = slice.to_vec();
+                    let tag = cipher.encrypt_in_place_detached(
+                        Nonce::from_slice(&nonce_for_segment(&nonce, idx as u64)),
+                        b"",
+                        &mut segment,
+                    )?;
+                    chunked.extend_from_slice(&segment);
+                    chunked.extend_from_slice(tag.as_slice());
+                }
+            }
+
+            file_data.compressed_size = chunked.len() as u64;
+            file_data.compressed_content = Some(chunked);
+            file_data.bitflags |= flags::CHUNKED_ENCRYPTION;
+            file_data.encryption_segment_count = Some(segment_count);
+            file_data.encryption_tag_hex = None;
+        } else {
+            let tag =
+                cipher.encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut encrypted)?;
+
+            encrypted.extend_from_slice(tag.as_slice());
+            file_data.compressed_size = encrypted.len() as u64;
+            file_data.compressed_content = Some(encrypted);
+            file_data.encryption_tag_hex = Some(hex_encode(tag.as_slice()));
+        }
         file_data.bitflags |= flags::ENCRYPTED_DATA;
         file_data.encryption_nonce_hex = Some(hex_encode(&nonce));
-        file_data.encryption_tag_hex = Some(hex_encode(tag.as_slice()));
         Ok(())
     }
 
@@ -257,6 +300,10 @@ impl CompressionPipeline {
 
             if let Some(tag) = &file_data.encryption_tag_hex {
                 upsert_extra_pair(&mut pairs, extra_keys::ENC_TAG, tag.clone());
+            }
+
+            if let Some(segments) = file_data.encryption_segment_count {
+                upsert_extra_pair(&mut pairs, extra_keys::ENC_SEGMENTS, segments.to_string());
             }
         }
 
@@ -364,6 +411,7 @@ mod tests {
         CompressionPipeline::new(PipelineConfig {
             compress_images,
             encryption_passphrase: None,
+            chunked_encryption: false,
         })
     }
 
@@ -553,6 +601,7 @@ mod tests {
         let pipeline = CompressionPipeline::new(PipelineConfig {
             compress_images: false,
             encryption_passphrase: Some("secret".to_string()),
+            chunked_encryption: false,
         });
 
         let result = pipeline
@@ -566,5 +615,30 @@ mod tests {
         assert!(result.extra.contains("e=chacha20poly1305"));
         assert!(result.extra.contains("en="));
         assert!(result.extra.contains("et="));
+    }
+
+    #[test]
+    fn test_chunked_encryption_sets_flag_and_segment_count() {
+        let pipeline = CompressionPipeline::new(PipelineConfig {
+            compress_images: false,
+            encryption_passphrase: Some("secret".to_string()),
+            chunked_encryption: true,
+        });
+
+        let result = pipeline
+            .process_file(
+                Path::new("song.mp3"),
+                b"x".repeat(crate::constants::crypto::SEGMENT_SIZE + 5),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.bitflags & flags::CHUNKED_ENCRYPTION,
+            flags::CHUNKED_ENCRYPTION
+        );
+        assert!(result.extra.contains("e=chacha20poly1305"));
+        assert!(result.extra.contains("en="));
+        assert!(result.extra.contains("es=2"));
+        assert!(!result.extra.contains("et="));
     }
 }

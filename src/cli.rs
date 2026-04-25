@@ -105,6 +105,10 @@ where
                         .value_name(passphrase_value)
                         .conflicts_with("encrypt")
                         .help(translate("cli.create.args.encrypt_passphrase")),
+                    Arg::new("chunked-encryption")
+                        .long("chunked-encryption")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.create.args.chunked_encryption")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -165,6 +169,10 @@ where
                         .value_name(passphrase_value)
                         .conflicts_with("encrypt")
                         .help(translate("cli.append.args.encrypt_passphrase")),
+                    Arg::new("chunked-encryption")
+                        .long("chunked-encryption")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.append.args.chunked_encryption")),
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -468,6 +476,46 @@ mod tests {
         let create = matches.subcommand_matches("create").unwrap();
         assert!(create.get_flag("encrypt"));
         assert!(create.get_one::<String>("encrypt-passphrase").is_none());
+    }
+
+    #[test]
+    fn test_chunked_encryption_flag_is_accepted_for_create() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "create",
+                    "-f",
+                    "out.dar",
+                    "--encrypt-passphrase",
+                    "pw",
+                    "--chunked-encryption",
+                    "src",
+                ])
+                .unwrap();
+
+        let create = matches.subcommand_matches("create").unwrap();
+        assert!(create.get_flag("chunked-encryption"));
+    }
+
+    #[test]
+    fn test_chunked_encryption_flag_is_accepted_for_append() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "append",
+                    "-f",
+                    "out.dar",
+                    "--encrypt-passphrase",
+                    "pw",
+                    "--chunked-encryption",
+                    "src",
+                ])
+                .unwrap();
+
+        let append = matches.subcommand_matches("append").unwrap();
+        assert!(append.get_flag("chunked-encryption"));
     }
 
     #[test]

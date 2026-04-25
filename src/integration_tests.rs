@@ -41,6 +41,7 @@ fn make_archive(
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
+            chunked_encryption: false,
         },
     );
     builder.write_header().unwrap();
@@ -88,6 +89,7 @@ fn append_to_archive(
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: passphrase.map(str::to_owned),
+            chunked_encryption: false,
         },
     );
     builder.import_existing_entries(state.entries);
@@ -418,6 +420,7 @@ fn make_split_v6_archive(
         PipelineConfig {
             compress_images: false,
             encryption_passphrase: None,
+            chunked_encryption: false,
         },
         FormatVersion::V6,
     );
@@ -641,6 +644,7 @@ fn test_v6_append_regenerates_dari_with_all_entries() {
             PipelineConfig {
                 compress_images: false,
                 encryption_passphrase: None,
+                chunked_encryption: false,
             },
             FormatVersion::V6,
         );
