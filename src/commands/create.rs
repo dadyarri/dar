@@ -5,6 +5,7 @@ use crate::archive_builder::ArchiveBuilder;
 use crate::encryption::resolve_encryption_passphrase;
 use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
+use crate::index_writer::{IndexWriter, index_path_for_archive};
 use crate::pipeline::PipelineConfig;
 use crate::walker::scan_files;
 use clap::ArgMatches;
@@ -112,6 +113,20 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let mut builder = ArchiveBuilder::with_version(writer, config, format_version);
     builder.write_header()?;
+
+    // For v6 archives, attach an external index writer so the `.dari` file is
+    // written alongside the `.dar` file when `build()` is called.
+    if format_version == FormatVersion::V6 {
+        let idx_path = index_path_for_archive(Path::new(file));
+        let iw = IndexWriter::new(&idx_path, builder.header_timestamp(), 1).wrap_err(
+            t!(
+                "cli.create.errors.index_write_failed",
+                locale = locale.as_str()
+            )
+            .to_string(),
+        )?;
+        builder.set_index_writer(iw);
+    }
 
     let start = Instant::now();
     let mut count = 0usize;

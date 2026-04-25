@@ -11,6 +11,10 @@ verbose = "Enables verbose output"
 content = "Files/folders to add to archive"
 help = "Shows help of the command"
 version = "Shows version information"
+no_index = "Bypass auto-discovery of the external .dari index file and read the embedded index instead"
+
+[cli.common.warnings]
+stale_index = "external index is stale (timestamps differ); re-run 'dari reindex -f %{file}' or pass --no-index to skip"
 
 [cli.common.flags]
 format_version = "target archive format version (5 or 6, default 5)"
@@ -86,6 +90,7 @@ file_exists = "File %{file} already exists"
 delete_failed = "Failed to delete file"
 create_file_failed = "Failed to create file"
 create_archive_failed = "Failed to create archive"
+index_write_failed = "Failed to create external index file for archive"
 
 [cli.append]
 about = "Appends data to existing archive"
@@ -285,3 +290,20 @@ shell = "Shell to generate completions for (bash, elvish, fish, powershell, zsh)
 
 [cli.completions.errors]
 completions_failed = "Failed to generate shell completions"
+
+[cli.reindex]
+about = "Rebuild the external index (.dari) for a v6 archive"
+
+[cli.reindex.args]
+file = "The path to the archive file"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+
+[cli.reindex.messages]
+reindex_done = "Index written to %{path}"
+
+[cli.reindex.errors]
+reindex_failed = "Failed to rebuild index for %{file}"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+v5_unsupported = "Archive %{file} is format v5; reindex only works with v6 archives"
+

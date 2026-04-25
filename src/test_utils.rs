@@ -70,3 +70,57 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
     builder.build().unwrap();
     builder.into_inner().into_inner()
 }
+
+/// Build a v6 `.dar` archive on disk.
+///
+/// Like [`build_archive`] but targets format version 6 so that external index
+/// (`.dari`) tests can rely on a v6 source archive.
+pub fn build_v6_archive(
+    dir: &tempfile::TempDir,
+    name: &str,
+    files: &[(&str, &[u8])],
+) -> PathBuf {
+    use crate::format_version::FormatVersion;
+
+    let archive_path = dir.path().join(name);
+    let file_handle = File::create(&archive_path).unwrap();
+    let mut builder = ArchiveBuilder::with_version(
+        file_handle,
+        PipelineConfig {
+            compress_images: false,
+            encryption_passphrase: None,
+        },
+        FormatVersion::V6,
+    );
+    builder.write_header().unwrap();
+    for (archive_name, content) in files {
+        let tmp = dir.path().join(archive_name);
+        std::fs::write(&tmp, content).unwrap();
+        builder.add_file(&tmp, archive_name).unwrap();
+    }
+    builder.build().unwrap();
+    archive_path
+}
+
+/// Write a `.dari` external index sidecar for the existing archive at `archive_path`.
+///
+/// Reads the embedded index from `archive_path`, then writes a fresh `.dari` alongside
+/// it.  The `.dari` timestamp is taken from the archive header so that
+/// [`crate::reader::load_with_auto_index`] considers it fresh.
+///
+/// Panics on any I/O or parse error — intended only for use in tests.
+pub fn write_dari_sidecar(archive_path: &Path) {
+    use crate::i18n::Locale;
+    use crate::index_writer::{IndexWriter, index_path_for_archive};
+    use crate::reader::load_archive;
+
+    let locale = Locale::new("en");
+    let mut fh = File::open(archive_path).unwrap();
+    let state = load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+    let idx_path = index_path_for_archive(archive_path);
+    let mut iw = IndexWriter::new(&idx_path, state.header.timestamp, 1).unwrap();
+    for wrapper in &state.entries {
+        iw.write_entry(wrapper).unwrap();
+    }
+    iw.finish().unwrap();
+}

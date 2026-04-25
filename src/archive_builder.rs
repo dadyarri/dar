@@ -37,6 +37,13 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     conflict_mode: ConflictMode,
     /// Target on-disk format version.  Defaults to [`FormatVersion::V5`].
     target_version: FormatVersion,
+    /// Unix timestamp written into the archive header by [`Self::write_header`].
+    /// Zero before `write_header` is called.
+    header_timestamp: u64,
+    /// Optional external index writer attached for v6 archives.
+    /// When set, [`Self::build_v6`] writes all entries to this writer and calls
+    /// [`crate::index_writer::IndexWriter::finish`] before returning.
+    index_writer: Option<crate::index_writer::IndexWriter>,
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +106,8 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             path_set: HashSet::new(),
             conflict_mode: ConflictMode::default(),
             target_version: FormatVersion::default(),
+            header_timestamp: 0,
+            index_writer: None,
         }
     }
 
@@ -118,6 +127,25 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     /// Override the conflict-resolution strategy used by [`Self::commit_prepared`].
     pub fn set_conflict_mode(&mut self, mode: ConflictMode) {
         self.conflict_mode = mode;
+    }
+
+    /// Attach an external index writer for v6 archives.
+    ///
+    /// When set, [`Self::build`] writes all committed entries to `iw` and calls
+    /// [`crate::index_writer::IndexWriter::finish`] before returning.  Must be
+    /// called **after** [`Self::write_header`] so that the index writer is
+    /// created with the correct `archive_timestamp` (see [`Self::header_timestamp`]).
+    pub fn set_index_writer(&mut self, iw: crate::index_writer::IndexWriter) {
+        self.index_writer = Some(iw);
+    }
+
+    /// Returns the Unix timestamp written into the archive header by the most
+    /// recent call to [`Self::write_header`].
+    ///
+    /// Use this value when constructing a [`crate::index_writer::IndexWriter`]
+    /// so the timestamps in the `.dari` and `.dar` files match.
+    pub fn header_timestamp(&self) -> u64 {
+        self.header_timestamp
     }
 
     /// Returns `true` if `path` is already present in the archive (either from
@@ -150,14 +178,16 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn write_header(&mut self) -> Result<()> {
         match self.target_version {
             FormatVersion::V5 => {
-                ArchiveHeader::new()?
-                    .write(&mut self.writer)
+                let h = ArchiveHeader::new()?;
+                self.header_timestamp = h.timestamp;
+                h.write(&mut self.writer)
                     .wrap_err(t!("cli.common.errors.header_write_failed"))?;
                 Ok(())
             }
             FormatVersion::V6 => {
-                ArchiveHeaderV6::new()?
-                    .write(&mut self.writer)
+                let h = ArchiveHeaderV6::new()?;
+                self.header_timestamp = h.timestamp;
+                h.write(&mut self.writer)
                     .wrap_err(t!("cli.common.errors.header_write_failed"))?;
                 Ok(())
             }
@@ -376,6 +406,9 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
 
     /// Finalise a v6 archive: write `ArchiveIndexEntryV6` structs for all entries,
     /// then an `ArchiveFooterV6` with a u64 index offset, then flush.
+    /// If an external [`crate::index_writer::IndexWriter`] was attached via
+    /// [`Self::set_index_writer`], all entries are also written there and the
+    /// writer is finalised.
     fn build_v6(&mut self) -> Result<()> {
         // Record where the index section begins (u64 — no 4 GiB ceiling).
         let index_offset = self
@@ -422,6 +455,17 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         self.writer
             .flush()
             .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
+
+        // Write external index file if one was attached.
+        let iw_opt = self.index_writer.take();
+        if let Some(mut iw) = iw_opt {
+            for wrapper in &self.entries {
+                iw.write_entry(wrapper)
+                    .wrap_err("Failed to write entry to external index file")?;
+            }
+            iw.finish()
+                .wrap_err("Failed to finalise external index file")?;
+        }
 
         Ok(())
     }

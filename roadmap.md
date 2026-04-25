@@ -231,7 +231,7 @@ version_mismatch = "cannot append: archive is format v{found}, requested format 
 
 ---
 
-### Phase 2 — External index file (`.dari`)
+### Phase 2 — External index file (`.dari`) ✅
 
 **Goal:** Separate the file index from the data volumes so that metadata
 operations (`inspect`, `list`, selective `extract`) never need to open large
@@ -834,4 +834,3 @@ Phases 5, 6, and 7 are independent of each other once Phases 0 and 1 are
 complete and can be worked in parallel.
 
 ---
-

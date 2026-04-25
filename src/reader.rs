@@ -6,7 +6,7 @@ use crate::models::archive::{
     ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
     ArchiveIndexEntryV6, ArchiveIndexEntryWrapper,
 };
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use rust_i18n::t;
 use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
@@ -90,7 +90,12 @@ pub fn read_version(source: &mut dyn ReadSeek, locale: &Locale) -> Result<Format
     )?;
 
     let mut buf = [0u8; 5];
-    read_exact_ctx(source, &mut buf, "cli.common.errors.header_read_failed", locale)?;
+    read_exact_ctx(
+        source,
+        &mut buf,
+        "cli.common.errors.header_read_failed",
+        locale,
+    )?;
 
     if &buf[0..4] != format::SIGNATURE {
         return Err(eyre!(t!(
@@ -494,6 +499,317 @@ pub fn load_archive(
     }
 }
 
+/// Parse an external index file (`.dari`) and return the decoded [`ArchiveState`].
+///
+/// The index uses the same v6 entry layout as the embedded index in `.dar` archives,
+/// preceded by an [`crate::index_writer::IndexFileHeader`] and followed by an
+/// [`crate::index_writer::IndexFileFooter`] that contains a BLAKE3 self-integrity
+/// checksum over all preceding bytes.
+///
+/// On success, `index_offset` in the returned [`ArchiveState`] is `0` (unused for
+/// external indices) and `header.timestamp` is `IndexFileHeader::archive_timestamp`.
+pub fn load_index(
+    source: &mut dyn ReadSeek,
+    file_path: &str,
+    locale: &Locale,
+) -> Result<ArchiveState> {
+    use crate::index_writer::{
+        IndexFileFooter, IndexFileHeader, INDEX_FOOTER_SIGNATURE, INDEX_SIGNATURE, INDEX_VERSION,
+    };
+
+    let idx_header_size = size_of::<IndexFileHeader>() as u64; // 17
+    let idx_footer_size = size_of::<IndexFileFooter>() as u64; // 45
+
+    let file_len = source.seek(SeekFrom::End(0)).wrap_err(
+        t!(
+            "cli.common.errors.seek_failed",
+            locale = locale.as_str(),
+            file = file_path
+        )
+        .to_string(),
+    )?;
+
+    if file_len < idx_header_size + idx_footer_size {
+        return Err(eyre!(t!(
+            "cli.common.errors.footer_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // --- Footer (last 45 bytes) ---
+    let footer_pos = file_len - idx_footer_size;
+    seek_ctx(source, SeekFrom::Start(footer_pos), file_path, locale)?;
+    let mut footer_buf = [0u8; size_of::<IndexFileFooter>()];
+    read_exact_ctx(
+        source,
+        &mut footer_buf,
+        "cli.common.errors.footer_read_failed",
+        locale,
+    )?;
+    let footer = *bytemuck::from_bytes::<IndexFileFooter>(&footer_buf);
+
+    if &footer.signature != INDEX_FOOTER_SIGNATURE {
+        return Err(eyre!(t!(
+            "cli.common.errors.footer_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // --- Read and hash all content before the footer ---
+    let content_len = footer_pos as usize;
+    let mut content = vec![0u8; content_len];
+    seek_ctx(source, SeekFrom::Start(0), file_path, locale)?;
+    source.read_exact(&mut content).wrap_err(
+        t!(
+            "cli.common.errors.index_decode_failed",
+            locale = locale.as_str()
+        )
+        .to_string(),
+    )?;
+
+    // Verify self-integrity BLAKE3 checksum.
+    let computed_hash = *blake3::hash(&content).as_bytes();
+    if computed_hash != footer.checksum {
+        return Err(eyre!(
+            "Index file integrity check failed: BLAKE3 checksum mismatch in {}",
+            file_path
+        ));
+    }
+
+    // --- Header (first 17 bytes) ---
+    if content.len() < idx_header_size as usize {
+        return Err(eyre!(t!(
+            "cli.common.errors.header_invalid",
+            locale = locale.as_str()
+        )));
+    }
+    let idx_header = *bytemuck::from_bytes::<IndexFileHeader>(&content[..idx_header_size as usize]);
+
+    if &idx_header.signature != INDEX_SIGNATURE || idx_header.version != INDEX_VERSION {
+        return Err(eyre!(t!(
+            "cli.common.errors.header_invalid",
+            locale = locale.as_str()
+        )));
+    }
+
+    // Synthesise a v5-layout ArchiveHeader for ArchiveState compatibility.
+    let header = ArchiveHeader {
+        signature: *format::SIGNATURE,
+        version: 6,
+        timestamp: idx_header.archive_timestamp,
+    };
+
+    // --- Parse index entries from content[header_size..] ---
+    let entry_struct_size = size_of::<ArchiveIndexEntryV6>();
+    let mut pos = idx_header_size as usize;
+    let mut entries: Vec<ArchiveIndexEntryWrapper> =
+        Vec::with_capacity(footer.entry_count as usize);
+    let mut encryption_mode: Option<bool> = None;
+    let mut encryption_probe: Option<EncryptedEntryProbe> = None;
+
+    for _ in 0..footer.entry_count {
+        if pos + entry_struct_size > content.len() {
+            return Err(eyre!(t!(
+                "cli.common.errors.index_decode_failed",
+                locale = locale.as_str()
+            )));
+        }
+        let v6 =
+            *bytemuck::from_bytes::<ArchiveIndexEntryV6>(&content[pos..pos + entry_struct_size]);
+        pos += entry_struct_size;
+
+        // Map v6 on-disk struct → v5-compatible ArchiveIndexEntry (holds the common fields).
+        let entry = ArchiveIndexEntry {
+            offset: v6.offset,
+            bitflags: v6.bitflags,
+            compression_method: v6.compression_method,
+            modification_timestamp: v6.modification_timestamp,
+            uid: v6.uid,
+            gid: v6.gid,
+            perm: v6.perm,
+            checksum: v6.checksum,
+            original_size: v6.original_size,
+            compressed_size: v6.compressed_size,
+            path_length: v6.path_length,
+            extra_length: v6.extra_length,
+        };
+
+        let entry_encrypted = (v6.bitflags & flags::ENCRYPTED_DATA) != 0;
+        match encryption_mode {
+            None => encryption_mode = Some(entry_encrypted),
+            Some(expected) if expected != entry_encrypted => {
+                return Err(eyre!(t!(
+                    "cli.common.errors.mixed_encryption",
+                    locale = locale.as_str()
+                )));
+            }
+            _ => {}
+        }
+
+        if entry_encrypted && encryption_probe.is_none() {
+            encryption_probe = Some(EncryptedEntryProbe {
+                offset: v6.offset,
+                size: v6.compressed_size,
+                checksum: v6.checksum,
+            });
+        }
+
+        // Variable-length tail: path
+        let path_len = v6.path_length as usize;
+        if pos + path_len > content.len() {
+            return Err(eyre!(t!(
+                "cli.common.errors.index_decode_failed",
+                locale = locale.as_str()
+            )));
+        }
+        let path =
+            String::from_utf8(content[pos..pos + path_len].to_vec()).wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.utf8_failed",
+                    locale = locale.as_str(),
+                    field = "path"
+                )
+                .to_string()
+            })?;
+        pos += path_len;
+
+        // Variable-length tail: extra
+        let extra_len = v6.extra_length as usize;
+        if pos + extra_len > content.len() {
+            return Err(eyre!(t!(
+                "cli.common.errors.index_decode_failed",
+                locale = locale.as_str()
+            )));
+        }
+        let extra =
+            String::from_utf8(content[pos..pos + extra_len].to_vec()).wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.utf8_failed",
+                    locale = locale.as_str(),
+                    field = "extra"
+                )
+                .to_string()
+            })?;
+        pos += extra_len;
+
+        // Variable-length tail: xattr blob (skip; Phase 6 will consume it)
+        let xattr_len = v6.xattr_length as usize;
+        if pos + xattr_len > content.len() {
+            return Err(eyre!(t!(
+                "cli.common.errors.index_decode_failed",
+                locale = locale.as_str()
+            )));
+        }
+        pos += xattr_len;
+
+        entries.push(ArchiveIndexEntryWrapper::new_v6(
+            entry,
+            path,
+            extra,
+            v6.stored_checksum,
+            v6.xattr_length,
+            v6.volume_number,
+        ));
+    }
+
+    Ok(ArchiveState {
+        entries,
+        header,
+        encryption_mode,
+        index_offset: 0, // unused for external index
+        encryption_probe,
+    })
+}
+
+/// Open an archive and load its index, preferring the external `.dari` index file
+/// when it exists and is fresh.
+///
+/// This is the preferred entry point for all reader-side commands (`inspect`,
+/// `extract`, `list`).  It:
+///
+/// 1. Peeks at the archive source to detect the format version and timestamp.
+/// 2. If `no_index` is `true`, skips auto-discovery entirely.
+/// 3. If the archive is v5, skips auto-discovery (`.dari` uses v6 entry layout).
+/// 4. Computes the candidate external index path via
+///    [`crate::index_writer::index_path_for_archive`].
+/// 5. If the `.dari` file exists and its `archive_timestamp` matches the archive
+///    header's `timestamp`, calls [`load_index`].
+/// 6. If the timestamps differ, prints a warning and falls back to [`load_archive`].
+/// 7. If no `.dari` file exists, calls [`load_archive`] directly.
+pub fn load_with_auto_index(
+    archive_source: &mut dyn ReadSeek,
+    archive_path: &std::path::Path,
+    no_index: bool,
+    locale: &Locale,
+) -> Result<ArchiveState> {
+    use crate::index_writer::{index_path_for_archive, IndexFileHeader, INDEX_SIGNATURE};
+    use std::fs::File;
+
+    if !no_index {
+        // Peek at the archive header: first 13 bytes give signature(4) + version(1) +
+        // timestamp(8), shared layout between v5 and v6.
+        let (archive_version, archive_ts): (u8, u64) = {
+            let mut buf = [0u8; 13];
+            archive_source.seek(SeekFrom::Start(0)).ok();
+            if archive_source.read_exact(&mut buf).is_ok() {
+                let version = buf[4];
+                let ts = u64::from_le_bytes(buf[5..13].try_into().unwrap_or([0u8; 8]));
+                (version, ts)
+            } else {
+                (0, 0)
+            }
+        };
+
+        // Only v6 archives write a `.dari` (v6 entry layout required).
+        if archive_version == 6 {
+            let idx_path = index_path_for_archive(archive_path);
+
+            if idx_path.exists() {
+                // Read index file header to check its archive_timestamp.
+                let idx_ts: Option<u64> = (|| -> Option<u64> {
+                    let hdr_size = size_of::<IndexFileHeader>();
+                    let mut f = File::open(&idx_path).ok()?;
+                    let mut hdr_buf = vec![0u8; hdr_size];
+                    f.read_exact(&mut hdr_buf).ok()?;
+                    let h = *bytemuck::from_bytes::<IndexFileHeader>(&hdr_buf);
+                    if &h.signature == INDEX_SIGNATURE {
+                        Some(h.archive_timestamp)
+                    } else {
+                        None
+                    }
+                })();
+
+                match idx_ts {
+                    Some(ts) if ts == archive_ts => {
+                        // Fresh index — load from it.
+                        let mut idx_f = File::open(&idx_path).wrap_err_with(|| {
+                            format!("Failed to open index file {}", idx_path.display())
+                        })?;
+                        return load_index(&mut idx_f, idx_path.to_str().unwrap_or(""), locale);
+                    }
+                    Some(_) => {
+                        // Stale index — warn and fall through to the embedded index.
+                        eprintln!(
+                            "{}",
+                            t!(
+                                "cli.common.warnings.stale_index",
+                                locale = locale.as_str(),
+                                file = archive_path.display().to_string()
+                            )
+                        );
+                    }
+                    None => {
+                        // Unreadable / invalid index header — fall through silently.
+                    }
+                }
+            }
+        }
+    }
+
+    // Fall back to reading the embedded index from the archive.
+    load_archive(archive_source, archive_path.to_str().unwrap_or(""), locale)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -854,5 +1170,171 @@ mod tests {
         let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         let original_size = state.entries[0].entry.original_size;
         assert_eq!(original_size, content.len() as u64);
+    }
+
+    // ── Phase 2 — load_with_auto_index tests ─────────────────────────────────
+
+    /// Build a v6 archive file on disk (not a Cursor) and return its path.
+    fn write_v6_archive_on_disk(
+        dir: &tempfile::TempDir,
+        name: &str,
+        files: &[(&str, &[u8])],
+    ) -> std::path::PathBuf {
+        crate::test_utils::build_v6_archive(dir, name, files)
+    }
+
+    /// Write a fresh `.dari` sidecar alongside `archive_path`.
+    fn write_dari(archive_path: &std::path::Path) {
+        crate::test_utils::write_dari_sidecar(archive_path);
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v5_archive_uses_embedded_index() {
+        // A v5 archive must use the embedded index even when a (garbage) .dari exists.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path =
+            crate::test_utils::build_archive(&dir, "v5skip.dar", &[("a.txt", b"hello")], None);
+
+        // Place a garbage .dari next to the archive — it must be ignored.
+        let dari_path = archive_path.with_extension("dari");
+        std::fs::write(
+            &dari_path,
+            b"GARBAGE DATA \xE2\x80\x94 NOT A VALID DARI FILE",
+        )
+        .unwrap();
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "a.txt");
+        assert_eq!(state.header.version, 5, "v5 archive must report version 5");
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v6_no_dari_falls_back_to_embedded() {
+        // v6 archive with no .dari → falls back to the embedded index.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = write_v6_archive_on_disk(&dir, "v6_noindex.dar", &[("b.txt", b"world")]);
+
+        // Confirm no .dari exists after the raw builder call (no IndexWriter attached).
+        assert!(!archive_path.with_extension("dari").exists());
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "b.txt");
+        assert_eq!(state.header.version, 6);
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v6_fresh_dari_is_preferred() {
+        // v6 archive with a fresh (matching-timestamp) .dari → load_index is used.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path =
+            write_v6_archive_on_disk(&dir, "v6_fresh.dar", &[("c.txt", b"fresh content")]);
+        write_dari(&archive_path);
+
+        assert!(
+            archive_path.with_extension("dari").exists(),
+            "fresh .dari must exist"
+        );
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "c.txt");
+        assert_eq!(state.header.version, 6);
+    }
+
+    #[test]
+    fn test_load_with_auto_index_no_index_flag_bypasses_fresh_dari() {
+        // no_index = true: ignore a fresh .dari and load from the embedded index.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path =
+            write_v6_archive_on_disk(&dir, "v6_bypass.dar", &[("d.txt", b"bypass test")]);
+        write_dari(&archive_path);
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        // no_index = true must bypass the fresh .dari.
+        let state = load_with_auto_index(&mut fh, &archive_path, true, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "d.txt");
+        assert_eq!(state.header.version, 6, "embedded index still reports v6");
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v6_stale_dari_falls_back_to_embedded() {
+        // .dari with timestamp 0 (guaranteed stale vs. any real archive) → falls back.
+        use crate::index_writer::IndexWriter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path =
+            write_v6_archive_on_disk(&dir, "v6_stale.dar", &[("e.txt", b"stale test")]);
+
+        // Write a .dari with timestamp 0 — will never match a real archive timestamp.
+        let dari_path = archive_path.with_extension("dari");
+        let stale_iw = IndexWriter::new(&dari_path, 0, 1).unwrap();
+        stale_iw.finish().unwrap();
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        // Must fall back to the embedded index without panicking.
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(
+            state.entries.len(),
+            1,
+            "stale .dari must not prevent loading the archive"
+        );
+        assert_eq!(state.entries[0].path, "e.txt");
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v6_unreadable_dari_falls_back() {
+        // .dari file is too short to read the 17-byte header → falls back silently.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path =
+            write_v6_archive_on_disk(&dir, "v6_badidx.dar", &[("f.txt", b"invalid index")]);
+
+        // 5-byte file triggers UnexpectedEof in read_exact — returns None → fall through.
+        let dari_path = archive_path.with_extension("dari");
+        std::fs::write(&dari_path, b"SHORT").unwrap();
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].path, "f.txt");
+    }
+
+    #[test]
+    fn test_load_with_auto_index_v6_multiple_entries_via_dari() {
+        // All entries are returned when loading from a fresh .dari with multiple entries.
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = write_v6_archive_on_disk(
+            &dir,
+            "v6_multi.dar",
+            &[("x.txt", b"one"), ("y.rs", b"two"), ("z.html", b"three")],
+        );
+        write_dari(&archive_path);
+
+        let locale = en();
+        let mut fh = std::fs::File::open(&archive_path).unwrap();
+        let state = load_with_auto_index(&mut fh, &archive_path, false, &locale).unwrap();
+
+        assert_eq!(state.entries.len(), 3);
+        let paths: Vec<&str> = state.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"x.txt"));
+        assert!(paths.contains(&"y.rs"));
+        assert!(paths.contains(&"z.html"));
     }
 }

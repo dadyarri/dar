@@ -69,6 +69,16 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("reindex", sub_matches)) => {
+            commands::reindex::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.reindex.errors.reindex_failed",
+                    locale = locale.as_str(),
+                    file = sub_matches.get_one::<String>("file").map(String::as_str).unwrap_or("")
+                )
+                .to_string(),
+            )?;
+        }
         _ => unreachable!(),
     }
 

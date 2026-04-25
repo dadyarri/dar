@@ -11,6 +11,10 @@ verbose = "Включить подробный вывод"
 content = "Файлы/папки для добавления в архив"
 help = "Показать справку по команде"
 version = "Показать информацию о версии"
+no_index = "Пропустить автообнаружение внешнего файла индекса .dari и читать встроенный индекс"
+
+[cli.common.warnings]
+stale_index = "внешний индекс устарел (метки времени различаются); выполните 'dari reindex -f %{file}' или передайте --no-index для пропуска"
 
 [cli.common.flags]
 format_version = "целевая версия формата архива (5 или 6, по умолчанию 5)"
@@ -86,6 +90,7 @@ file_exists = "Файл %{file} уже существует"
 delete_failed = "Не удалось удалить файл"
 create_file_failed = "Не удалось создать файл"
 create_archive_failed = "Не удалось создать архив"
+index_write_failed = "Не удалось создать внешний файл индекса для архива"
 
 [cli.append]
 about = "Добавляет данные в существующий архив"
@@ -285,3 +290,20 @@ shell = "Оболочка для генерации автодополнения
 
 [cli.completions.errors]
 completions_failed = "Не удалось сгенерировать скрипт автодополнения"
+
+[cli.reindex]
+about = "Пересоздать внешний индекс (.dari) для архива v6"
+
+[cli.reindex.args]
+file = "Путь к архивному файлу"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+
+[cli.reindex.messages]
+reindex_done = "Индекс записан в %{path}"
+
+[cli.reindex.errors]
+reindex_failed = "Не удалось пересоздать индекс для %{file}"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архив %{file} не существует"
+v5_unsupported = "Архив %{file} имеет формат v5; reindex работает только с архивами v6"
+

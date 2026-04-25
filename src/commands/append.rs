@@ -134,9 +134,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let ArchiveState {
         entries,
+        header,
         index_offset,
         ..
     } = existing_archive;
+    let archive_timestamp = header.timestamp;
 
     // ── Dry-run short-circuit ────────────────────────────────────────────────
     if dry_run {
@@ -156,6 +158,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         conflict_mode,
         verbose,
         format_version,
+        archive_timestamp,
         locale,
     )
 }
@@ -282,6 +285,7 @@ fn execute_append_write(
     conflict_mode: ConflictMode,
     verbose: bool,
     format_version: FormatVersion,
+    archive_timestamp: u64,
     locale: &Locale,
 ) -> Result<()> {
     println!(
@@ -313,6 +317,22 @@ fn execute_append_write(
     let mut builder = ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
+
+    // For v6 archives, attach an external index writer so the `.dari` file is
+    // regenerated when `build()` is called.  Use the existing archive's timestamp
+    // so the index and archive stay in sync.
+    if format_version == FormatVersion::V6 {
+        let idx_path = crate::index_writer::index_path_for_archive(std::path::Path::new(file));
+        let iw = crate::index_writer::IndexWriter::new(&idx_path, archive_timestamp, 1)
+            .wrap_err_with(|| {
+                t!(
+                    "cli.create.errors.index_write_failed",
+                    locale = locale.as_str()
+                )
+                .to_string()
+            })?;
+        builder.set_index_writer(iw);
+    }
 
     let start = Instant::now();
     let mut count = 0usize;

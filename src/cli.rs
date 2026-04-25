@@ -212,6 +212,10 @@ where
                         .num_args(1)
                         .value_name(passphrase_value)
                         .help(translate("cli.inspect.args.encrypt_passphrase")),
+                    Arg::new("no-index")
+                        .long("no-index")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.no_index")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
@@ -242,6 +246,10 @@ where
                         .num_args(1)
                         .value_name(passphrase_value)
                         .help(translate("cli.extract.args.encrypt_passphrase")),
+                    Arg::new("no-index")
+                        .long("no-index")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.no_index")),
                     Arg::new("paths")
                         .num_args(0..)
                         .required(false)
@@ -270,6 +278,10 @@ where
                         .long("json")
                         .action(ArgAction::SetTrue)
                         .help(translate("cli.list.args.json")),
+                    Arg::new("no-index")
+                        .long("no-index")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.common.args.no_index")),
                     Arg::new("help")
                         .short('h')
                         .long("help")
@@ -327,6 +339,29 @@ where
                         .required(true)
                         .value_parser(clap::value_parser!(Shell))
                         .help(translate("cli.completions.args.shell")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
+            Command::new("reindex")
+                .about(translate("cli.reindex.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.reindex.args.file")),
+                    Arg::new("encrypt-passphrase")
+                        .long("encrypt-passphrase")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .value_name(passphrase_value)
+                        .help(translate("cli.reindex.args.encrypt_passphrase")),
                     Arg::new("help")
                         .short('h')
                         .long("help")

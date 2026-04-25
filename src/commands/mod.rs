@@ -5,4 +5,5 @@ pub mod encrypt;
 pub mod extract;
 pub mod inspect;
 pub mod list;
+pub mod reindex;
 pub mod shared;

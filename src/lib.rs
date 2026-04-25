@@ -13,6 +13,7 @@ pub mod conflict;
 pub mod constants;
 pub mod format_version;
 pub mod counting_writer;
+pub mod index_writer;
 pub mod encryption;
 pub mod errors;
 pub mod extra;
