@@ -9,7 +9,7 @@ use crate::traits::FromLeBytes;
 #[cfg(test)]
 use eyre::ContextCompat;
 
-/// Gets current timestamp in seconds since Unix Epoch
+/// Return the current timestamp in whole seconds since the Unix epoch.
 pub fn get_unix_timestamp() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -17,7 +17,7 @@ pub fn get_unix_timestamp() -> Result<u64> {
         .as_secs())
 }
 
-/// Reads number of specified type in bytearray starting from specified index
+/// Read a little-endian numeric value of type `T` from `bytes` at `starting_from`.
 #[cfg(test)]
 pub fn read_bytes_as<T: FromLeBytes>(bytes: &[u8], starting_from: usize) -> Result<T> {
     let end = starting_from + T::SIZE;
@@ -33,7 +33,7 @@ pub fn read_bytes_as<T: FromLeBytes>(bytes: &[u8], starting_from: usize) -> Resu
     Ok(T::from_le_bytes(slice))
 }
 
-/// Reads string of specified length starting from specified index from bytearray
+/// Read a UTF-8 string slice of `length` bytes from `bytes` at `starting_from`.
 #[cfg(test)]
 pub fn read_string(bytes: &[u8], starting_from: usize, length: usize) -> Result<String> {
     let end = starting_from + length;
@@ -50,7 +50,21 @@ pub fn read_string(bytes: &[u8], starting_from: usize, length: usize) -> Result<
     Ok(s.to_string())
 }
 
-/// Calculate relative path starting from directory root
+/// Compute the archive-relative path for `file_path` under `dir_root`.
+///
+/// The returned path is sanitized so parent traversals, absolute prefixes, and
+/// platform-specific root components are removed.
+///
+/// # Examples
+///
+/// ```
+/// use dari::utils::calculate_archive_path;
+/// use std::path::Path;
+///
+/// let root = Path::new("/tmp/project");
+/// let file = Path::new("/tmp/project/src/main.rs");
+/// assert_eq!(calculate_archive_path(root, file), "src/main.rs");
+/// ```
 pub fn calculate_archive_path(dir_root: &Path, file_path: &Path) -> String {
     let relative = file_path.strip_prefix(dir_root).unwrap_or(file_path);
     let path_str = relative.to_string_lossy().to_string();
@@ -80,9 +94,15 @@ pub fn get_mode(metadata: &fs::Metadata) -> (u32, u32, u16) {
 /// | `"other"`| —                                          | everything else (en) |
 ///
 /// Combine the suffix with a dot-separated key prefix to get the final i18n key:
-/// ```ignore
-/// let key = plural_key(total, "tui.inspect.status_total", locale);
-/// rust_i18n::t!(&key, locale = locale, total = total)
+/// ```
+/// use dari::utils::{plural_key, plural_suffix};
+///
+/// assert_eq!(plural_suffix(1, "en"), "one");
+/// assert_eq!(plural_suffix(2, "ru"), "few");
+/// assert_eq!(
+///     plural_key(5, "tui.inspect.status_total", "ru"),
+///     "tui.inspect.status_total_many"
+/// );
 /// ```
 pub fn plural_suffix(n: usize, locale: &str) -> &'static str {
     match locale {
@@ -107,14 +127,26 @@ pub fn plural_suffix(n: usize, locale: &str) -> &'static str {
     }
 }
 
-/// Returns the fully-qualified i18n key for a plural-aware translation.
+/// Return the fully-qualified i18n key for a plural-aware translation.
 ///
-/// Example: `plural_key(5, "tui.inspect.status_total", "ru")` → `"tui.inspect.status_total_many"`
+/// # Examples
+///
+/// ```
+/// use dari::utils::plural_key;
+///
+/// assert_eq!(
+///     plural_key(5, "tui.inspect.status_total", "ru"),
+///     "tui.inspect.status_total_many"
+/// );
+/// ```
 pub fn plural_key(n: usize, prefix: &str, locale: &str) -> String {
     format!("{prefix}_{}", plural_suffix(n, locale))
 }
 
-/// Cleanup path
+/// Normalize a path string for storage inside an archive.
+///
+/// This removes `..`, root markers, and Windows-style prefixes, then rejoins
+/// the surviving path components with `/`.
 pub(crate) fn sanitize_path(path: &str) -> String {
     let mut components = Vec::new();
     let path_obj = PathBuf::from(path);

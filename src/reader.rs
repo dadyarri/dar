@@ -485,9 +485,8 @@ pub fn load_v6(
 
 /// Parse the header, footer, and full index of a `.dar` archive source.
 ///
-/// Reads the version byte from the archive and dispatches to the appropriate
-/// version-specific loader.  Currently only v5 archives are supported;
-/// v6 support will be added in Phase 1.
+/// Reads the version byte from the archive and dispatches to the matching
+/// version-specific loader (`v5` or `v6`).
 ///
 /// `source` can be any [`ReadSeek`] implementation — typically a `std::fs::File`
 /// in production code or a `std::io::Cursor<Vec<u8>>` in unit tests.

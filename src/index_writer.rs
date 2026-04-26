@@ -100,6 +100,22 @@ unsafe impl Zeroable for IndexFileFooter {}
 /// - `archive.dar`     → `archive.dari`
 /// - `archive.dar.001` → `archive.dari`
 /// - `archive.dar.002` → `archive.dari`
+///
+/// # Examples
+///
+/// ```
+/// use dari::index_writer::index_path_for_archive;
+/// use std::path::Path;
+///
+/// assert_eq!(
+///     index_path_for_archive(Path::new("archive.dar")),
+///     Path::new("archive.dari")
+/// );
+/// assert_eq!(
+///     index_path_for_archive(Path::new("archive.dar.001")),
+///     Path::new("archive.dari")
+/// );
+/// ```
 pub fn index_path_for_archive(archive_path: &Path) -> PathBuf {
     // Strip a three-digit-numeric extension (volume suffix) if present.
     let base = match archive_path.extension() {
@@ -168,7 +184,7 @@ impl IndexWriter {
         })
     }
 
-    /// Append one archive entry (serialised as a v6 index record) to the file.
+    /// Append one archive entry serialized as a v6 index record to the file.
     pub fn write_entry(&mut self, wrapper: &ArchiveIndexEntryWrapper) -> Result<()> {
         let e = wrapper.entry;
         let v6_entry = ArchiveIndexEntryV6 {
