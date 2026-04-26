@@ -1,6 +1,6 @@
 use crate::constants::crypto;
-use crate::constants::flags;
 use crate::constants::extra_keys;
+use crate::constants::flags;
 use crate::encryption::nonce_for_segment;
 use crate::encryption::nonce_from_checksum;
 use crate::extra::parse_extra_pairs;
@@ -375,9 +375,7 @@ fn decrypt_data(
         return Err(eyre!(t!("cli.extractor.errors.data_too_short")));
     }
     if bitflags & flags::CHUNKED_ENCRYPTION != 0 && parse_chunked_segment_count(extra).is_none() {
-        return Err(eyre!(t!(
-            "cli.extractor.errors.chunked_segments_missing"
-        )));
+        return Err(eyre!(t!("cli.extractor.errors.chunked_segments_missing")));
     }
     try_decrypt_bytes(data, checksum, bitflags, extra, passphrase)
         .ok_or_else(|| eyre!(t!("cli.extractor.errors.decrypt_invalid")))
@@ -784,14 +782,24 @@ mod tests {
         let refs: Vec<&ArchiveIndexEntryWrapper> = entries.iter().collect();
         extract_entries(&archive_path, &refs, &entries, &dest, None).unwrap();
 
-        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"preserved payload");
-        assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), b"preserved payload");
+        assert_eq!(
+            std::fs::read(dest.join("a.txt")).unwrap(),
+            b"preserved payload"
+        );
+        assert_eq!(
+            std::fs::read(dest.join("b.txt")).unwrap(),
+            b"preserved payload"
+        );
         assert_eq!(
             xattr::get(dest.join("a.txt"), "user.dari.test").unwrap(),
             Some(b"roundtrip".to_vec())
         );
         let a_meta = std::fs::metadata(dest.join("a.txt")).unwrap();
         let b_meta = std::fs::metadata(dest.join("b.txt")).unwrap();
-        assert_eq!(a_meta.ino(), b_meta.ino(), "extracted files should be hard-linked");
+        assert_eq!(
+            a_meta.ino(),
+            b_meta.ino(),
+            "extracted files should be hard-linked"
+        );
     }
 }

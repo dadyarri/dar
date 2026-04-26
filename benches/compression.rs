@@ -5,11 +5,10 @@
 /// `iter_batched` is used so that the payload clone (needed because
 /// `process_file` takes ownership) is **excluded** from the measured time and
 /// only the compression step itself is captured.
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use dari::pipeline::{CompressionPipeline, PipelineConfig};
 use std::hint::black_box;
 use std::path::Path;
-
 
 rust_i18n::i18n!("locales", fallback = "en");
 

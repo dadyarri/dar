@@ -139,7 +139,10 @@ mod tests {
         let sub_matches = make_matches(&["-f", archive.to_str().unwrap()]);
         let locale = Locale::new("en");
         let result = call(&sub_matches, &locale);
-        assert!(result.is_err(), "reindex on a v5 archive must return an error");
+        assert!(
+            result.is_err(),
+            "reindex on a v5 archive must return an error"
+        );
     }
 
     #[test]
@@ -270,6 +273,9 @@ mod tests {
         let dari_hdr = *from_bytes::<IndexFileHeader>(&dari_bytes[..17]);
         let dari_ts = dari_hdr.archive_timestamp;
 
-        assert_eq!(dari_ts, archive_ts, ".dari timestamp must match the archive header timestamp");
+        assert_eq!(
+            dari_ts, archive_ts,
+            ".dari timestamp must match the archive header timestamp"
+        );
     }
 }

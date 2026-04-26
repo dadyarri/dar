@@ -6,7 +6,7 @@
 /// The archive is built entirely in-memory — no filesystem I/O occurs during
 /// setup.  The benchmark loop creates a fresh `Cursor<&[u8]>` (O(1), no copy)
 /// rather than cloning the archive bytes on every iteration.
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use dari::{
     archive_builder::ArchiveBuilder,
     file_reader::PreparedFile,
@@ -16,7 +16,6 @@ use dari::{
 };
 use std::hint::black_box;
 use std::io::Cursor;
-
 
 rust_i18n::i18n!("locales", fallback = "en");
 

@@ -41,7 +41,10 @@ impl std::fmt::Display for DariError {
                     "path conflict: '{existing}' already exists in the archive"
                 )
             }
-            DariError::UnsupportedVersion { found, max_supported } => write!(
+            DariError::UnsupportedVersion {
+                found,
+                max_supported,
+            } => write!(
                 f,
                 "unsupported archive version: found {found}, max supported {max_supported}"
             ),

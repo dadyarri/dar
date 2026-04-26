@@ -102,7 +102,10 @@ mod tests {
     fn test_nonce_for_segment_xors_le_counter_into_prefix() {
         let base = [0xAA; crypto::NONCE_LEN];
         let derived = nonce_for_segment(&base, 0x0102_0304_0506_0708);
-        assert_eq!(derived[..8], [0xA2, 0xAD, 0xAC, 0xAF, 0xAE, 0xA9, 0xA8, 0xAB]);
+        assert_eq!(
+            derived[..8],
+            [0xA2, 0xAD, 0xAC, 0xAF, 0xAE, 0xA9, 0xA8, 0xAB]
+        );
         assert_eq!(derived[8..], [0xAA; 4]);
     }
 }

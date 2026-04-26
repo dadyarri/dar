@@ -140,14 +140,13 @@ impl IndexWriter {
     /// `ArchiveHeaderV6::timestamp`) of the corresponding archive so that
     /// readers can detect a stale index.
     pub fn new(path: &Path, archive_timestamp: u64, total_volumes: u16) -> Result<Self> {
-        let file = File::create(path)
-            .wrap_err_with(|| {
-                t!(
-                    "cli.common.errors.index_file_create_failed",
-                    file = path.display().to_string()
-                )
-                .to_string()
-            })?;
+        let file = File::create(path).wrap_err_with(|| {
+            t!(
+                "cli.common.errors.index_file_create_failed",
+                file = path.display().to_string()
+            )
+            .to_string()
+        })?;
         let mut writer = BufWriter::new(file);
         let header = IndexFileHeader {
             signature: *INDEX_SIGNATURE,
@@ -235,10 +234,12 @@ impl IndexWriter {
             .wrap_err(t!("cli.common.errors.index_file_total_volumes_seek_failed"))?;
         self.writer
             .write_all(&self.total_volumes.to_le_bytes())
-            .wrap_err(t!("cli.common.errors.index_file_total_volumes_patch_failed"))?;
-        self.writer
-            .flush()
-            .wrap_err(t!("cli.common.errors.index_file_flush_patched_header_failed"))?;
+            .wrap_err(t!(
+                "cli.common.errors.index_file_total_volumes_patch_failed"
+            ))?;
+        self.writer.flush().wrap_err(t!(
+            "cli.common.errors.index_file_flush_patched_header_failed"
+        ))?;
         self.writer
             .seek(std::io::SeekFrom::End(0))
             .wrap_err(t!("cli.common.errors.index_file_seek_end_failed"))?;
@@ -362,7 +363,9 @@ mod tests {
     #[test]
     fn test_write_one_entry_and_read_back() {
         use crate::i18n::Locale;
-        use crate::models::archive::{ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod};
+        use crate::models::archive::{
+            ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
+        };
         use crate::reader::load_index;
 
         let dir = tempfile::tempdir().unwrap();
@@ -441,7 +444,9 @@ mod tests {
     #[test]
     fn test_write_multiple_entries_and_read_back_verifies_all_fields() {
         use crate::i18n::Locale;
-        use crate::models::archive::{ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod};
+        use crate::models::archive::{
+            ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
+        };
         use crate::reader::load_index;
 
         let dir = tempfile::tempdir().unwrap();

@@ -337,7 +337,10 @@ mod tests {
     #[test]
     fn null_byte_is_binary() {
         let bytes = b"hello\x00world";
-        assert!(matches!(classify_bytes(bytes, "txt"), PreviewContent::Binary));
+        assert!(matches!(
+            classify_bytes(bytes, "txt"),
+            PreviewContent::Binary
+        ));
     }
 
     #[test]
@@ -345,7 +348,10 @@ mod tests {
         // > 10 % control bytes (0x01-0x08, 0x0E-0x1F)
         let mut bytes = vec![0x01u8; 20];
         bytes.extend_from_slice(b"normal text here");
-        assert!(matches!(classify_bytes(&bytes, "txt"), PreviewContent::Binary));
+        assert!(matches!(
+            classify_bytes(&bytes, "txt"),
+            PreviewContent::Binary
+        ));
     }
 
     #[test]
@@ -354,7 +360,13 @@ mod tests {
         // Extension "unknownext" has no syntect syntax, so it falls back to Text.
         let result = classify_bytes(b"", "unknownext");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "expected Text for empty bytes"
         );
     }
@@ -368,7 +380,13 @@ mod tests {
         let bytes = b"Hello, world!\n";
         let result = classify_bytes(bytes, "unknownext");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "unexpected variant"
         );
     }
@@ -379,7 +397,13 @@ mod tests {
         let result = classify_bytes(code, "rs");
         // syntect knows Rust — should return HighlightedText.
         assert!(
-            matches!(result, PreviewContent::HighlightedText { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::HighlightedText {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "expected HighlightedText for .rs extension"
         );
     }
@@ -417,7 +441,13 @@ mod tests {
         let bytes: &[u8] = &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
         let result = classify_bytes(bytes, "txt");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "Windows-1251", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "Windows-1251",
+                    ..
+                }
+            ),
             "expected Windows-1251 text"
         );
     }
@@ -434,8 +464,11 @@ mod tests {
         use bytemuck::Zeroable;
 
         let extra = format!("{}=algo", extra_keys::ENC_ALGO);
-        let wrapper =
-            ArchiveIndexEntryWrapper::new(ArchiveIndexEntry::zeroed(), "file.txt".to_string(), extra);
+        let wrapper = ArchiveIndexEntryWrapper::new(
+            ArchiveIndexEntry::zeroed(),
+            "file.txt".to_string(),
+            extra,
+        );
 
         // Pass `None` as passphrase; with no data to read the raw bytes will be
         // `None` → Binary, but since encrypted flag is set and passphrase is None
@@ -451,13 +484,17 @@ mod tests {
         let archive = build_v6_archive(&dir, "ok.dar", &[("alpha.txt", b"alpha")]);
         let mut fh = fs::File::open(&archive).unwrap();
         let locale = crate::i18n::Locale::new("en");
-        let state = crate::reader::load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
+        let state =
+            crate::reader::load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
         let entry = &state.entries[0];
 
         let preview = build_preview(&archive, entry, &state.entries, None, "en");
 
         assert_eq!(preview.integrity, PreviewIntegrity::Verified);
-        assert!(!matches!(preview.content, PreviewContent::StoredChecksumMismatch));
+        assert!(!matches!(
+            preview.content,
+            PreviewContent::StoredChecksumMismatch
+        ));
     }
 
     #[test]
@@ -482,8 +519,8 @@ mod tests {
 
         let mut fh = fs::File::open(&archive_path).unwrap();
         let locale = crate::i18n::Locale::new("en");
-        let state = crate::reader::load_archive(&mut fh, archive_path.to_str().unwrap(), &locale)
-            .unwrap();
+        let state =
+            crate::reader::load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
         let entry = &state.entries[0];
 
         let preview = build_preview(&archive_path, entry, &state.entries, None, "en");

@@ -64,7 +64,10 @@ mod tests {
     fn test_unknown_version_returns_error() {
         let err = FormatVersion::try_from(99u8).unwrap_err();
         match err {
-            DariError::UnsupportedVersion { found, max_supported } => {
+            DariError::UnsupportedVersion {
+                found,
+                max_supported,
+            } => {
                 assert_eq!(found, 99);
                 assert_eq!(max_supported, 6);
             }
@@ -77,4 +80,3 @@ mod tests {
         assert_eq!(FormatVersion::default(), FormatVersion::V5);
     }
 }
-

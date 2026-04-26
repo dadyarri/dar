@@ -489,10 +489,12 @@ fn test_v6_dari_timestamp_matches_archive_header() {
     let dari_hdr = *from_bytes::<IndexFileHeader>(&dari_bytes[..17]);
     let dari_ts = dari_hdr.archive_timestamp;
 
-    assert_eq!(dari_ts, archive_ts, ".dari timestamp must match the archive header timestamp");
     assert_eq!(
-        &dari_hdr.signature,
-        INDEX_SIGNATURE,
+        dari_ts, archive_ts,
+        ".dari timestamp must match the archive header timestamp"
+    );
+    assert_eq!(
+        &dari_hdr.signature, INDEX_SIGNATURE,
         "dari signature must be DARIDX"
     );
 }
@@ -521,10 +523,7 @@ fn test_v6_auto_index_extract_roundtrip() {
     extract_entries(&archive, &refs, &state.entries, &dest, None).unwrap();
 
     assert_eq!(fs::read(dest.join("alpha.txt")).unwrap(), b"alpha");
-    assert_eq!(
-        fs::read(dest.join("beta.rs")).unwrap(),
-        b"fn main() {}"
-    );
+    assert_eq!(fs::read(dest.join("beta.rs")).unwrap(), b"fn main() {}");
 }
 
 #[test]
@@ -656,8 +655,7 @@ fn test_v6_append_regenerates_dari_with_all_entries() {
 
         // Attach an IndexWriter so the .dari is regenerated on build().
         let idx_path = crate::index_writer::index_path_for_archive(&archive_path);
-        let iw =
-            crate::index_writer::IndexWriter::new(&idx_path, archive_ts, 1).unwrap();
+        let iw = crate::index_writer::IndexWriter::new(&idx_path, archive_ts, 1).unwrap();
         builder.set_index_writer(iw);
 
         let new_file = dir.path().join("appended.txt");

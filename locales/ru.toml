@@ -397,3 +397,28 @@ reindex_failed = "Не удалось пересоздать индекс для
 open_failed = "Не удалось открыть архив %{file}"
 archive_missing = "Архив %{file} не существует"
 v5_unsupported = "Архив %{file} имеет формат v5; reindex работает только с архивами v6"
+
+[cli.migrate]
+about = "Мигрирует архив v5 в v6 без повторного сжатия и шифрования данных"
+
+[cli.migrate.args]
+file = "Путь к исходному архиву v5"
+output = "Записать мигрированный архив v6 по этому пути (по умолчанию — замена на месте)"
+split_size = "Разбить мигрированный вывод v6 на нумерованные тома, когда размер тома превышает это значение"
+preserve_xattrs = "Флаг принят для совместимости с roadmap; в мигрируемых записях v5 xattr отсутствуют"
+
+[cli.migrate.messages]
+migrating = "Миграция %{file} в формат v%{version}"
+migrate_done = "Миграция завершена: %{entries} записей записано в %{out}"
+
+[cli.migrate.errors]
+migrate_failed = "Не удалось выполнить миграцию %{file}"
+archive_missing = "Архив %{file} не существует"
+open_failed = "Не удалось открыть архив %{file}"
+already_v6 = "%{file} уже имеет формат v6; делать нечего"
+output_exists = "Файл назначения %{file} уже существует"
+create_failed = "Не удалось создать результат миграции %{file}"
+read_entry_failed = "Не удалось прочитать сохранённые байты %{path} из %{file}"
+rename_failed = "Не удалось переименовать %{from} в %{to} во время миграции"
+cleanup_failed = "Не удалось удалить временную резервную копию %{file} после миграции"
+split_in_place_unsupported = "Миграция на месте не поддерживает --split-size; укажите --output"

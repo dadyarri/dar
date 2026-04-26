@@ -221,7 +221,11 @@ fn parse_split_size(value: &str, locale: &Locale) -> Result<u64> {
         .unwrap_or(trimmed.len());
     let (digits, suffix) = trimmed.split_at(split_at);
     let base: u64 = digits.parse().wrap_err(
-        t!("cli.common.errors.split_size_invalid", locale = locale.as_str()).to_string(),
+        t!(
+            "cli.common.errors.split_size_invalid",
+            locale = locale.as_str()
+        )
+        .to_string(),
     )?;
     let multiplier = match suffix.trim().to_ascii_lowercase().as_str() {
         "" | "b" => 1,
@@ -293,7 +297,10 @@ mod tests {
         assert_eq!(parse_split_size("512", &locale).unwrap(), 512);
         assert_eq!(parse_split_size("2K", &locale).unwrap(), 2 * 1024);
         assert_eq!(parse_split_size("3m", &locale).unwrap(), 3 * 1024 * 1024);
-        assert_eq!(parse_split_size("1GB", &locale).unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(
+            parse_split_size("1GB", &locale).unwrap(),
+            1024 * 1024 * 1024
+        );
     }
 
     #[test]

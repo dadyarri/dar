@@ -83,7 +83,23 @@ fn main() -> Result<()> {
                 rust_i18n::t!(
                     "cli.reindex.errors.reindex_failed",
                     locale = locale.as_str(),
-                    file = sub_matches.get_one::<String>("file").map(String::as_str).unwrap_or("")
+                    file = sub_matches
+                        .get_one::<String>("file")
+                        .map(String::as_str)
+                        .unwrap_or("")
+                )
+                .to_string(),
+            )?;
+        }
+        Some(("migrate", sub_matches)) => {
+            commands::migrate::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.migrate.errors.migrate_failed",
+                    locale = locale.as_str(),
+                    file = sub_matches
+                        .get_one::<String>("file")
+                        .map(String::as_str)
+                        .unwrap_or("")
                 )
                 .to_string(),
             )?;

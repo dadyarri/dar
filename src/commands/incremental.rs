@@ -114,8 +114,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         return Ok(());
     }
 
-    let archive_format_version = FormatVersion::try_from(existing_archive.header.version)
-        .map_err(eyre::Report::new)?;
+    let archive_format_version =
+        FormatVersion::try_from(existing_archive.header.version).map_err(eyre::Report::new)?;
     if version_explicitly_set && cli_format_version != archive_format_version {
         return Err(eyre!(t!(
             "cli.append.errors.version_mismatch",
@@ -199,11 +199,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .to_string(),
     )?;
 
-    let mut builder = ArchiveBuilder::with_version(
-        BufWriter::new(file_handle),
-        config,
-        archive_format_version,
-    );
+    let mut builder =
+        ArchiveBuilder::with_version(BufWriter::new(file_handle), config, archive_format_version);
     builder.set_archive_output_path(file);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
@@ -434,13 +431,19 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    try_decrypt_bytes(&data, &probe.checksum, probe.bitflags, &probe.extra, passphrase)
-        .ok_or_else(|| {
-            eyre!(t!(
-                "cli.append.errors.append_passphrase_invalid",
-                locale = locale.as_str()
-            ))
-        })?;
+    try_decrypt_bytes(
+        &data,
+        &probe.checksum,
+        probe.bitflags,
+        &probe.extra,
+        passphrase,
+    )
+    .ok_or_else(|| {
+        eyre!(t!(
+            "cli.append.errors.append_passphrase_invalid",
+            locale = locale.as_str()
+        ))
+    })?;
 
     Ok(())
 }

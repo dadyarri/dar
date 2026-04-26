@@ -73,7 +73,9 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
                 "path": volume_path,
             }));
         } else if volume_ok {
-            let bytes = std::fs::metadata(&volume_path).map(|m| m.len()).unwrap_or(0);
+            let bytes = std::fs::metadata(&volume_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
             println!(
                 "{}",
                 t!(
@@ -98,8 +100,12 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     for entry in &state.entries {
         let entry_offset = entry.entry.offset;
         let entry_volume = entry.volume_number;
-        let raw = read_raw_entry_bytes(archive_path, entry, &state.entries)
-            .ok_or_else(|| eyre!(t!("cli.verify.errors.verify_failed", locale = locale.as_str())))?;
+        let raw = read_raw_entry_bytes(archive_path, entry, &state.entries).ok_or_else(|| {
+            eyre!(t!(
+                "cli.verify.errors.verify_failed",
+                locale = locale.as_str()
+            ))
+        })?;
         let stored_ok = entry
             .stored_checksum_v6()
             .is_none_or(|expected| blake3::hash(&raw).as_bytes() == expected);
@@ -146,7 +152,14 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
                     path = entry.path.as_str()
                 ))
             })?;
-            try_decrypt_bytes(&raw, &entry.entry.checksum, entry.entry.bitflags, &entry.extra, pass).ok_or_else(|| {
+            try_decrypt_bytes(
+                &raw,
+                &entry.entry.checksum,
+                entry.entry.bitflags,
+                &entry.extra,
+                pass,
+            )
+            .ok_or_else(|| {
                 eyre!(t!(
                     "cli.extractor.errors.decrypt_invalid",
                     locale = locale.as_str()

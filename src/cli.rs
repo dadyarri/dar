@@ -463,6 +463,38 @@ where
                         .action(ArgAction::Help)
                         .help(translate("cli.common.args.help")),
                 ]),
+            Command::new("migrate")
+                .about(translate("cli.migrate.about"))
+                .help_template(command_help_template(&translate))
+                .args(vec![
+                    Arg::new("file")
+                        .short('f')
+                        .long("file")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .required(true)
+                        .help(translate("cli.migrate.args.file")),
+                    Arg::new("output")
+                        .short('o')
+                        .long("output")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help(translate("cli.migrate.args.output")),
+                    Arg::new("split-size")
+                        .long("split-size")
+                        .action(ArgAction::Set)
+                        .num_args(1)
+                        .help(translate("cli.migrate.args.split_size")),
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
+                        .action(ArgAction::SetTrue)
+                        .help(translate("cli.migrate.args.preserve_xattrs")),
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
+                        .action(ArgAction::Help)
+                        .help(translate("cli.common.args.help")),
+                ]),
             Command::new("verify")
                 .about(translate("cli.verify.about"))
                 .help_template(command_help_template(&translate))
@@ -653,9 +685,7 @@ mod tests {
 
         let incremental = matches.subcommand_matches("incremental").unwrap();
         assert_eq!(
-            incremental
-                .get_one::<String>("since")
-                .map(String::as_str),
+            incremental.get_one::<String>("since").map(String::as_str),
             Some("@42")
         );
     }
@@ -707,5 +737,34 @@ mod tests {
 
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn test_migrate_flags_are_accepted() {
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(vec![
+                    "dari",
+                    "migrate",
+                    "-f",
+                    "old.dar",
+                    "-o",
+                    "new.dar",
+                    "--split-size",
+                    "2M",
+                    "--preserve-xattrs",
+                ])
+                .unwrap();
+
+        let migrate = matches.subcommand_matches("migrate").unwrap();
+        assert_eq!(
+            migrate.get_one::<String>("output").map(String::as_str),
+            Some("new.dar")
+        );
+        assert_eq!(
+            migrate.get_one::<String>("split-size").map(String::as_str),
+            Some("2M")
+        );
+        assert!(migrate.get_flag("preserve-xattrs"));
     }
 }

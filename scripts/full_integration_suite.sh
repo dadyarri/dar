@@ -288,6 +288,30 @@ main() {
     assert_file_exists "$TEST_ROOT/basic/extracted_selected/docs/readme.md"
     assert_not_exists "$TEST_ROOT/basic/extracted_selected/src/main.rs"
 
+    next_step "Testing v5 to v6 migration workflow"
+    mkdir -p "$TEST_ROOT/migrate"
+    run_cmd migrate_v5_to_v6 \
+        "$BIN" migrate -f "$TEST_ROOT/basic/basic.dar" -o "$TEST_ROOT/migrate/migrated.dar"
+    assert_file_exists "$TEST_ROOT/migrate/migrated.dar"
+    assert_file_exists "$TEST_ROOT/migrate/migrated.dari"
+    assert_file_exists "$TEST_ROOT/migrate/migrated.dar.b3"
+    run_bash migrate_list_json \
+        "\"$BIN\" list -f \"$TEST_ROOT/migrate/migrated.dar\" --json > \"$TEST_ROOT/migrate/list.json\""
+    assert_contains "$TEST_ROOT/migrate/list.json" "\"path\": \"docs/readme.md\""
+    assert_contains "$TEST_ROOT/migrate/list.json" "\"path\": \"dup/a.txt\""
+    run_cmd verify_migrated_v6 \
+        "$BIN" verify -f "$TEST_ROOT/migrate/migrated.dar" --full
+    run_cmd extract_migrated_v6 \
+        "$BIN" extract -f "$TEST_ROOT/migrate/migrated.dar" -d "$TEST_ROOT/migrate/out"
+    assert_files_equal \
+        "$TEST_ROOT/fixtures/basic_input/docs/readme.md" \
+        "$TEST_ROOT/migrate/out/docs/readme.md"
+    assert_files_equal \
+        "$TEST_ROOT/fixtures/basic_input/dup/a.txt" \
+        "$TEST_ROOT/migrate/out/dup/a.txt"
+    expect_fail migrate_v6_rejected \
+        "$BIN" migrate -f "$TEST_ROOT/migrate/migrated.dar" -o "$TEST_ROOT/migrate/should_fail.dar"
+
     next_step "Testing append conflict handling and overwrite behavior"
     mkdir -p "$TEST_ROOT/append"
     mkdir -p "$TEST_ROOT/fixtures/append_base"

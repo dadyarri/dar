@@ -759,7 +759,7 @@ eliminating superseded entries and reclaiming dead data blocks. Analogous to
 
 ---
 
-### Phase 8 — `dari migrate` command
+### Phase 8 — `dari migrate` command ✅
 
 **Goal:** Convert an existing v5 `.dar` archive to v6 in-place or to a new
 output path, without re-compressing or re-encrypting any data.

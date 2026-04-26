@@ -397,3 +397,28 @@ reindex_failed = "Failed to rebuild index for %{file}"
 open_failed = "Failed to open archive %{file}"
 archive_missing = "Archive file %{file} does not exist"
 v5_unsupported = "Archive %{file} is format v5; reindex only works with v6 archives"
+
+[cli.migrate]
+about = "Migrates a v5 archive to v6 without recompressing or re-encrypting data"
+
+[cli.migrate.args]
+file = "The path to the source v5 archive file"
+output = "Write the migrated v6 archive to this path (defaults to in-place replacement)"
+split_size = "Split migrated v6 output into numbered volumes once a volume exceeds this size"
+preserve_xattrs = "Accepted for roadmap compatibility; migrated v5 entries do not contain xattrs"
+
+[cli.migrate.messages]
+migrating = "Migrating %{file} to format v%{version}"
+migrate_done = "Migration complete: %{entries} entries written to %{out}"
+
+[cli.migrate.errors]
+migrate_failed = "Migration failed for %{file}"
+archive_missing = "Archive file %{file} does not exist"
+open_failed = "Failed to open archive %{file}"
+already_v6 = "%{file} is already format v6; nothing to do"
+output_exists = "Output file %{file} already exists"
+create_failed = "Failed to create migration output %{file}"
+read_entry_failed = "Failed to read stored bytes for %{path} from %{file}"
+rename_failed = "Failed to rename %{from} to %{to} during migration"
+cleanup_failed = "Failed to remove temporary backup %{file} after migration"
+split_in_place_unsupported = "In-place migration does not support --split-size; provide --output"

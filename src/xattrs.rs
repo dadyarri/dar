@@ -71,9 +71,7 @@ pub fn hardlink_target(xattrs: &[XattrPair]) -> Option<&str> {
 
 pub fn non_synthetic_xattrs(xattrs: &[XattrPair]) -> impl Iterator<Item = (&str, &[u8])> {
     xattrs.iter().filter_map(|(name, value)| {
-        if name == SYNTHETIC_INODE
-            || name == SYNTHETIC_DEVICE
-            || name == SYNTHETIC_HARDLINK_TARGET
+        if name == SYNTHETIC_INODE || name == SYNTHETIC_DEVICE || name == SYNTHETIC_HARDLINK_TARGET
         {
             None
         } else {

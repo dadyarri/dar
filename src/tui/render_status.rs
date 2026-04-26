@@ -425,7 +425,11 @@ mod tests {
 
     #[test]
     fn all_hint_i18n_keys_are_non_empty() {
-        for mode in [PreviewMode::Closed, PreviewMode::Metadata, PreviewMode::Content] {
+        for mode in [
+            PreviewMode::Closed,
+            PreviewMode::Metadata,
+            PreviewMode::Content,
+        ] {
             for &(is_dir, is_file, is_binary) in &[
                 (false, false, false),
                 (true, false, false),

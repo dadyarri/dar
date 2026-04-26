@@ -8,7 +8,7 @@ use crate::models::archive::{
     ArchiveIndexEntryV6, ArchiveIndexEntryWrapper,
 };
 use crate::xattrs::decode_xattr_blob;
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
@@ -529,7 +529,7 @@ pub fn load_index(
     locale: &Locale,
 ) -> Result<ArchiveState> {
     use crate::index_writer::{
-        IndexFileFooter, IndexFileHeader, INDEX_FOOTER_SIGNATURE, INDEX_SIGNATURE, INDEX_VERSION,
+        INDEX_FOOTER_SIGNATURE, INDEX_SIGNATURE, INDEX_VERSION, IndexFileFooter, IndexFileHeader,
     };
 
     let idx_header_size = size_of::<IndexFileHeader>() as u64; // 17
@@ -819,7 +819,7 @@ pub fn load_with_auto_index(
     no_index: bool,
     locale: &Locale,
 ) -> Result<ArchiveState> {
-    use crate::index_writer::{index_path_for_archive, IndexFileHeader, INDEX_SIGNATURE};
+    use crate::index_writer::{INDEX_SIGNATURE, IndexFileHeader, index_path_for_archive};
     use std::fs::File;
 
     if !no_index {

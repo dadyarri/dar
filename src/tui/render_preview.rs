@@ -196,8 +196,7 @@ pub(crate) fn build_metadata_rows_data(
         rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
 
     let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label =
-            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
         (label, human_size(meta.original_size))
     } else {
         let label =
@@ -347,14 +346,15 @@ pub(crate) fn render_content_panel(
 
     match &entry_preview.content {
         PreviewContent::StoredChecksumMismatch => {
-            let msg = rust_i18n::t!("tui.inspect.preview.stored_checksum_mismatch", locale = locale);
+            let msg = rust_i18n::t!(
+                "tui.inspect.preview.stored_checksum_mismatch",
+                locale = locale
+            );
             let hint = rust_i18n::t!("tui.inspect.preview.stored_checksum_hint", locale = locale);
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("  {}", msg),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(

@@ -83,11 +83,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
 ///
 /// Like [`build_archive`] but targets format version 6 so that external index
 /// (`.dari`) tests can rely on a v6 source archive.
-pub fn build_v6_archive(
-    dir: &tempfile::TempDir,
-    name: &str,
-    files: &[(&str, &[u8])],
-) -> PathBuf {
+pub fn build_v6_archive(dir: &tempfile::TempDir, name: &str, files: &[(&str, &[u8])]) -> PathBuf {
     use crate::format_version::FormatVersion;
 
     let archive_path = dir.path().join(name);

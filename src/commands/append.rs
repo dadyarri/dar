@@ -103,8 +103,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let existing_archive = load_archive(&mut file_handle, file, locale)?;
 
     // Determine the format version of the existing archive.
-    let archive_format_version = FormatVersion::try_from(existing_archive.header.version)
-        .map_err(eyre::Report::new)?;
+    let archive_format_version =
+        FormatVersion::try_from(existing_archive.header.version).map_err(eyre::Report::new)?;
 
     // If the user explicitly passed `--format-version` with a value that differs from
     // the archive's own format, reject the request — mixing versions is not supported.
@@ -337,7 +337,8 @@ fn execute_append_write(
         .to_string(),
     )?;
 
-    let mut builder = ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
+    let mut builder =
+        ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
     builder.set_archive_output_path(file);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
@@ -446,7 +447,14 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    try_decrypt_bytes(&data, &probe.checksum, probe.bitflags, &probe.extra, passphrase).ok_or_else(|| {
+    try_decrypt_bytes(
+        &data,
+        &probe.checksum,
+        probe.bitflags,
+        &probe.extra,
+        passphrase,
+    )
+    .ok_or_else(|| {
         eyre!(t!(
             "cli.append.errors.append_passphrase_invalid",
             locale = locale.as_str()
@@ -802,11 +810,8 @@ mod tests {
         std::fs::write(&new_file, b"appended content").unwrap();
 
         // Do not specify --format-version → the archive's version (v5) is used.
-        let sub_matches = make_matches(&[
-            "-f",
-            archive.to_str().unwrap(),
-            new_file.to_str().unwrap(),
-        ]);
+        let sub_matches =
+            make_matches(&["-f", archive.to_str().unwrap(), new_file.to_str().unwrap()]);
 
         let locale = Locale::new("en");
         // Should succeed and still be readable as a v5 archive.
@@ -818,7 +823,10 @@ mod tests {
             .open(&archive)
             .unwrap();
         let state = load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
-        assert_eq!(state.header.version, 5, "archive should remain v5 after append");
+        assert_eq!(
+            state.header.version, 5,
+            "archive should remain v5 after append"
+        );
         assert_eq!(state.entries.len(), 2);
     }
 }
