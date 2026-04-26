@@ -105,7 +105,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::build_archive;
+    use crate::test_utils::build_v5_archive;
     use clap::{Arg, ArgAction, Command};
     use tempfile::tempdir;
 
@@ -134,8 +134,7 @@ mod tests {
     #[test]
     fn test_reindex_v5_archive_returns_error() {
         let dir = tempdir().unwrap();
-        // build_archive creates a v5 archive by default.
-        let archive = build_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
+        let archive = build_v5_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
         let sub_matches = make_matches(&["-f", archive.to_str().unwrap()]);
         let locale = Locale::new("en");
         let result = call(&sub_matches, &locale);

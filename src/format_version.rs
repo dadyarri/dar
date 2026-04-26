@@ -13,9 +13,9 @@ pub enum FormatVersion {
 }
 
 impl Default for FormatVersion {
-    /// The default write version is v5 (current stable format).
+    /// The default write version is v6.
     fn default() -> Self {
-        FormatVersion::V5
+        FormatVersion::V6
     }
 }
 
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_is_v5() {
-        assert_eq!(FormatVersion::default(), FormatVersion::V5);
+    fn test_default_is_v6() {
+        assert_eq!(FormatVersion::default(), FormatVersion::V6);
     }
 }

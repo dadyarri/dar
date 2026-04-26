@@ -294,7 +294,7 @@ fn rename_optional_artifact(from: &Path, to: &Path, locale: &Locale) -> Result<(
 mod tests {
     use super::*;
     use crate::reader::load_archive;
-    use crate::test_utils::build_archive;
+    use crate::test_utils::build_v5_archive;
     use clap::{Arg, ArgAction, Command};
     use tempfile::tempdir;
 
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn test_migrate_v5_archive_to_v6_output() {
         let dir = tempdir().unwrap();
-        let source = build_archive(
+        let source = build_v5_archive(
             &dir,
             "source.dar",
             &[("a.txt", b"alpha"), ("b.txt", b"beta")],

@@ -3,7 +3,7 @@ use bytemuck::Zeroable;
 ///
 /// Exercises fuzzy matching on a 10 000-entry tree to surface regressions in
 /// the `nucleo_matcher` scoring path.
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use dari::{
     models::archive::{ArchiveIndexEntry, ArchiveIndexEntryWrapper},
     tui::{search::apply_fuzzy_filter, tree::build_tree},

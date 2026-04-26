@@ -54,8 +54,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .get_one::<String>("format-version")
         .map(String::as_str)
     {
-        Some("6") => FormatVersion::V6,
-        _ => FormatVersion::V5,
+        Some("5") => FormatVersion::V5,
+        _ => FormatVersion::V6,
     };
     let version_explicitly_set =
         matches.value_source("format-version") == Some(ValueSource::CommandLine);

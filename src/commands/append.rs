@@ -53,8 +53,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .get_one::<String>("format-version")
         .map(String::as_str)
     {
-        Some("6") => FormatVersion::V6,
-        _ => FormatVersion::V5,
+        Some("5") => FormatVersion::V5,
+        _ => FormatVersion::V6,
     };
     let version_explicitly_set =
         matches.value_source("format-version") == Some(ValueSource::CommandLine);
@@ -469,7 +469,7 @@ mod tests {
     use super::{ensure_encryption_mode, parse_conflict_mode, verify_passphrase_matches};
     use crate::i18n::Locale;
     use crate::reader::load_archive;
-    use crate::test_utils::build_archive;
+    use crate::test_utils::{build_archive, build_v5_archive};
     use clap::{Arg, ArgAction, Command};
     use std::fs::OpenOptions;
     use tempfile::tempdir;
@@ -524,7 +524,7 @@ mod tests {
                     Arg::new("format-version")
                         .long("format-version")
                         .action(ArgAction::Set)
-                        .default_value("5"),
+                        .default_value("6"),
                 )
                 .arg(
                     Arg::new("on-conflict")
@@ -774,7 +774,7 @@ mod tests {
     #[test]
     fn test_version_mismatch_explicit_v6_on_v5_archive_returns_error() {
         let dir = tempdir().unwrap();
-        let archive = build_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
+        let archive = build_v5_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
 
         let new_file = dir.path().join("new.txt");
         std::fs::write(&new_file, b"new data").unwrap();
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn test_append_to_v5_without_explicit_version_uses_archive_version() {
         let dir = tempdir().unwrap();
-        let archive = build_archive(&dir, "v5_default.dar", &[("file.txt", b"original")], None);
+        let archive = build_v5_archive(&dir, "v5_default.dar", &[("file.txt", b"original")], None);
 
         let new_file = dir.path().join("new.txt");
         std::fs::write(&new_file, b"appended content").unwrap();

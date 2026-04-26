@@ -252,17 +252,19 @@ main() {
     prepare_fixtures
     build_binary
 
-    next_step "Testing create dry-run and v5 archive creation"
+    next_step "Testing create dry-run and default v6 archive creation"
     run_cmd create_dry_run \
         "$BIN" create -f "$TEST_ROOT/basic/dry-run.dar" --dry-run "$TEST_ROOT/fixtures/basic_input"
     assert_not_exists "$TEST_ROOT/basic/dry-run.dar"
     assert_contains "$LOG_DIR/${STEP}_create_dry_run.log" "docs/readme.md"
     mkdir -p "$TEST_ROOT/basic"
-    run_cmd create_v5_archive \
+    run_cmd create_default_archive \
         "$BIN" create -f "$TEST_ROOT/basic/basic.dar" --compress-images -v "$TEST_ROOT/fixtures/basic_input"
     assert_file_exists "$TEST_ROOT/basic/basic.dar"
+    assert_file_exists "$TEST_ROOT/basic/basic.dari"
+    assert_file_exists "$TEST_ROOT/basic/basic.dar.b3"
 
-    next_step "Testing list and extract on v5 archive"
+    next_step "Testing list and extract on default v6 archive"
     run_bash list_table \
         "\"$BIN\" list -f \"$TEST_ROOT/basic/basic.dar\" > \"$TEST_ROOT/basic/list.txt\""
     run_bash list_json \
@@ -288,10 +290,19 @@ main() {
     assert_file_exists "$TEST_ROOT/basic/extracted_selected/docs/readme.md"
     assert_not_exists "$TEST_ROOT/basic/extracted_selected/src/main.rs"
 
+    next_step "Testing explicit v5 archive creation for legacy workflows"
+    mkdir -p "$TEST_ROOT/legacy_v5"
+    run_cmd create_legacy_v5_archive \
+        "$BIN" create -f "$TEST_ROOT/legacy_v5/basic_v5.dar" --format-version 5 \
+        "$TEST_ROOT/fixtures/basic_input"
+    assert_file_exists "$TEST_ROOT/legacy_v5/basic_v5.dar"
+    assert_not_exists "$TEST_ROOT/legacy_v5/basic_v5.dari"
+    assert_not_exists "$TEST_ROOT/legacy_v5/basic_v5.dar.b3"
+
     next_step "Testing v5 to v6 migration workflow"
     mkdir -p "$TEST_ROOT/migrate"
     run_cmd migrate_v5_to_v6 \
-        "$BIN" migrate -f "$TEST_ROOT/basic/basic.dar" -o "$TEST_ROOT/migrate/migrated.dar"
+        "$BIN" migrate -f "$TEST_ROOT/legacy_v5/basic_v5.dar" -o "$TEST_ROOT/migrate/migrated.dar"
     assert_file_exists "$TEST_ROOT/migrate/migrated.dar"
     assert_file_exists "$TEST_ROOT/migrate/migrated.dari"
     assert_file_exists "$TEST_ROOT/migrate/migrated.dar.b3"
@@ -387,7 +398,7 @@ EOF
     run_cmd encrypt_in_place \
         "$BIN" encrypt -f "$TEST_ROOT/encrypt/in_place.dar" --encrypt-passphrase secret --in-place
     run_cmd extract_in_place_encrypted \
-        "$BIN" extract -f "$TEST_ROOT/encrypt/in_place.dar" --encrypt-passphrase secret \
+        "$BIN" extract -f "$TEST_ROOT/encrypt/in_place.dar" --no-index --encrypt-passphrase secret \
         -d "$TEST_ROOT/encrypt/in_place_out"
     assert_files_equal \
         "$TEST_ROOT/fixtures/plain_in_place/in_place.txt" \
@@ -400,7 +411,7 @@ EOF
         "$BIN" create -f "$TEST_ROOT/chunked/invalid.dar" --chunked-encryption \
         "$TEST_ROOT/fixtures/chunked_input"
     expect_fail append_chunked_requires_v5_rejection \
-        "$BIN" append -f "$TEST_ROOT/basic/basic.dar" --encrypt-passphrase secret \
+        "$BIN" append -f "$TEST_ROOT/legacy_v5/basic_v5.dar" --encrypt-passphrase secret \
         --chunked-encryption "$TEST_ROOT/fixtures/append_unique_input"
     run_cmd create_chunked_archive \
         "$BIN" create -f "$TEST_ROOT/chunked/live.dar" --encrypt-passphrase secret \
@@ -464,7 +475,7 @@ EOF
     next_step "Testing xattr preservation and hardlink reconstruction"
     mkdir -p "$TEST_ROOT/preserve"
     expect_fail append_preserve_xattrs_requires_v6 \
-        "$BIN" append -f "$TEST_ROOT/basic/basic.dar" --preserve-xattrs \
+        "$BIN" append -f "$TEST_ROOT/legacy_v5/basic_v5.dar" --preserve-xattrs \
         "$TEST_ROOT/fixtures/append_unique_input"
     run_cmd create_preserve_archive \
         "$BIN" create -f "$TEST_ROOT/preserve/live.dar" --preserve-xattrs \
@@ -512,7 +523,7 @@ EOF
         "$BIN" reindex -f "$TEST_ROOT/v6/live.dar"
     assert_file_exists "$TEST_ROOT/v6/live.dari"
     expect_fail reindex_v5_fails \
-        "$BIN" reindex -f "$TEST_ROOT/basic/basic.dar"
+        "$BIN" reindex -f "$TEST_ROOT/legacy_v5/basic_v5.dar"
     run_cmd extract_v6_no_index \
         "$BIN" extract -f "$TEST_ROOT/v6/live.dar" --no-index -d "$TEST_ROOT/v6/out_no_index"
     assert_files_equal \

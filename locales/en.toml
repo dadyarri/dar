@@ -17,7 +17,7 @@ no_index = "Bypass auto-discovery of the external .dari index file and read the 
 stale_index = "external index is stale (timestamps differ); re-run 'dari reindex -f %{file}' or pass --no-index to skip"
 
 [cli.common.flags]
-format_version = "target archive format version (5 or 6, default 5)"
+format_version = "target archive format version (5 or 6, default 6)"
 format_version_auto = "format version forced to %{v} because %{reason} requires it"
 
 [cli.common.headings]

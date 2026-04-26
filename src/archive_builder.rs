@@ -40,7 +40,7 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     path_set: HashSet<String>,
     /// Conflict resolution strategy applied by [`Self::commit_prepared`].
     conflict_mode: ConflictMode,
-    /// Target on-disk format version.  Defaults to [`FormatVersion::V5`].
+    /// Target on-disk format version.  Defaults to [`FormatVersion::V6`].
     target_version: FormatVersion,
     /// Unix timestamp written into the archive header by [`Self::write_header`].
     /// Zero before `write_header` is called.
@@ -154,7 +154,8 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     ///
     /// Use this constructor when the caller needs to write an archive in a
     /// version other than the default (v5).  All behaviour is identical to
-    /// [`Self::with_config`] for v5; v6 write paths are added in Phase 1.
+    /// [`Self::with_config`] for the default write version; callers can use this
+    /// to force legacy v5 output explicitly.
     #[must_use]
     pub fn with_version(writer: W, config: PipelineConfig, version: FormatVersion) -> Self {
         Self {
@@ -806,7 +807,11 @@ mod tests {
     /// Write a minimal archive (header + one real file + footer) and return the bytes.
     fn build_archive_with_file(path: &std::path::Path) -> Vec<u8> {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder
             .add_file(&path.to_path_buf(), &path.display().to_string())
@@ -818,7 +823,11 @@ mod tests {
     #[test]
     fn test_header_signature_and_version() {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         let data = builder.writer.into_inner();
 
@@ -854,7 +863,11 @@ mod tests {
         std::fs::write(&f2, b"fn main() {}").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -977,7 +990,11 @@ mod tests {
         std::fs::write(&f2, b"same-content").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -1016,7 +1033,11 @@ mod tests {
         std::fs::write(&f2, b"content-b").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -1049,7 +1070,11 @@ mod tests {
     #[test]
     fn test_import_existing_entries_seeds_dedup_map() {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
 
         let checksum = blake3::hash(b"hello world");
         let mut checksum_bytes = [0u8; 32];
@@ -1135,7 +1160,11 @@ mod tests {
         std::fs::write(&f1, b"first").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Error);
         builder.write_header().unwrap();
         builder.add_file(&f1, "file.txt").unwrap();
@@ -1155,7 +1184,11 @@ mod tests {
         std::fs::write(&f2, b"second").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Rename);
         builder.write_header().unwrap();
         builder.add_file(&f1, "assets/logo.png").unwrap();
@@ -1181,7 +1214,11 @@ mod tests {
         std::fs::write(&f2, b"second").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Overwrite);
         builder.write_header().unwrap();
         builder.add_file(&f1, "config.toml").unwrap();
@@ -1206,7 +1243,11 @@ mod tests {
         std::fs::write(&f, b"hello").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         assert!(!builder.path_exists("data.txt"));
         builder.add_file(&f, "data.txt").unwrap();
@@ -1225,7 +1266,11 @@ mod tests {
         std::fs::write(&f_new, b"replaced = true").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Overwrite);
         builder.write_header().unwrap();
         // Add original "config.toml"
@@ -1273,7 +1318,11 @@ mod tests {
         std::fs::write(&f3, content).unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, "copy1.bin").unwrap();
         builder.add_file(&f2, "copy2.bin").unwrap();
@@ -1351,7 +1400,11 @@ mod tests {
         let archive_path = dir.path().join("triple_dedup.dar");
         {
             let file_handle = File::create(&archive_path).unwrap();
-            let mut builder = ArchiveBuilder::with_config(file_handle, PipelineConfig::default());
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig::default(),
+                crate::format_version::FormatVersion::V5,
+            );
             builder.write_header().unwrap();
             builder.add_file(&f1, "a.txt").unwrap();
             builder.add_file(&f2, "b.txt").unwrap();

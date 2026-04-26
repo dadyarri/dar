@@ -1,5 +1,6 @@
 //! Shared test helpers compiled only when running tests.
 use crate::archive_builder::{ArchiveBuilder, PreparedFile};
+use crate::format_version::FormatVersion;
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -14,9 +15,29 @@ pub fn build_archive(
     files: &[(&str, &[u8])],
     passphrase: Option<&str>,
 ) -> PathBuf {
+    build_archive_with_version(dir, name, files, passphrase, FormatVersion::default())
+}
+
+/// Build a scratch v5 `.dar` archive from a list of `(archive_name, content)` pairs.
+pub fn build_v5_archive(
+    dir: &tempfile::TempDir,
+    name: &str,
+    files: &[(&str, &[u8])],
+    passphrase: Option<&str>,
+) -> PathBuf {
+    build_archive_with_version(dir, name, files, passphrase, FormatVersion::V5)
+}
+
+fn build_archive_with_version(
+    dir: &tempfile::TempDir,
+    name: &str,
+    files: &[(&str, &[u8])],
+    passphrase: Option<&str>,
+    version: FormatVersion,
+) -> PathBuf {
     let archive_path = dir.path().join(name);
     let file_handle = File::create(&archive_path).unwrap();
-    let mut builder = ArchiveBuilder::with_config(
+    let mut builder = ArchiveBuilder::with_version(
         file_handle,
         PipelineConfig {
             compress_images: false,
@@ -24,6 +45,7 @@ pub fn build_archive(
             chunked_encryption: false,
             preserve_xattrs: false,
         },
+        version,
     );
     builder.write_header().unwrap();
     for (archive_name, content) in files {
@@ -42,6 +64,19 @@ pub fn build_archive(
 ///
 /// If `passphrase` is `Some`, the archive is encrypted with ChaCha20-Poly1305.
 pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) -> Vec<u8> {
+    build_archive_bytes_with_version(files, passphrase, FormatVersion::default())
+}
+
+/// Build a v5 `.dar` archive entirely in memory and return the raw bytes.
+pub fn build_v5_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) -> Vec<u8> {
+    build_archive_bytes_with_version(files, passphrase, FormatVersion::V5)
+}
+
+fn build_archive_bytes_with_version(
+    files: &[(&str, &[u8])],
+    passphrase: Option<&str>,
+    version: FormatVersion,
+) -> Vec<u8> {
     let pipeline = CompressionPipeline::new(PipelineConfig {
         compress_images: false,
         encryption_passphrase: passphrase.map(str::to_owned),
@@ -49,7 +84,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
         preserve_xattrs: false,
     });
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
-    let mut builder = ArchiveBuilder::with_config(
+    let mut builder = ArchiveBuilder::with_version(
         cursor,
         PipelineConfig {
             compress_images: false,
@@ -57,6 +92,7 @@ pub fn build_archive_bytes(files: &[(&str, &[u8])], passphrase: Option<&str>) ->
             chunked_encryption: false,
             preserve_xattrs: false,
         },
+        version,
     );
     builder.write_header().unwrap();
     for (archive_name, content) in files {

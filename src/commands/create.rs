@@ -42,8 +42,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .get_one::<String>("format-version")
         .map(String::as_str)
     {
-        Some("6") => FormatVersion::V6,
-        _ => FormatVersion::V5,
+        Some("5") => FormatVersion::V5,
+        _ => FormatVersion::V6,
     };
     let split_size = matches
         .get_one::<String>("split-size")
@@ -247,6 +247,7 @@ fn parse_split_size(value: &str, locale: &Locale) -> Result<u64> {
 mod tests {
     use super::parse_split_size;
     use crate::archive_builder::ArchiveBuilder;
+    use crate::format_version::FormatVersion;
     use crate::pipeline::PipelineConfig;
     use crate::utils::{get_unix_timestamp, read_bytes_as, read_string};
     use std::io::Cursor;
@@ -257,7 +258,8 @@ mod tests {
         let buffer = Cursor::new(Vec::new());
 
         // Act
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder =
+            ArchiveBuilder::with_version(buffer, PipelineConfig::default(), FormatVersion::V5);
         builder.write_header().unwrap();
 
         // Assert

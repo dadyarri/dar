@@ -131,7 +131,7 @@ where
                         .long("format-version")
                         .action(ArgAction::Set)
                         .num_args(1)
-                        .default_value("5")
+                        .default_value("6")
                         .value_parser(["5", "6"])
                         .help(translate("cli.common.flags.format_version")),
                     Arg::new("content")
@@ -194,7 +194,7 @@ where
                         .long("format-version")
                         .action(ArgAction::Set)
                         .num_args(1)
-                        .default_value("5")
+                        .default_value("6")
                         .value_parser(["5", "6"])
                         .help(translate("cli.common.flags.format_version")),
                     Arg::new("on-conflict")
@@ -296,7 +296,7 @@ where
                         .long("format-version")
                         .action(ArgAction::Set)
                         .num_args(1)
-                        .default_value("5")
+                        .default_value("6")
                         .value_parser(["5", "6"])
                         .help(translate("cli.common.flags.format_version")),
                     Arg::new("on-conflict")

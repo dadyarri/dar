@@ -900,7 +900,7 @@ pub fn load_with_auto_index(
 mod tests {
     use super::*;
     use crate::i18n::Locale;
-    use crate::test_utils::build_archive_bytes;
+    use crate::test_utils::{build_archive_bytes, build_v5_archive};
     use std::io::Cursor;
 
     fn en() -> Locale {
@@ -996,7 +996,7 @@ mod tests {
         let mut src = archive(&[("f.txt", b"y")]);
         let state = load_archive(&mut src, "<mem>", &en()).unwrap();
         assert_eq!(&state.header.signature, b"DARI");
-        assert_eq!(state.header.version, 5);
+        assert_eq!(state.header.version, 6);
     }
 
     #[test]
@@ -1146,7 +1146,11 @@ mod tests {
         use crate::pipeline::PipelineConfig;
 
         let cursor = std::io::Cursor::new(Vec::<u8>::new());
-        let mut builder = ArchiveBuilder::with_config(cursor, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            cursor,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.build().unwrap();
         let bytes = builder.into_inner().into_inner();
@@ -1276,8 +1280,7 @@ mod tests {
     fn test_load_with_auto_index_v5_archive_uses_embedded_index() {
         // A v5 archive must use the embedded index even when a (garbage) .dari exists.
         let dir = tempfile::tempdir().unwrap();
-        let archive_path =
-            crate::test_utils::build_archive(&dir, "v5skip.dar", &[("a.txt", b"hello")], None);
+        let archive_path = build_v5_archive(&dir, "v5skip.dar", &[("a.txt", b"hello")], None);
 
         // Place a garbage .dari next to the archive — it must be ignored.
         let dari_path = archive_path.with_extension("dari");
