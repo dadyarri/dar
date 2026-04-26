@@ -11,6 +11,14 @@ verbose = "Включить подробный вывод"
 content = "Файлы/папки для добавления в архив"
 help = "Показать справку по команде"
 version = "Показать информацию о версии"
+no_index = "Пропустить автообнаружение внешнего файла индекса .dari и читать встроенный индекс"
+
+[cli.common.warnings]
+stale_index = "внешний индекс устарел (метки времени различаются); выполните 'dari reindex -f %{file}' или передайте --no-index для пропуска"
+
+[cli.common.flags]
+format_version = "целевая версия формата архива (5 или 6, по умолчанию 6)"
+format_version_auto = "версия формата принудительно установлена в %{v}: %{reason} требует её"
 
 [cli.common.headings]
 usage = "Использование"
@@ -45,6 +53,38 @@ invalid_compression_method = "Некорректное значение Compress
 time_before_unix_epoch = "Системное время установлено раньше эпохи Unix"
 encrypt_prompt_failed = "Не удалось прочитать парольную фразу из терминала"
 encrypt_prompt_empty = "Парольная фраза не может быть пустой"
+sidecar_open_volume_failed = "Не удалось открыть том архива %{file}"
+sidecar_read_volume_failed = "Не удалось прочитать том архива %{file}"
+sidecar_create_failed = "Не удалось создать файл sidecar %{file}"
+sidecar_write_failed = "Не удалось записать файл sidecar %{file}"
+sidecar_open_failed = "Не удалось открыть файл sidecar %{file}"
+sidecar_read_failed = "Не удалось прочитать файл sidecar %{file}"
+index_file_create_failed = "Не удалось создать внешний файл индекса %{file}"
+index_file_header_write_failed = "Не удалось записать заголовок внешнего индекса"
+index_file_entry_write_failed = "Не удалось записать запись внешнего индекса"
+index_file_entry_path_write_failed = "Не удалось записать путь записи внешнего индекса"
+index_file_entry_extra_write_failed = "Не удалось записать метаданные записи внешнего индекса"
+index_file_flush_before_patch_failed = "Не удалось сбросить внешний индекс перед исправлением заголовка"
+index_file_total_volumes_seek_failed = "Не удалось перейти к полю общего числа томов во внешнем индексе"
+index_file_total_volumes_patch_failed = "Не удалось обновить общее число томов во внешнем индексе"
+index_file_flush_patched_header_failed = "Не удалось сбросить исправленный заголовок внешнего индекса"
+index_file_seek_end_failed = "Не удалось перейти в конец внешнего индекса"
+index_file_read_for_checksum_failed = "Не удалось прочитать внешний индекс для вычисления контрольной суммы"
+index_file_footer_write_failed = "Не удалось записать футер внешнего индекса"
+index_file_flush_failed = "Не удалось сбросить внешний индекс"
+index_checksum_mismatch = "Проверка целостности внешнего индекса %{file} не прошла: несовпадение BLAKE3"
+index_open_failed = "Не удалось открыть внешний файл индекса %{file}"
+split_volume_base_missing = "Не задан базовый путь для разделённого архива"
+split_volume_opener_missing = "Не настроен writer для разделённого архива"
+volume_header_patch_failed = "Не удалось обновить заголовок тома архива %{file}"
+volume_header_seek_failed = "Не удалось перейти к заголовку тома архива %{file}"
+volume_header_flush_failed = "Не удалось сбросить обновлённый заголовок тома архива %{file}"
+external_index_entry_write_failed = "Не удалось записать запись во внешний индекс"
+external_index_finish_failed = "Не удалось завершить запись внешнего индекса"
+split_size_empty = "Размер разбиения не должен быть пустым"
+split_size_invalid = "Некорректный размер разбиения"
+split_size_suffix_invalid = "Неподдерживаемый суффикс размера разбиения: %{suffix}"
+shell_required = "Необходимо указать shell"
 seek_failed = "Не удалось переместить указатель внутри архива %{file}"
 header_read_failed = "Не удалось прочитать заголовок архива %{file}"
 header_invalid = "Заголовок архива повреждён или версия не поддерживается"
@@ -56,6 +96,7 @@ utf8_failed = "Поле %{field} в индексе архива содержит
 brotli_decompression_failed = "Ошибка распаковки Brotli: %{error}"
 zstd_decompression_failed = "Ошибка распаковки ZStandard: %{error}"
 lzma_decompression_failed = "Ошибка распаковки LZMA: %{error}"
+chunked_encryption_requires_encrypt = "--chunked-encryption требует --encrypt или --encrypt-passphrase"
 
 [cli.common.messages]
 summary = "Готово: %{count} файл(ов), исходный: %{original} → сохранено: %{stored} (%{ratio}%), время: %{elapsed}"
@@ -69,8 +110,11 @@ overwrite = "Перезаписать существующий архив"
 compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать данные файлов"
 encrypt_passphrase = "Шифровать данные файлов, используя парольную фразу из аргумента"
+chunked_encryption = "Шифровать аутентифицированными сегментами по 1 МиБ (требует шифрования; включает v6)"
+preserve_xattrs = "Сохранять Unix xattr и метаданные жёстких ссылок при записи архивов v6"
 passphrase_value = "ПАРОЛЬ"
 dry_run = "Предварительный просмотр добавляемых файлов без создания архива"
+split_size = "Разбить вывод v6 на нумерованные тома, когда размер тома превышает это значение (например: 2G, 512M)"
 
 [cli.create.messages]
 creating_archive = "Создание архива %{file}"
@@ -82,6 +126,7 @@ file_exists = "Файл %{file} уже существует"
 delete_failed = "Не удалось удалить файл"
 create_file_failed = "Не удалось создать файл"
 create_archive_failed = "Не удалось создать архив"
+index_write_failed = "Не удалось создать внешний файл индекса для архива"
 
 [cli.append]
 about = "Добавляет данные в существующий архив"
@@ -91,6 +136,8 @@ file = "Путь к существующему архивному файлу"
 compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
 encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
 encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
+chunked_encryption = "Шифровать добавляемые данные сегментами по 1 МиБ (требует шифрования; только v6)"
+preserve_xattrs = "Сохранять Unix xattr и метаданные жёстких ссылок для добавляемых записей (только v6)"
 dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"
 on_conflict = "Поведение при конфликте путей с существующими записями архива: error (по умолчанию), rename, overwrite"
 
@@ -115,6 +162,9 @@ append_passphrase_invalid = "Неверная парольная фраза дл
 append_encryption_probe_missing = "Не удалось найти зашифрованные данные для проверки парольной фразы"
 append_conflict_error = "Добавление прервано: следующие пути уже существуют в архиве:\n  %{paths}"
 append_invalid_conflict_mode = "Недопустимое значение --on-conflict '%{value}': ожидается 'error', 'rename' или 'overwrite'"
+version_mismatch = "невозможно добавить: архив имеет формат v%{found}, но указан --format-version %{requested}; удалите флаг или используйте подходящую версию"
+append_chunked_requires_v6 = "Для chunked-шифрования требуется архив формата v6"
+append_preserve_xattrs_requires_v6 = "Для сохранения xattr требуется архив формата v6"
 
 [cli.inspect]
 about = "Интерактивный просмотр содержимого архива"
@@ -126,6 +176,32 @@ encrypt_passphrase = "Парольная фраза для расшифровк�
 [cli.inspect.errors]
 inspect_failed = "Не удалось открыть архив для просмотра"
 open_failed = "Не удалось открыть архив %{file}"
+
+[cli.incremental]
+about = "Добавляет только файлы, изменённые после указанного времени или момента создания базового архива"
+
+[cli.incremental.args]
+file = "Путь к существующему архивному файлу"
+since = "Добавлять только файлы новее этого времени в формате RFC 3339 или значения @unix-seconds"
+compress_images = "Без потерь оптимизировать PNG с помощью OxiPNG"
+encrypt = "Запросить парольную фразу интерактивно и зашифровать добавляемые данные файлов"
+encrypt_passphrase = "Шифровать добавляемые данные файлов, используя парольную фразу из аргумента"
+chunked_encryption = "Шифровать добавляемые данные сегментами по 1 МиБ (требует шифрования; только v6)"
+preserve_xattrs = "Сохранять Unix xattr и метаданные жёстких ссылок для добавляемых записей (только v6)"
+dry_run = "Предварительный просмотр добавляемых файлов без изменения архива"
+on_conflict = "Поведение при конфликте путей с существующими записями архива: error (по умолчанию), rename, overwrite"
+
+[cli.incremental.messages]
+incrementing_archive = "Добавление инкрементальных изменений в архив %{file}"
+dry_run_header = "Пробный запуск — файлы, которые будут инкрементально добавлены в %{file}:"
+dry_run_footer = "(пробный запуск — файл не изменён)"
+no_changes = "Для %{file} не найдено файлов новее инкрементальной отсечки"
+
+[cli.incremental.errors]
+incremental_failed = "Не удалось выполнить инкрементальное добавление"
+archive_missing = "Архив %{file} не существует"
+open_failed = "Не удалось открыть архив %{file} для инкрементального добавления"
+since_invalid = "Недопустимое значение --since '%{value}': ожидается RFC 3339 или @unix-seconds"
 
 [cli.extract]
 about = "Извлекает файлы из архива"
@@ -200,6 +276,8 @@ encrypted_hint = "Укажите --encrypt-passphrase для расшифров�
 wrong_passphrase = "Неверная парольная фраза — просмотр недоступен"
 binary = "Бинарный файл — просмотр содержимого недоступен"
 truncated = "(содержимое обрезано до 1 МиБ)"
+stored_checksum_mismatch = "Сохранённые байты повреждены — просмотр заблокирован"
+stored_checksum_hint = "Запустите 'dari verify -f <архив>' для проверки целостности"
 
 [tui.inspect.preview.tags]
 imk = "Производитель камеры"
@@ -227,6 +305,7 @@ create_dir_failed = "Не удалось создать каталог %{path}"
 write_failed = "Не удалось записать извлечённый файл %{path}"
 data_too_short = "Зашифрованные данные слишком короткие для корректного тега аутентификации"
 decrypt_invalid = "Ошибка расшифровки: парольная фраза неверна или данные повреждены"
+chunked_segments_missing = "Для записи с chunked-шифрованием отсутствуют метаданные о числе сегментов"
 
 
 [cli.list]
@@ -248,6 +327,28 @@ header = "Содержимое %{file}:"
 
 [cli.list.errors]
 list_failed = "Не удалось вывести содержимое архива"
+archive_missing = "Архив %{file} не существует"
+open_failed = "Не удалось открыть архив %{file}"
+
+[cli.verify]
+about = "Проверяет тома архива и целостность записей"
+
+[cli.verify.args]
+file = "Путь к архивному файлу или первому тому разделённого архива"
+encrypt_passphrase = "Парольная фраза для расшифровки записей при проверке с --full"
+full = "Проверять контрольные суммы исходного содержимого после расшифровки и распаковки"
+json = "Выводить результаты проверки в JSON"
+
+[cli.verify.messages]
+layer1_ok = "том %{v}: OK (%{bytes} байт)"
+layer1_fail = "том %{v}: НЕСОВПАДЕНИЕ BLAKE3"
+layer2_ok = "запись %{path}: сохранённые байты OK"
+layer2_fail = "запись %{path}: сохранённые байты ПОВРЕЖДЕНЫ (том %{v} смещение %{off})"
+layer3_ok = "запись %{path}: содержимое OK"
+layer3_fail = "запись %{path}: содержимое ПОВРЕЖДЕНО (контрольная сумма распакованного содержимого не совпала)"
+
+[cli.verify.errors]
+verify_failed = "Проверка архива завершилась с ошибкой"
 open_failed = "Не удалось открыть архив %{file}"
 archive_missing = "Архив %{file} не существует"
 
@@ -280,3 +381,44 @@ shell = "Оболочка для генерации автодополнения
 
 [cli.completions.errors]
 completions_failed = "Не удалось сгенерировать скрипт автодополнения"
+
+[cli.reindex]
+about = "Пересоздать внешний индекс (.dari) для архива v6"
+
+[cli.reindex.args]
+file = "Путь к архивному файлу"
+encrypt_passphrase = "Парольная фраза для расшифровки записей зашифрованного архива"
+
+[cli.reindex.messages]
+reindex_done = "Индекс записан в %{path}"
+
+[cli.reindex.errors]
+reindex_failed = "Не удалось пересоздать индекс для %{file}"
+open_failed = "Не удалось открыть архив %{file}"
+archive_missing = "Архив %{file} не существует"
+v5_unsupported = "Архив %{file} имеет формат v5; reindex работает только с архивами v6"
+
+[cli.migrate]
+about = "Мигрирует архив v5 в v6 без повторного сжатия и шифрования данных"
+
+[cli.migrate.args]
+file = "Путь к исходному архиву v5"
+output = "Записать мигрированный архив v6 по этому пути (по умолчанию — замена на месте)"
+split_size = "Разбить мигрированный вывод v6 на нумерованные тома, когда размер тома превышает это значение"
+preserve_xattrs = "Флаг принят для совместимости с roadmap; в мигрируемых записях v5 xattr отсутствуют"
+
+[cli.migrate.messages]
+migrating = "Миграция %{file} в формат v%{version}"
+migrate_done = "Миграция завершена: %{entries} записей записано в %{out}"
+
+[cli.migrate.errors]
+migrate_failed = "Не удалось выполнить миграцию %{file}"
+archive_missing = "Архив %{file} не существует"
+open_failed = "Не удалось открыть архив %{file}"
+already_v6 = "%{file} уже имеет формат v6; делать нечего"
+output_exists = "Файл назначения %{file} уже существует"
+create_failed = "Не удалось создать результат миграции %{file}"
+read_entry_failed = "Не удалось прочитать сохранённые байты %{path} из %{file}"
+rename_failed = "Не удалось переименовать %{from} в %{to} во время миграции"
+cleanup_failed = "Не удалось удалить временную резервную копию %{file} после миграции"
+split_in_place_unsupported = "Миграция на месте не поддерживает --split-size; укажите --output"

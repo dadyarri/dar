@@ -59,6 +59,7 @@ fn collect_scored_files(
                         display_name: child.full_path.clone(),
                         full_path: child.full_path.clone(),
                         entry_idx: child.entry_idx,
+                        incremental: child.incremental,
                         match_indices: indices,
                     },
                 ));
@@ -89,7 +90,7 @@ mod tests {
             make_entry("assets/logo.png"),
             make_entry("README.md"),
         ];
-        build_tree(&entries)
+        build_tree(&entries, 0)
     }
 
     #[test]
@@ -127,7 +128,7 @@ mod tests {
     #[test]
     fn multi_match_sorted_by_score() {
         let entries = vec![make_entry("src/main.rs"), make_entry("src/maintain.rs")];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         // Both contain "main"; the shorter/closer match should score higher.
         let results = apply_fuzzy_filter("main", &root);
         assert_eq!(results.len(), 2);

@@ -6,6 +6,7 @@ use ignore::WalkBuilder;
 use rust_i18n::t;
 use std::fs::canonicalize;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Clone)]
 pub struct ScannedFile {
@@ -85,6 +86,15 @@ pub fn scan_files(paths: ValuesRef<String>, locale: &Locale) -> Result<Vec<Scann
     scan_files_with_source(paths, locale, &IgnoreWalker)
 }
 
+pub fn scan_files_incremental(
+    paths: ValuesRef<String>,
+    locale: &Locale,
+    since: u64,
+) -> Result<Vec<ScannedFile>> {
+    let files = scan_files_with_source(paths, locale, &IgnoreWalker)?;
+    filter_files_modified_since(files, since)
+}
+
 /// Like [`scan_files`] but uses `source` for directory walking.
 ///
 /// This allows tests to inject a [`FixedFileSource`] to avoid real I/O.
@@ -121,6 +131,20 @@ pub fn scan_files_with_source(
     }
 
     Ok(files)
+}
+
+fn filter_files_modified_since(files: Vec<ScannedFile>, since: u64) -> Result<Vec<ScannedFile>> {
+    let mut filtered = Vec::new();
+    for file in files {
+        let modified = std::fs::metadata(&file.source_path)?
+            .modified()?
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs();
+        if modified > since {
+            filtered.push(file);
+        }
+    }
+    Ok(filtered)
 }
 
 #[cfg(test)]
@@ -266,5 +290,39 @@ mod tests {
             "dotfiles must be included when hidden=false"
         );
         assert!(names.contains(&"normal.txt"));
+    }
+
+    #[test]
+    fn test_incremental_scan_filters_files_not_newer_than_since() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("old.txt"), b"old").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        fs::write(dir.path().join("new.txt"), b"new").unwrap();
+
+        let args = vec![
+            "dari",
+            "incremental",
+            "-f",
+            "out.dar",
+            dir.path().to_str().unwrap(),
+        ];
+        let matches =
+            build_cli_with_translator(|key| rust_i18n::t!(key, locale = "en").to_string())
+                .try_get_matches_from(&args)
+                .unwrap();
+        let sub = matches.subcommand_matches("incremental").unwrap();
+        let content = sub.get_many::<String>("content").unwrap();
+        let locale = Locale::new("en");
+        let files = super::scan_files_incremental(content, &locale, since).unwrap();
+        let names: Vec<_> = files.iter().map(|f| f.archive_path.as_str()).collect();
+        assert!(names.contains(&"new.txt"));
+        assert!(!names.contains(&"old.txt"));
     }
 }

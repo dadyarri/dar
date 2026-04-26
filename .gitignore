@@ -12,3 +12,5 @@ target/
 
 ### IntelliJ IDEA files ###
 .idea
+
+.codex

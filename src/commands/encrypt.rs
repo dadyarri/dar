@@ -157,6 +157,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let config = PipelineConfig {
         compress_images: false,
         encryption_passphrase: Some(passphrase),
+        chunked_encryption: false,
+        preserve_xattrs: false,
     };
 
     let mut builder = ArchiveBuilder::with_config(BufWriter::new(temp_file), config);

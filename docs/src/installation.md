@@ -1,8 +1,8 @@
 # Installation
 
-## Building from Source
+## Build From Source
 
-Building **dari** requires the Rust compiler (version 1.70 or higher) and Cargo.
+Building `dari` requires Rust 1.85 or newer and Cargo.
 
 ```sh
 git clone https://github.com/dadyarri/dar
@@ -10,49 +10,32 @@ cd dar
 cargo build --release
 ```
 
-After a successful build the binary is located at `target/release/dari`.
+The binary will be available at:
 
-Copy it to any directory on your `PATH`:
-
-```sh
-cp target/release/dari ~/.local/bin/dari
+```text
+target/release/dari
 ```
 
-## Shell Completion Scripts
+To make it available on your `PATH`:
 
-Completion scripts are generated at runtime using the `dari completions <SHELL>` subcommand.
+```sh
+install -Dm755 target/release/dari ~/.local/bin/dari
+```
+
+## Shell Completions
+
+Completion scripts are generated at runtime:
+
+```sh
+dari completions <SHELL>
+```
 
 Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
 
-### Bash
+Examples:
 
 ```sh
 dari completions bash > ~/.bash_completion.d/dari
-# or source directly in the current session:
-source <(dari completions bash)
-```
-
-### Fish
-
-```sh
 dari completions fish > ~/.config/fish/completions/dari.fish
-```
-
-### Zsh
-
-```sh
 dari completions zsh > ~/.zsh/completions/_dari
-# Make sure the directory is listed in fpath
-```
-
-### PowerShell
-
-```sh
-dari completions powershell | Out-String | Invoke-Expression
-```
-
-### Elvish
-
-```sh
-dari completions elvish >> ~/.config/elvish/rc.elv
 ```

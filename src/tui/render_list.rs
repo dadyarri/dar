@@ -179,6 +179,7 @@ mod tests {
             display_name: name.to_string(),
             full_path: format!("src/{name}"),
             entry_idx: None,
+            incremental: false,
             match_indices: vec![],
         }
     }
@@ -191,6 +192,7 @@ mod tests {
             display_name: name.to_string(),
             full_path: name.to_string(),
             entry_idx: None,
+            incremental: false,
             match_indices: vec![],
         }
     }

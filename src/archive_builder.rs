@@ -3,15 +3,22 @@ pub use crate::conflict::{ConflictMode, make_renamed_path};
 pub use crate::file_reader::{PreparedFile, prepare_file_from_disk};
 
 use crate::constants::flags;
+use crate::format_version::FormatVersion;
 use crate::models::archive::{
-    ArchiveFooter, ArchiveHeader, ArchiveIndexEntry, ArchiveIndexEntryWrapper, CompressionMethod,
+    ArchiveFooter, ArchiveFooterV6, ArchiveHeader, ArchiveHeaderV6, ArchiveIndexEntry,
+    ArchiveIndexEntryV6, ArchiveIndexEntryWrapper, CompressionMethod,
 };
 use crate::pipeline::{CompressionPipeline, PipelineConfig};
+use crate::sidecar::write_b3_sidecar;
+use crate::xattrs::{
+    XattrPair, encode_xattr_blob, hardlink_target, hardlink_target_xattr, inode_xattrs,
+};
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::{Seek, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Returned by [`ArchiveBuilder::commit_prepared`] with metadata suitable for
 /// verbose progress reporting.
@@ -33,6 +40,34 @@ pub struct ArchiveBuilder<W: Write + Seek> {
     path_set: HashSet<String>,
     /// Conflict resolution strategy applied by [`Self::commit_prepared`].
     conflict_mode: ConflictMode,
+    /// Target on-disk format version.  Defaults to [`FormatVersion::V6`].
+    target_version: FormatVersion,
+    /// Unix timestamp written into the archive header by [`Self::write_header`].
+    /// Zero before `write_header` is called.
+    header_timestamp: u64,
+    /// Optional external index writer attached for v6 archives.
+    /// When set, [`Self::build_v6`] writes all entries to this writer and calls
+    /// [`crate::index_writer::IndexWriter::finish`] before returning.
+    index_writer: Option<crate::index_writer::IndexWriter>,
+    /// Absolute or relative path of the primary archive output.
+    archive_output_path: Option<PathBuf>,
+    /// Optional split threshold in bytes. When set, v6 archives are written as
+    /// numbered volumes (`.001`, `.002`, ...).
+    split_threshold: Option<u64>,
+    /// 0-based current volume number.
+    current_volume: u16,
+    /// Base archive path used to derive numbered volume file names.
+    volume_base_path: Option<PathBuf>,
+    /// Filesystem path of the volume currently held by `writer`.
+    current_volume_path: Option<PathBuf>,
+    /// All volume paths written so far, in order.
+    volume_paths: Vec<PathBuf>,
+    /// Number of entries whose primary storage lives in the current volume.
+    current_volume_entry_count: usize,
+    /// Re-opens the next numbered volume when split writing is enabled.
+    volume_opener: Option<Box<dyn Fn(&Path) -> Result<W>>>,
+    /// Tracks already-seen Unix (device, inode) pairs when xattr preservation is enabled.
+    hardlink_index: HashMap<(u64, u64), String>,
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +76,9 @@ struct ExistingFileData {
     compression_method: crate::models::archive::CompressionMethod,
     compressed_size: u64,
     bitflags: u16,
+    /// BLAKE3 of bytes as stored on disk; zero for entries imported from v5 archives.
+    stored_checksum: [u8; 32],
+    volume_number: u16,
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +120,11 @@ fn make_index_entry(
     }
 }
 
+fn volume_path_for(base_path: &Path, volume_number: u16) -> PathBuf {
+    let suffix = format!("{:03}", u32::from(volume_number) + 1);
+    PathBuf::from(format!("{}.{}", base_path.display(), suffix))
+}
+
 impl<W: Write + Seek> ArchiveBuilder<W> {
     #[must_use]
     pub fn with_config(writer: W, config: PipelineConfig) -> Self {
@@ -92,12 +135,90 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             dedup_index: HashMap::new(),
             path_set: HashSet::new(),
             conflict_mode: ConflictMode::default(),
+            target_version: FormatVersion::default(),
+            header_timestamp: 0,
+            index_writer: None,
+            archive_output_path: None,
+            split_threshold: None,
+            current_volume: 0,
+            volume_base_path: None,
+            current_volume_path: None,
+            volume_paths: Vec::new(),
+            current_volume_entry_count: 0,
+            volume_opener: None,
+            hardlink_index: HashMap::new(),
+        }
+    }
+
+    /// Create a new builder targeting a specific format version.
+    ///
+    /// Use this constructor when the caller needs to write an archive in a
+    /// version other than the default (v5).  All behaviour is identical to
+    /// [`Self::with_config`] for the default write version; callers can use this
+    /// to force legacy v5 output explicitly.
+    #[must_use]
+    pub fn with_version(writer: W, config: PipelineConfig, version: FormatVersion) -> Self {
+        Self {
+            target_version: version,
+            ..Self::with_config(writer, config)
         }
     }
 
     /// Override the conflict-resolution strategy used by [`Self::commit_prepared`].
     pub fn set_conflict_mode(&mut self, mode: ConflictMode) {
         self.conflict_mode = mode;
+    }
+
+    /// Attach an external index writer for v6 archives.
+    ///
+    /// When set, [`Self::build`] writes all committed entries to `iw` and calls
+    /// [`crate::index_writer::IndexWriter::finish`] before returning.  Must be
+    /// called **after** [`Self::write_header`] so that the index writer is
+    /// created with the correct `archive_timestamp` (see [`Self::header_timestamp`]).
+    pub fn set_index_writer(&mut self, iw: crate::index_writer::IndexWriter) {
+        self.index_writer = Some(iw);
+    }
+
+    /// Set the output archive path. Used for single-file v6 sidecar creation.
+    pub fn set_archive_output_path(&mut self, path: impl Into<PathBuf>) {
+        let path = path.into();
+        self.archive_output_path = Some(path.clone());
+        if self.current_volume_path.is_none() {
+            self.current_volume_path = Some(path.clone());
+        }
+        if self.volume_paths.is_empty() {
+            self.volume_paths.push(path);
+        }
+    }
+
+    /// Enable split-volume output for v6 archives.
+    pub fn enable_split<F>(
+        &mut self,
+        base_path: impl Into<PathBuf>,
+        split_threshold: u64,
+        opener: F,
+    ) where
+        F: Fn(&Path) -> Result<W> + 'static,
+    {
+        let base_path = base_path.into();
+        let first_volume = volume_path_for(&base_path, 0);
+        self.split_threshold = Some(split_threshold);
+        self.volume_base_path = Some(base_path);
+        self.current_volume_path = Some(first_volume.clone());
+        self.archive_output_path = Some(first_volume.clone());
+        self.volume_paths.clear();
+        self.volume_paths.push(first_volume);
+        self.volume_opener = Some(Box::new(opener));
+        self.current_volume = 0;
+    }
+
+    /// Returns the Unix timestamp written into the archive header by the most
+    /// recent call to [`Self::write_header`].
+    ///
+    /// Use this value when constructing a [`crate::index_writer::IndexWriter`]
+    /// so the timestamps in the `.dari` and `.dar` files match.
+    pub fn header_timestamp(&self) -> u64 {
+        self.header_timestamp
     }
 
     /// Returns `true` if `path` is already present in the archive (either from
@@ -117,8 +238,20 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                         compression_method: wrapper.entry.compression_method,
                         compressed_size: wrapper.entry.compressed_size,
                         bitflags: wrapper.entry.bitflags,
+                        stored_checksum: wrapper.stored_checksum,
+                        volume_number: wrapper.volume_number,
                     },
                 );
+            }
+
+            if let Some(target) = hardlink_target(&wrapper.xattrs) {
+                if let Some((device, inode)) = decode_inode_identity(&wrapper.xattrs) {
+                    self.hardlink_index
+                        .insert((device, inode), target.to_string());
+                }
+            } else if let Some((device, inode)) = decode_inode_identity(&wrapper.xattrs) {
+                self.hardlink_index
+                    .insert((device, inode), wrapper.path.clone());
             }
 
             self.path_set.insert(wrapper.path.clone());
@@ -127,11 +260,28 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     }
 
     pub fn write_header(&mut self) -> Result<()> {
-        ArchiveHeader::new()?
-            .write(&mut self.writer)
-            .wrap_err(t!("cli.common.errors.header_write_failed"))?;
-
-        Ok(())
+        match self.target_version {
+            FormatVersion::V5 => {
+                let h = ArchiveHeader::new()?;
+                self.header_timestamp = h.timestamp;
+                h.write(&mut self.writer)
+                    .wrap_err(t!("cli.common.errors.header_write_failed"))?;
+                Ok(())
+            }
+            FormatVersion::V6 => {
+                let mut h = ArchiveHeaderV6::new()?;
+                if self.header_timestamp != 0 {
+                    h.timestamp = self.header_timestamp;
+                } else {
+                    self.header_timestamp = h.timestamp;
+                }
+                h.volume_number = self.current_volume;
+                h.total_volumes = 1;
+                h.write(&mut self.writer)
+                    .wrap_err(t!("cli.common.errors.header_write_failed"))?;
+                Ok(())
+            }
+        }
     }
 
     /// Write a [`PreparedFile`] to the archive. Must be called from a single thread.
@@ -155,6 +305,22 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         let pipeline_result = prepared.pipeline_result;
         let mut bitflags = pipeline_result.bitflags;
         let original_size = pipeline_result.original_size;
+        let mut entry_xattrs = prepared.xattrs;
+
+        if self.pipeline.preserve_xattrs_enabled()
+            && self.target_version == FormatVersion::V6
+            && let Some((device, inode)) = prepared.device_inode
+        {
+            if let Some(target) = self.hardlink_index.get(&(device, inode)).cloned() {
+                entry_xattrs.push(hardlink_target_xattr(&target));
+            } else {
+                entry_xattrs.extend(inode_xattrs(device, inode));
+                self.hardlink_index
+                    .insert((device, inode), archive_path.clone());
+            }
+        }
+        let xattr_bytes = encode_xattr_blob(&entry_xattrs)?;
+        let xattr_length = xattr_bytes.len() as u32;
 
         // ── Conflict resolution ──────────────────────────────────────────────
         if self.path_set.contains(&archive_path) {
@@ -187,7 +353,7 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         if let Some(existing) = self.dedup_index.get(&pipeline_result.checksum).copied() {
             bitflags |= flags::LINKED_DATA;
 
-            self.entries.push(ArchiveIndexEntryWrapper::new(
+            self.entries.push(ArchiveIndexEntryWrapper::new_v6(
                 make_index_entry(
                     existing.offset,
                     bitflags | existing.bitflags,
@@ -204,6 +370,10 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 ),
                 archive_path.clone(),
                 pipeline_result.extra,
+                entry_xattrs,
+                existing.stored_checksum,
+                xattr_length,
+                existing.volume_number,
             ));
             self.path_set.insert(archive_path.clone());
 
@@ -216,12 +386,6 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             });
         }
 
-        // Record byte offset where this file's data block begins
-        let data_offset = self
-            .writer
-            .stream_position()
-            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
-
         // Write file data: compressed bytes if compression ran, otherwise original bytes
         let (bytes_to_write, compressed_size) = match &pipeline_result.compressed_content {
             Some(compressed) => (compressed.as_slice(), compressed.len() as u64),
@@ -231,12 +395,24 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             ),
         };
 
+        self.maybe_rotate_volume(compressed_size)?;
+
+        // Record byte offset where this file's data block begins.
+        let data_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
+
         self.writer
             .write_all(bytes_to_write)
             .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = archive_path))?;
 
+        // Compute BLAKE3 of the bytes exactly as stored on disk (post-compression,
+        // post-encryption).  Used as `stored_checksum` in v6 index entries.
+        let stored_checksum = *blake3::hash(bytes_to_write).as_bytes();
+
         self.path_set.insert(archive_path.clone());
-        self.entries.push(ArchiveIndexEntryWrapper::new(
+        self.entries.push(ArchiveIndexEntryWrapper::new_v6(
             make_index_entry(
                 data_offset,
                 bitflags,
@@ -253,7 +429,12 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
             ),
             archive_path.clone(),
             pipeline_result.extra,
+            entry_xattrs,
+            stored_checksum,
+            xattr_length,
+            self.current_volume,
         ));
+        self.current_volume_entry_count += 1;
 
         self.dedup_index.insert(
             pipeline_result.checksum,
@@ -262,6 +443,8 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
                 compression_method: pipeline_result.compression_method,
                 compressed_size,
                 bitflags,
+                stored_checksum,
+                volume_number: self.current_volume,
             },
         );
 
@@ -286,6 +469,227 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         self.commit_prepared(prepared)
     }
 
+    /// Import an already-stored data block without recompressing or re-encrypting it.
+    pub fn import_stored_entry(
+        &mut self,
+        source_entry: ArchiveIndexEntryWrapper,
+        stored_bytes: &[u8],
+    ) -> Result<FileAddOutcome> {
+        let archive_path = source_entry.path.clone();
+
+        if self.path_set.contains(&archive_path) {
+            return Err(eyre!(t!(
+                "cli.append.errors.append_conflict_error",
+                paths = archive_path
+            )));
+        }
+
+        self.maybe_rotate_volume(stored_bytes.len() as u64)?;
+
+        let data_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
+
+        self.writer
+            .write_all(stored_bytes)
+            .wrap_err_with(|| t!("cli.common.errors.file_write_failed", file = archive_path))?;
+
+        let stored_checksum = *blake3::hash(stored_bytes).as_bytes();
+        let original_size = source_entry.entry.original_size;
+        let compressed_size = stored_bytes.len() as u64;
+        let compression_method = source_entry.entry.compression_method;
+
+        let entry = make_index_entry(
+            data_offset,
+            source_entry.entry.bitflags,
+            compression_method,
+            source_entry.entry.modification_timestamp,
+            source_entry.entry.uid,
+            source_entry.entry.gid,
+            source_entry.entry.perm,
+            source_entry.entry.checksum,
+            original_size,
+            compressed_size,
+            archive_path.len() as u32,
+            source_entry.extra.len() as u32,
+        );
+
+        self.path_set.insert(archive_path.clone());
+        self.entries.push(ArchiveIndexEntryWrapper::new_v6(
+            entry,
+            archive_path.clone(),
+            source_entry.extra,
+            source_entry.xattrs,
+            stored_checksum,
+            source_entry.xattr_length,
+            self.current_volume,
+        ));
+        self.current_volume_entry_count += 1;
+
+        if source_entry.entry.bitflags & flags::LINKED_DATA == 0 {
+            self.dedup_index.insert(
+                source_entry.entry.checksum,
+                ExistingFileData {
+                    offset: data_offset,
+                    compression_method,
+                    compressed_size,
+                    bitflags: source_entry.entry.bitflags,
+                    stored_checksum,
+                    volume_number: self.current_volume,
+                },
+            );
+        }
+
+        Ok(FileAddOutcome {
+            archive_path,
+            original_size,
+            stored_size: compressed_size,
+            compression_method,
+            is_dedup: false,
+        })
+    }
+
+    fn maybe_rotate_volume(&mut self, next_stored_size: u64) -> Result<()> {
+        if self.target_version != FormatVersion::V6 {
+            return Ok(());
+        }
+        let Some(split_threshold) = self.split_threshold else {
+            return Ok(());
+        };
+        let current_pos = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_write_position_failed"))?;
+        if self.current_volume_entry_count == 0 || current_pos + next_stored_size <= split_threshold
+        {
+            return Ok(());
+        }
+
+        self.seal_current_volume()?;
+        self.current_volume = self.current_volume.saturating_add(1);
+        let base_path = self
+            .volume_base_path
+            .as_ref()
+            .ok_or_else(|| eyre!(t!("cli.common.errors.split_volume_base_missing")))?
+            .clone();
+        let next_path = volume_path_for(&base_path, self.current_volume);
+        let opener = self
+            .volume_opener
+            .as_ref()
+            .ok_or_else(|| eyre!(t!("cli.common.errors.split_volume_opener_missing")))?;
+        self.writer = opener(&next_path)?;
+        self.current_volume_path = Some(next_path.clone());
+        self.volume_paths.push(next_path);
+        self.current_volume_entry_count = 0;
+        self.write_header()?;
+
+        if let Some(iw) = self.index_writer.as_mut() {
+            iw.set_total_volumes(self.current_volume + 1)?;
+        }
+
+        Ok(())
+    }
+
+    fn seal_current_volume(&mut self) -> Result<()> {
+        self.write_v6_embedded_index_and_footer()?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
+        if let Some(path) = self.current_volume_path.as_ref() {
+            write_b3_sidecar(path)?;
+        }
+        Ok(())
+    }
+
+    fn write_v6_embedded_index_and_footer(&mut self) -> Result<()> {
+        let index_offset = self
+            .writer
+            .stream_position()
+            .wrap_err(t!("cli.common.errors.get_index_offset_failed"))?;
+
+        for wrapper in &self.entries {
+            let e = wrapper.entry;
+            let v6_entry = ArchiveIndexEntryV6 {
+                offset: e.offset,
+                bitflags: e.bitflags,
+                compression_method: e.compression_method,
+                modification_timestamp: e.modification_timestamp,
+                uid: e.uid,
+                gid: e.gid,
+                perm: e.perm,
+                checksum: e.checksum,
+                stored_checksum: wrapper.stored_checksum,
+                original_size: e.original_size,
+                compressed_size: e.compressed_size,
+                path_length: e.path_length,
+                extra_length: e.extra_length,
+                xattr_length: wrapper.xattr_length,
+                volume_number: wrapper.volume_number,
+            };
+            v6_entry
+                .write(&mut self.writer)
+                .wrap_err(t!("cli.common.errors.index_entry_write_failed"))?;
+            self.writer
+                .write_all(wrapper.path.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_path_write_failed"))?;
+            self.writer
+                .write_all(wrapper.extra.as_bytes())
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
+            let xattr_bytes = encode_xattr_blob(&wrapper.xattrs)?;
+            self.writer
+                .write_all(&xattr_bytes)
+                .wrap_err(t!("cli.common.errors.entry_extra_write_failed"))?;
+        }
+
+        ArchiveFooterV6::new(index_offset, self.entries.len() as u32)
+            .write(&mut self.writer)
+            .wrap_err(t!("cli.common.errors.footer_write_failed"))?;
+        Ok(())
+    }
+
+    fn patch_total_volumes(&self, total_volumes: u16) -> Result<()> {
+        if self.target_version != FormatVersion::V6 {
+            return Ok(());
+        }
+        for path in &self.volume_paths {
+            let mut file = File::options()
+                .read(true)
+                .write(true)
+                .open(path)
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_patch_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+            file.seek(std::io::SeekFrom::Start(15)).wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.volume_header_seek_failed",
+                    file = path.display().to_string()
+                )
+                .to_string()
+            })?;
+            file.write_all(&total_volumes.to_le_bytes())
+                .wrap_err_with(|| {
+                    t!(
+                        "cli.common.errors.volume_header_patch_failed",
+                        file = path.display().to_string()
+                    )
+                    .to_string()
+                })?;
+            file.flush().wrap_err_with(|| {
+                t!(
+                    "cli.common.errors.volume_header_flush_failed",
+                    file = path.display().to_string()
+                )
+                .to_string()
+            })?;
+        }
+        Ok(())
+    }
+
     /// Finalise the archive by writing all index entries and the footer, then flushing.
     ///
     /// Must be called exactly once after all files have been added.
@@ -294,6 +698,13 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     ///
     /// Returns an error if any index entry, the footer, or the flush fails due to an I/O error.
     pub fn build(&mut self) -> Result<()> {
+        match self.target_version {
+            FormatVersion::V5 => self.build_v5(),
+            FormatVersion::V6 => self.build_v6(),
+        }
+    }
+
+    fn build_v5(&mut self) -> Result<()> {
         // Record where the index section begins
         let index_offset =
             self.writer
@@ -326,6 +737,37 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
         Ok(())
     }
 
+    /// Finalise a v6 archive: write `ArchiveIndexEntryV6` structs for all entries,
+    /// then an `ArchiveFooterV6` with a u64 index offset, then flush.
+    /// If an external [`crate::index_writer::IndexWriter`] was attached via
+    /// [`Self::set_index_writer`], all entries are also written there and the
+    /// writer is finalised.
+    fn build_v6(&mut self) -> Result<()> {
+        self.write_v6_embedded_index_and_footer()?;
+        self.writer
+            .flush()
+            .wrap_err(t!("cli.common.errors.flush_archive_failed"))?;
+
+        // Write external index file if one was attached.
+        let iw_opt = self.index_writer.take();
+        if let Some(mut iw) = iw_opt {
+            iw.set_total_volumes(self.current_volume + 1)?;
+            for wrapper in &self.entries {
+                iw.write_entry(wrapper)
+                    .wrap_err(t!("cli.common.errors.external_index_entry_write_failed"))?;
+            }
+            iw.finish()
+                .wrap_err(t!("cli.common.errors.external_index_finish_failed"))?;
+        }
+
+        self.patch_total_volumes(self.current_volume + 1)?;
+        for path in &self.volume_paths {
+            write_b3_sidecar(path)?;
+        }
+
+        Ok(())
+    }
+
     /// Consume the builder and return the underlying writer.
     ///
     /// Useful when the writer is a `Cursor<Vec<u8>>` and the caller needs to
@@ -334,6 +776,23 @@ impl<W: Write + Seek> ArchiveBuilder<W> {
     pub fn into_inner(self) -> W {
         self.writer
     }
+}
+
+fn decode_inode_identity(xattrs: &[XattrPair]) -> Option<(u64, u64)> {
+    let mut device = None;
+    let mut inode = None;
+    for (name, value) in xattrs {
+        if value.len() != 8 {
+            continue;
+        }
+        let decoded = u64::from_le_bytes(value.as_slice().try_into().ok()?);
+        if name == crate::xattrs::SYNTHETIC_DEVICE {
+            device = Some(decoded);
+        } else if name == crate::xattrs::SYNTHETIC_INODE {
+            inode = Some(decoded);
+        }
+    }
+    Some((device?, inode?))
 }
 
 #[cfg(test)]
@@ -348,7 +807,11 @@ mod tests {
     /// Write a minimal archive (header + one real file + footer) and return the bytes.
     fn build_archive_with_file(path: &std::path::Path) -> Vec<u8> {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder
             .add_file(&path.to_path_buf(), &path.display().to_string())
@@ -360,7 +823,11 @@ mod tests {
     #[test]
     fn test_header_signature_and_version() {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         let data = builder.writer.into_inner();
 
@@ -396,7 +863,11 @@ mod tests {
         std::fs::write(&f2, b"fn main() {}").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -519,7 +990,11 @@ mod tests {
         std::fs::write(&f2, b"same-content").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -558,7 +1033,11 @@ mod tests {
         std::fs::write(&f2, b"content-b").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, &f1.display().to_string()).unwrap();
         builder.add_file(&f2, &f2.display().to_string()).unwrap();
@@ -591,7 +1070,11 @@ mod tests {
     #[test]
     fn test_import_existing_entries_seeds_dedup_map() {
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
 
         let checksum = blake3::hash(b"hello world");
         let mut checksum_bytes = [0u8; 32];
@@ -677,7 +1160,11 @@ mod tests {
         std::fs::write(&f1, b"first").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Error);
         builder.write_header().unwrap();
         builder.add_file(&f1, "file.txt").unwrap();
@@ -697,7 +1184,11 @@ mod tests {
         std::fs::write(&f2, b"second").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Rename);
         builder.write_header().unwrap();
         builder.add_file(&f1, "assets/logo.png").unwrap();
@@ -723,7 +1214,11 @@ mod tests {
         std::fs::write(&f2, b"second").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Overwrite);
         builder.write_header().unwrap();
         builder.add_file(&f1, "config.toml").unwrap();
@@ -748,7 +1243,11 @@ mod tests {
         std::fs::write(&f, b"hello").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         assert!(!builder.path_exists("data.txt"));
         builder.add_file(&f, "data.txt").unwrap();
@@ -767,7 +1266,11 @@ mod tests {
         std::fs::write(&f_new, b"replaced = true").unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.set_conflict_mode(ConflictMode::Overwrite);
         builder.write_header().unwrap();
         // Add original "config.toml"
@@ -815,7 +1318,11 @@ mod tests {
         std::fs::write(&f3, content).unwrap();
 
         let buffer = Cursor::new(Vec::new());
-        let mut builder = ArchiveBuilder::with_config(buffer, PipelineConfig::default());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V5,
+        );
         builder.write_header().unwrap();
         builder.add_file(&f1, "copy1.bin").unwrap();
         builder.add_file(&f2, "copy2.bin").unwrap();
@@ -893,7 +1400,11 @@ mod tests {
         let archive_path = dir.path().join("triple_dedup.dar");
         {
             let file_handle = File::create(&archive_path).unwrap();
-            let mut builder = ArchiveBuilder::with_config(file_handle, PipelineConfig::default());
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig::default(),
+                crate::format_version::FormatVersion::V5,
+            );
             builder.write_header().unwrap();
             builder.add_file(&f1, "a.txt").unwrap();
             builder.add_file(&f2, "b.txt").unwrap();
@@ -913,5 +1424,229 @@ mod tests {
         assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), content);
         assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), content);
         assert_eq!(std::fs::read(dest.join("c.txt")).unwrap(), content);
+    }
+
+    // ── Phase 1 — v6 format tests ────────────────────────────────────────────
+
+    /// Build a minimal v6 archive (header + one file + footer) and return the bytes.
+    fn build_v6_archive_with_file(path: &std::path::Path) -> Vec<u8> {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V6,
+        );
+        builder.write_header().unwrap();
+        builder
+            .add_file(&path.to_path_buf(), &path.display().to_string())
+            .unwrap();
+        builder.build().unwrap();
+        builder.writer.into_inner()
+    }
+
+    #[test]
+    fn test_v6_header_signature_and_version() {
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V6,
+        );
+        builder.write_header().unwrap();
+        let data = builder.writer.into_inner();
+
+        assert_eq!(&data[0..4], b"DARI", "v6 signature mismatch");
+        assert_eq!(data[4], 6, "v6 version byte mismatch");
+        // volume_number and total_volumes at bytes 13..17
+        let volume_number = u16::from_le_bytes(data[13..15].try_into().unwrap());
+        let total_volumes = u16::from_le_bytes(data[15..17].try_into().unwrap());
+        assert_eq!(volume_number, 0, "volume_number should default to 0");
+        assert_eq!(total_volumes, 1, "total_volumes should default to 1");
+        assert!(data.len() >= std::mem::size_of::<crate::models::archive::ArchiveHeaderV6>());
+    }
+
+    #[test]
+    fn test_v6_footer_signature_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("hello.txt");
+        std::fs::write(&file_path, b"hello world").unwrap();
+
+        let data = build_v6_archive_with_file(&file_path);
+
+        let footer_offset =
+            data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        assert_eq!(
+            &data[footer_offset..footer_offset + 7],
+            b"DARIEND",
+            "v6 footer signature mismatch"
+        );
+    }
+
+    #[test]
+    fn test_v6_footer_uses_u64_index_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.txt");
+        std::fs::write(&file_path, b"some data").unwrap();
+
+        let data = build_v6_archive_with_file(&file_path);
+
+        let footer_base =
+            data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        // In v6 footer: sig(7) + index_offset(8 as u64) + amount_of_files(4)
+        let index_offset = read_bytes_as::<u64>(&data, footer_base + 7).unwrap();
+        assert!(
+            index_offset > 17, // must be past the 17-byte v6 header
+            "v6 index_offset ({index_offset}) must be past the v6 header"
+        );
+    }
+
+    #[test]
+    fn test_v6_footer_file_count_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, b"aaa").unwrap();
+        std::fs::write(&f2, b"fn main() {}").unwrap();
+
+        let buffer = Cursor::new(Vec::new());
+        let mut builder = ArchiveBuilder::with_version(
+            buffer,
+            PipelineConfig::default(),
+            crate::format_version::FormatVersion::V6,
+        );
+        builder.write_header().unwrap();
+        builder.add_file(&f1, &f1.display().to_string()).unwrap();
+        builder.add_file(&f2, &f2.display().to_string()).unwrap();
+        builder.build().unwrap();
+        let data = builder.writer.into_inner();
+
+        let footer_base =
+            data.len() - std::mem::size_of::<crate::models::archive::ArchiveFooterV6>();
+        // v6 footer: sig(7) + index_offset(8) = 15, then amount_of_files(4)
+        let file_count = read_bytes_as::<u32>(&data, footer_base + 15).unwrap();
+        assert_eq!(file_count, 2, "v6 footer file count should be 2");
+    }
+
+    #[test]
+    fn test_v6_round_trip_extract() {
+        use crate::extractor::extract_entries;
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"hello from v6 format";
+        let f1 = dir.path().join("a.txt");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+
+        let archive_path = dir.path().join("v6_test.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig::default(),
+                crate::format_version::FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&f1, "a.txt").unwrap();
+            builder.add_file(&f2, "b.rs").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut f = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut f, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 2);
+        assert_eq!(
+            state.header.version, 6,
+            "loaded archive should report version 6"
+        );
+
+        let dest = dir.path().join("out_v6");
+        let refs: Vec<_> = state.entries.iter().collect();
+        extract_entries(&archive_path, &refs, &state.entries, &dest, None).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), content);
+        assert_eq!(std::fs::read(dest.join("b.rs")).unwrap(), content);
+    }
+
+    #[test]
+    fn test_v6_stored_checksum_is_populated() {
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"content for stored checksum test";
+        let f = dir.path().join("data.txt");
+        std::fs::write(&f, content).unwrap();
+
+        let archive_path = dir.path().join("stored_ck.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig::default(),
+                crate::format_version::FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&f, "data.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut fh = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 1);
+
+        let wrapper = &state.entries[0];
+        // stored_checksum_v6 must be Some (non-zero) for a v6 entry with actual content.
+        assert!(
+            wrapper.stored_checksum_v6().is_some(),
+            "v6 entry must carry a non-zero stored_checksum"
+        );
+    }
+
+    #[test]
+    fn test_v6_dedup_stored_checksum_propagated_to_linked_entry() {
+        use crate::i18n::Locale;
+        use crate::reader::load_archive;
+        use std::fs::File;
+
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"deduped content";
+        let f1 = dir.path().join("copy1.txt");
+        let f2 = dir.path().join("copy2.txt");
+        std::fs::write(&f1, content).unwrap();
+        std::fs::write(&f2, content).unwrap();
+
+        let archive_path = dir.path().join("dedup_v6.dar");
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig::default(),
+                crate::format_version::FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&f1, "copy1.txt").unwrap();
+            builder.add_file(&f2, "copy2.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let locale = Locale::new("en");
+        let mut fh = File::open(&archive_path).unwrap();
+        let state = load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(state.entries.len(), 2);
+
+        let primary = &state.entries[0];
+        let linked = &state.entries[1];
+        // Both entries should carry the same stored_checksum.
+        assert_eq!(
+            primary.stored_checksum, linked.stored_checksum,
+            "linked v6 entry must inherit primary's stored_checksum"
+        );
     }
 }

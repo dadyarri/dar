@@ -6,7 +6,7 @@
 /// The archive is built entirely in-memory — no filesystem I/O occurs during
 /// setup.  The benchmark loop creates a fresh `Cursor<&[u8]>` (O(1), no copy)
 /// rather than cloning the archive bytes on every iteration.
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use dari::{
     archive_builder::ArchiveBuilder,
     file_reader::PreparedFile,
@@ -27,6 +27,8 @@ fn build_large_archive() -> Vec<u8> {
     let config = PipelineConfig {
         compress_images: false,
         encryption_passphrase: None,
+        chunked_encryption: false,
+        preserve_xattrs: false,
     };
     let pipeline = CompressionPipeline::new(config.clone());
     let cursor = Cursor::new(Vec::<u8>::new());
@@ -37,10 +39,7 @@ fn build_large_archive() -> Vec<u8> {
     for i in 0..1_000u32 {
         let archive_name = format!("dir_{}/file_{}.txt", i / 100, i);
         let pipeline_result = pipeline
-            .process_file(
-                std::path::Path::new("entry.txt"),
-                content.clone(),
-            )
+            .process_file(std::path::Path::new("entry.txt"), content.clone())
             .unwrap();
         let prepared = PreparedFile {
             archive_path: archive_name,
@@ -49,6 +48,8 @@ fn build_large_archive() -> Vec<u8> {
             uid: 1000,
             gid: 1000,
             perm: 644,
+            xattrs: vec![],
+            device_inode: None,
         };
         builder.commit_prepared(prepared).unwrap();
     }

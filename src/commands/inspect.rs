@@ -11,7 +11,7 @@ use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use ratatui::widgets::TableState;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let file_path = matches.get_one::<String>("file").ok_or_else(|| {
@@ -21,6 +21,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         ))
     })?;
     let passphrase = matches.get_one::<String>("encrypt-passphrase").cloned();
+    let no_index = matches.get_flag("no-index");
 
     let mut file = File::open(file_path).wrap_err_with(|| {
         rust_i18n::t!(
@@ -31,9 +32,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .to_string()
     })?;
 
-    let archive_state = reader::load_archive(&mut file, file_path, locale)?;
+    let archive_state =
+        reader::load_with_auto_index(&mut file, Path::new(file_path), no_index, locale)?;
 
-    let tree_root = tree::build_tree(&archive_state.entries);
+    let archive_timestamp = archive_state.header.timestamp;
+    let tree_root = tree::build_tree(&archive_state.entries, archive_timestamp);
     let visible = tree::flatten_visible(&tree_root);
 
     let mut table_state = TableState::default();
@@ -43,6 +46,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let app_state = AppState {
         archive_path: PathBuf::from(file_path),
+        archive_timestamp,
         entries: archive_state.entries,
         passphrase,
         locale: locale.clone(),

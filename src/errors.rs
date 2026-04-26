@@ -27,7 +27,7 @@ pub enum DariError {
     PathConflict { existing: String },
     /// The archive was written with a format version that this binary does not
     /// understand.
-    UnsupportedVersion { found: u8, expected: u8 },
+    UnsupportedVersion { found: u8, max_supported: u8 },
 }
 
 impl std::fmt::Display for DariError {
@@ -41,9 +41,12 @@ impl std::fmt::Display for DariError {
                     "path conflict: '{existing}' already exists in the archive"
                 )
             }
-            DariError::UnsupportedVersion { found, expected } => write!(
+            DariError::UnsupportedVersion {
+                found,
+                max_supported,
+            } => write!(
                 f,
-                "unsupported archive version: found {found}, expected {expected}"
+                "unsupported archive version: found {found}, max supported {max_supported}"
             ),
         }
     }
@@ -81,7 +84,7 @@ mod tests {
     fn test_unsupported_version_display() {
         let e = DariError::UnsupportedVersion {
             found: 6,
-            expected: 5,
+            max_supported: 5,
         };
         let msg = e.to_string();
         assert!(msg.contains("6"));

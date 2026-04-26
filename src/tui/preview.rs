@@ -22,6 +22,7 @@ const ENCRYPTION_KEYS: &[&str] = &[
     extra_keys::ENC_ALGO,
     extra_keys::ENC_NONCE,
     extra_keys::ENC_TAG,
+    extra_keys::ENC_SEGMENTS,
 ];
 
 /// Mapping of short extra-field keys to their `rust_i18n` key paths.
@@ -59,6 +60,8 @@ pub struct EntryMetadata {
 
 /// The decoded file content, or a reason it cannot be displayed.
 pub enum PreviewContent {
+    /// Stored bytes failed the v6 `stored_checksum` integrity check.
+    StoredChecksumMismatch,
     /// Entry is encrypted; no passphrase was supplied on the CLI.
     EncryptedNoPassphrase,
     /// Entry is encrypted; the supplied passphrase did not decrypt successfully.
@@ -81,10 +84,23 @@ pub enum PreviewContent {
     Binary,
 }
 
+/// Integrity state of the stored bytes read for a preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewIntegrity {
+    /// No v6 stored checksum was present, or preview I/O failed before the
+    /// check could be performed.
+    NotChecked,
+    /// Stored bytes matched the v6 `stored_checksum`.
+    Verified,
+    /// Stored bytes did not match the v6 `stored_checksum`.
+    Mismatch,
+}
+
 /// Complete preview for one archive entry.
 pub struct EntryPreview {
     pub metadata: EntryMetadata,
     pub content: PreviewContent,
+    pub integrity: PreviewIntegrity,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,24 +122,44 @@ pub fn build_preview(
     let metadata = build_metadata(entry, locale);
     let encrypted = is_entry_encrypted(&entry.extra);
 
-    let content = match read_raw_entry_bytes(archive_path, entry, all_entries) {
-        None => PreviewContent::Binary,
+    let (content, integrity) = match read_raw_entry_bytes(archive_path, entry, all_entries) {
+        None => (PreviewContent::Binary, PreviewIntegrity::NotChecked),
         Some(raw) => {
-            if encrypted {
+            let integrity = match entry.stored_checksum_v6() {
+                Some(expected) if blake3::hash(&raw).as_bytes() == expected => {
+                    PreviewIntegrity::Verified
+                }
+                Some(_) => PreviewIntegrity::Mismatch,
+                None => PreviewIntegrity::NotChecked,
+            };
+
+            if integrity == PreviewIntegrity::Mismatch {
+                (PreviewContent::StoredChecksumMismatch, integrity)
+            } else if encrypted {
                 match passphrase {
-                    None => PreviewContent::EncryptedNoPassphrase,
-                    Some(pass) => match try_decrypt_bytes(&raw, &entry.entry.checksum, pass) {
-                        None => PreviewContent::EncryptedWrongPassphrase,
-                        Some(decrypted) => decode_content(entry, &decrypted),
+                    None => (PreviewContent::EncryptedNoPassphrase, integrity),
+                    Some(pass) => match try_decrypt_bytes(
+                        &raw,
+                        &entry.entry.checksum,
+                        entry.entry.bitflags,
+                        &entry.extra,
+                        pass,
+                    ) {
+                        None => (PreviewContent::EncryptedWrongPassphrase, integrity),
+                        Some(decrypted) => (decode_content(entry, &decrypted), integrity),
                     },
                 }
             } else {
-                decode_content(entry, &raw)
+                (decode_content(entry, &raw), integrity)
             }
         }
     };
 
-    EntryPreview { metadata, content }
+    EntryPreview {
+        metadata,
+        content,
+        integrity,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +323,12 @@ fn try_highlight(text: &str, extension: &str) -> Option<Vec<ratatui::text::Line<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        archive_builder::ArchiveBuilder, format_version::FormatVersion, pipeline::PipelineConfig,
+        test_utils::build_v6_archive,
+    };
+    use std::{fs, io::BufWriter};
+    use tempfile::tempdir;
 
     // ------------------------------------------------------------------
     // classify_bytes — binary detection
@@ -295,7 +337,10 @@ mod tests {
     #[test]
     fn null_byte_is_binary() {
         let bytes = b"hello\x00world";
-        assert!(matches!(classify_bytes(bytes, "txt"), PreviewContent::Binary));
+        assert!(matches!(
+            classify_bytes(bytes, "txt"),
+            PreviewContent::Binary
+        ));
     }
 
     #[test]
@@ -303,7 +348,10 @@ mod tests {
         // > 10 % control bytes (0x01-0x08, 0x0E-0x1F)
         let mut bytes = vec![0x01u8; 20];
         bytes.extend_from_slice(b"normal text here");
-        assert!(matches!(classify_bytes(&bytes, "txt"), PreviewContent::Binary));
+        assert!(matches!(
+            classify_bytes(&bytes, "txt"),
+            PreviewContent::Binary
+        ));
     }
 
     #[test]
@@ -312,7 +360,13 @@ mod tests {
         // Extension "unknownext" has no syntect syntax, so it falls back to Text.
         let result = classify_bytes(b"", "unknownext");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "expected Text for empty bytes"
         );
     }
@@ -326,7 +380,13 @@ mod tests {
         let bytes = b"Hello, world!\n";
         let result = classify_bytes(bytes, "unknownext");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "unexpected variant"
         );
     }
@@ -337,7 +397,13 @@ mod tests {
         let result = classify_bytes(code, "rs");
         // syntect knows Rust — should return HighlightedText.
         assert!(
-            matches!(result, PreviewContent::HighlightedText { encoding: "UTF-8", .. }),
+            matches!(
+                result,
+                PreviewContent::HighlightedText {
+                    encoding: "UTF-8",
+                    ..
+                }
+            ),
             "expected HighlightedText for .rs extension"
         );
     }
@@ -375,7 +441,13 @@ mod tests {
         let bytes: &[u8] = &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
         let result = classify_bytes(bytes, "txt");
         assert!(
-            matches!(result, PreviewContent::Text { encoding: "Windows-1251", .. }),
+            matches!(
+                result,
+                PreviewContent::Text {
+                    encoding: "Windows-1251",
+                    ..
+                }
+            ),
             "expected Windows-1251 text"
         );
     }
@@ -392,8 +464,11 @@ mod tests {
         use bytemuck::Zeroable;
 
         let extra = format!("{}=algo", extra_keys::ENC_ALGO);
-        let wrapper =
-            ArchiveIndexEntryWrapper::new(ArchiveIndexEntry::zeroed(), "file.txt".to_string(), extra);
+        let wrapper = ArchiveIndexEntryWrapper::new(
+            ArchiveIndexEntry::zeroed(),
+            "file.txt".to_string(),
+            extra,
+        );
 
         // Pass `None` as passphrase; with no data to read the raw bytes will be
         // `None` → Binary, but since encrypted flag is set and passphrase is None
@@ -401,5 +476,59 @@ mod tests {
         // We can't easily call build_preview without a real archive file, so test
         // the logical path via the is_entry_encrypted helper directly.
         assert!(crate::extra::is_entry_encrypted(&wrapper.extra));
+    }
+
+    #[test]
+    fn build_preview_marks_v6_entry_as_integrity_verified() {
+        let dir = tempdir().unwrap();
+        let archive = build_v6_archive(&dir, "ok.dar", &[("alpha.txt", b"alpha")]);
+        let mut fh = fs::File::open(&archive).unwrap();
+        let locale = crate::i18n::Locale::new("en");
+        let state =
+            crate::reader::load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
+        let entry = &state.entries[0];
+
+        let preview = build_preview(&archive, entry, &state.entries, None, "en");
+
+        assert_eq!(preview.integrity, PreviewIntegrity::Verified);
+        assert!(!matches!(
+            preview.content,
+            PreviewContent::StoredChecksumMismatch
+        ));
+    }
+
+    #[test]
+    fn build_preview_surfaces_stored_checksum_mismatch() {
+        let dir = tempdir().unwrap();
+        let archive_path = dir.path().join("bad.dar");
+        let file_handle = fs::File::create(&archive_path).unwrap();
+        let mut builder = ArchiveBuilder::with_version(
+            BufWriter::new(file_handle),
+            PipelineConfig::default(),
+            FormatVersion::V6,
+        );
+        builder.write_header().unwrap();
+        let source = dir.path().join("hello.txt");
+        fs::write(&source, b"hello world").unwrap();
+        builder.add_file(&source, "hello.txt").unwrap();
+        builder.build().unwrap();
+
+        let mut raw = fs::read(&archive_path).unwrap();
+        raw[17] ^= 0x01;
+        fs::write(&archive_path, raw).unwrap();
+
+        let mut fh = fs::File::open(&archive_path).unwrap();
+        let locale = crate::i18n::Locale::new("en");
+        let state =
+            crate::reader::load_archive(&mut fh, archive_path.to_str().unwrap(), &locale).unwrap();
+        let entry = &state.entries[0];
+
+        let preview = build_preview(&archive_path, entry, &state.entries, None, "en");
+
+        assert_eq!(preview.integrity, PreviewIntegrity::Mismatch);
+        assert!(matches!(
+            preview.content,
+            PreviewContent::StoredChecksumMismatch
+        ));
     }
 }

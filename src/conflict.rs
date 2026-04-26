@@ -21,10 +21,12 @@ pub enum ConflictMode {
 ///
 /// # Examples
 ///
-/// ```no_run
-/// # use std::collections::HashSet;
-/// let set: HashSet<String> = ["a.txt".to_string()].into();
-/// // make_renamed_path("a.txt", &set) == "a-1.txt"
+/// ```
+/// use dari::conflict::make_renamed_path;
+/// use std::collections::HashSet;
+///
+/// let set: HashSet<String> = ["a.txt".to_string()].into_iter().collect();
+/// assert_eq!(make_renamed_path("a.txt", &set), "a-1.txt");
 /// ```
 #[must_use]
 pub fn make_renamed_path(path: &str, path_set: &HashSet<String>) -> String {

@@ -14,6 +14,19 @@ pub fn nonce_from_checksum(checksum: &[u8; 32]) -> [u8; crypto::NONCE_LEN] {
     nonce
 }
 
+/// Derive a per-segment nonce by XOR-ing the base nonce with the segment index.
+pub fn nonce_for_segment(
+    base_nonce: &[u8; crypto::NONCE_LEN],
+    segment_index: u64,
+) -> [u8; crypto::NONCE_LEN] {
+    let mut nonce = *base_nonce;
+    let counter = segment_index.to_le_bytes();
+    for (idx, byte) in counter.iter().enumerate() {
+        nonce[idx] ^= *byte;
+    }
+    nonce
+}
+
 pub fn resolve_encryption_passphrase(
     matches: &ArgMatches,
     locale: &Locale,
@@ -47,8 +60,9 @@ pub fn resolve_encryption_passphrase(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_encryption_passphrase;
+    use super::{nonce_for_segment, resolve_encryption_passphrase};
     use crate::cli::build_cli_with_translator;
+    use crate::constants::crypto;
     use crate::i18n::Locale;
 
     fn parse(args: &[&str]) -> clap::ArgMatches {
@@ -82,5 +96,16 @@ mod tests {
         let locale = Locale::new("en");
         let result = resolve_encryption_passphrase(&matches, &locale).unwrap();
         assert_eq!(result, Some("secret".to_string()));
+    }
+
+    #[test]
+    fn test_nonce_for_segment_xors_le_counter_into_prefix() {
+        let base = [0xAA; crypto::NONCE_LEN];
+        let derived = nonce_for_segment(&base, 0x0102_0304_0506_0708);
+        assert_eq!(
+            derived[..8],
+            [0xA2, 0xAD, 0xAC, 0xAF, 0xAE, 0xA9, 0xA8, 0xAB]
+        );
+        assert_eq!(derived[8..], [0xAA; 4]);
     }
 }

@@ -182,6 +182,7 @@ pub(crate) fn build_metadata_rows_data(
     locale: &str,
 ) -> Vec<MetadataRow> {
     let encoding_opt = match content {
+        PreviewContent::StoredChecksumMismatch => None,
         PreviewContent::Text { encoding, .. } => Some(*encoding),
         PreviewContent::HighlightedText { encoding, .. } => Some(*encoding),
         _ => None,
@@ -195,8 +196,7 @@ pub(crate) fn build_metadata_rows_data(
         rust_i18n::t!("tui.inspect.preview.label_checksum", locale = locale).into_owned();
 
     let size_row: (String, String) = if meta.compressed_size == 0 {
-        let label =
-            rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
+        let label = rust_i18n::t!("tui.inspect.preview.label_stored", locale = locale).into_owned();
         (label, human_size(meta.original_size))
     } else {
         let label =
@@ -345,6 +345,23 @@ pub(crate) fn render_content_panel(
     let mut lines: Vec<Line> = Vec::new();
 
     match &entry_preview.content {
+        PreviewContent::StoredChecksumMismatch => {
+            let msg = rust_i18n::t!(
+                "tui.inspect.preview.stored_checksum_mismatch",
+                locale = locale
+            );
+            let hint = rust_i18n::t!("tui.inspect.preview.stored_checksum_hint", locale = locale);
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  {}", msg),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  {}", hint),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         PreviewContent::EncryptedNoPassphrase => {
             let msg = rust_i18n::t!("tui.inspect.preview.encrypted_no_pass", locale = locale);
             let hint = rust_i18n::t!("tui.inspect.preview.encrypted_hint", locale = locale);
@@ -538,5 +555,12 @@ mod tests {
         let rows = build_metadata_rows_data(&meta, &PreviewContent::Binary, "en");
         // Checksum row (index 3) should have is_dim = true.
         assert!(rows[3].2, "expected checksum row to be dimmed");
+    }
+
+    #[test]
+    fn metadata_rows_checksum_mismatch_has_no_encoding() {
+        let meta = make_meta(100, 0);
+        let rows = build_metadata_rows_data(&meta, &PreviewContent::StoredChecksumMismatch, "en");
+        assert_eq!(rows.len(), 4);
     }
 }

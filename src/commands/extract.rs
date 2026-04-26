@@ -1,6 +1,6 @@
 use crate::extractor::{extract_entries, extract_entry};
 use crate::i18n::Locale;
-use crate::reader::load_archive;
+use crate::reader::load_with_auto_index;
 use clap::ArgMatches;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
@@ -36,6 +36,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .get_many::<String>("paths")
         .map(|v| v.map(|s| s.as_str()).collect());
 
+    let no_index = matches.get_flag("no-index");
+
     let mut file_handle = File::open(file).wrap_err_with(|| {
         t!(
             "cli.extract.errors.open_failed",
@@ -45,7 +47,7 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         .to_string()
     })?;
 
-    let archive_state = load_archive(&mut file_handle, file, locale)?;
+    let archive_state = load_with_auto_index(&mut file_handle, Path::new(file), no_index, locale)?;
     let created_at = archive_state.header.timestamp;
 
     println!(
@@ -121,6 +123,11 @@ mod tests {
                     Arg::new("encrypt-passphrase")
                         .long("encrypt-passphrase")
                         .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("no-index")
+                        .long("no-index")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(Arg::new("paths").num_args(0..).action(ArgAction::Append)),
         );

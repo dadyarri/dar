@@ -11,6 +11,14 @@ verbose = "Enables verbose output"
 content = "Files/folders to add to archive"
 help = "Shows help of the command"
 version = "Shows version information"
+no_index = "Bypass auto-discovery of the external .dari index file and read the embedded index instead"
+
+[cli.common.warnings]
+stale_index = "external index is stale (timestamps differ); re-run 'dari reindex -f %{file}' or pass --no-index to skip"
+
+[cli.common.flags]
+format_version = "target archive format version (5 or 6, default 6)"
+format_version_auto = "format version forced to %{v} because %{reason} requires it"
 
 [cli.common.headings]
 usage = "Usage"
@@ -45,6 +53,38 @@ invalid_compression_method = "Invalid value for CompressionMethod: %{value}"
 time_before_unix_epoch = "Time is set before Unix Epoch"
 encrypt_prompt_failed = "Failed to read passphrase from the terminal"
 encrypt_prompt_empty = "Passphrase cannot be empty"
+sidecar_open_volume_failed = "Failed to open archive volume %{file}"
+sidecar_read_volume_failed = "Failed to read archive volume %{file}"
+sidecar_create_failed = "Failed to create sidecar file %{file}"
+sidecar_write_failed = "Failed to write sidecar file %{file}"
+sidecar_open_failed = "Failed to open sidecar file %{file}"
+sidecar_read_failed = "Failed to read sidecar file %{file}"
+index_file_create_failed = "Failed to create external index file %{file}"
+index_file_header_write_failed = "Failed to write external index header"
+index_file_entry_write_failed = "Failed to write external index entry"
+index_file_entry_path_write_failed = "Failed to write external index entry path"
+index_file_entry_extra_write_failed = "Failed to write external index entry metadata"
+index_file_flush_before_patch_failed = "Failed to flush external index before header patch"
+index_file_total_volumes_seek_failed = "Failed to seek to total volume count in external index"
+index_file_total_volumes_patch_failed = "Failed to update total volume count in external index"
+index_file_flush_patched_header_failed = "Failed to flush patched external index header"
+index_file_seek_end_failed = "Failed to seek to the end of the external index"
+index_file_read_for_checksum_failed = "Failed to read external index for checksum calculation"
+index_file_footer_write_failed = "Failed to write external index footer"
+index_file_flush_failed = "Failed to flush external index file"
+index_checksum_mismatch = "External index integrity check failed for %{file}: BLAKE3 checksum mismatch"
+index_open_failed = "Failed to open external index file %{file}"
+split_volume_base_missing = "Split archive base path is missing"
+split_volume_opener_missing = "Split archive writer is not configured"
+volume_header_patch_failed = "Failed to update archive volume header %{file}"
+volume_header_seek_failed = "Failed to seek within archive volume header %{file}"
+volume_header_flush_failed = "Failed to flush updated archive volume header %{file}"
+external_index_entry_write_failed = "Failed to write an entry into the external index"
+external_index_finish_failed = "Failed to finalize the external index file"
+split_size_empty = "Split size must not be empty"
+split_size_invalid = "Split size is invalid"
+split_size_suffix_invalid = "Unsupported split size suffix: %{suffix}"
+shell_required = "Shell argument is required"
 seek_failed = "Failed to seek within archive %{file}"
 header_read_failed = "Failed to read archive header for %{file}"
 header_invalid = "Archive header is invalid or unsupported version"
@@ -56,6 +96,7 @@ utf8_failed = "Archive index %{field} is not valid UTF-8"
 brotli_decompression_failed = "Brotli decompression error: %{error}"
 zstd_decompression_failed = "ZStandard decompression error: %{error}"
 lzma_decompression_failed = "LZMA decompression error: %{error}"
+chunked_encryption_requires_encrypt = "--chunked-encryption requires --encrypt or --encrypt-passphrase"
 
 [cli.common.messages]
 summary = "Done: %{count} file(s), %{original} original → %{stored} stored (%{ratio}%), elapsed: %{elapsed}"
@@ -69,8 +110,11 @@ overwrite = "Overwrite existing archive file"
 compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt file data"
 encrypt_passphrase = "Encrypt file data using the provided passphrase argument"
+chunked_encryption = "Encrypt using 1 MiB authenticated segments (requires encryption; implies v6)"
+preserve_xattrs = "Preserve Unix extended attributes and hard-link metadata when writing v6 archives"
 passphrase_value = "PASSPHRASE"
 dry_run = "Preview which files would be added without writing the archive"
+split_size = "Split v6 output into numbered volumes once a volume exceeds this size (for example: 2G, 512M)"
 
 [cli.create.messages]
 creating_archive = "Creating archive %{file}"
@@ -82,6 +126,7 @@ file_exists = "File %{file} already exists"
 delete_failed = "Failed to delete file"
 create_file_failed = "Failed to create file"
 create_archive_failed = "Failed to create archive"
+index_write_failed = "Failed to create external index file for archive"
 
 [cli.append]
 about = "Appends data to existing archive"
@@ -91,6 +136,8 @@ file = "The path to the existing archive file"
 compress_images = "Losslessly optimize PNG using OxiPNG"
 encrypt = "Prompt for passphrase interactively to encrypt appended file data"
 encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+chunked_encryption = "Encrypt appended data using 1 MiB authenticated segments (requires encryption; v6 only)"
+preserve_xattrs = "Preserve Unix extended attributes and hard-link metadata for appended entries (v6 only)"
 dry_run = "Preview which files would be added without modifying the archive"
 on_conflict = "How to handle archive-relative path conflicts with existing entries: error (default), rename, overwrite"
 
@@ -115,6 +162,9 @@ append_passphrase_invalid = "Passphrase is incorrect for this encrypted archive"
 append_encryption_probe_missing = "Unable to locate encrypted data to verify passphrase"
 append_conflict_error = "Append aborted: the following path(s) already exist in the archive:\n  %{paths}"
 append_invalid_conflict_mode = "Invalid --on-conflict value '%{value}': expected 'error', 'rename', or 'overwrite'"
+version_mismatch = "cannot append: archive is format v%{found}, but --format-version %{requested} was requested; remove the flag or use a matching version"
+append_chunked_requires_v6 = "chunked encryption requires a v6 archive"
+append_preserve_xattrs_requires_v6 = "preserving xattrs requires a v6 archive"
 
 [cli.inspect]
 about = "Interactively inspect the contents of an archive"
@@ -126,6 +176,32 @@ encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
 [cli.inspect.errors]
 inspect_failed = "Failed to inspect archive"
 open_failed = "Failed to open archive %{file}"
+
+[cli.incremental]
+about = "Append only files changed since a timestamp or the base archive creation time"
+
+[cli.incremental.args]
+file = "The path to the existing archive file"
+since = "Only include files newer than this RFC 3339 timestamp or @unix-seconds value"
+compress_images = "Losslessly optimize PNG using OxiPNG"
+encrypt = "Prompt for passphrase interactively to encrypt appended file data"
+encrypt_passphrase = "Encrypt appended file data using the provided passphrase argument"
+chunked_encryption = "Encrypt appended data using 1 MiB authenticated segments (requires encryption; v6 only)"
+preserve_xattrs = "Preserve Unix extended attributes and hard-link metadata for appended entries (v6 only)"
+dry_run = "Preview which files would be added without modifying the archive"
+on_conflict = "How to handle archive-relative path conflicts with existing entries: error (default), rename, overwrite"
+
+[cli.incremental.messages]
+incrementing_archive = "Appending incremental changes into archive %{file}"
+dry_run_header = "Dry run — files that would be appended incrementally to %{file}:"
+dry_run_footer = "(dry run — no file modified)"
+no_changes = "No files newer than the incremental cutoff were found for %{file}"
+
+[cli.incremental.errors]
+incremental_failed = "Failed to perform incremental append"
+archive_missing = "Archive file %{file} does not exist"
+open_failed = "Failed to open archive %{file} for incremental append"
+since_invalid = "Invalid --since value '%{value}'; expected RFC 3339 or @unix-seconds"
 
 [cli.extract]
 about = "Extracts files from an archive"
@@ -199,6 +275,8 @@ encrypted_hint = "Pass --encrypt-passphrase to decrypt"
 wrong_passphrase = "Incorrect passphrase — preview unavailable"
 binary = "Binary file — content preview unavailable"
 truncated = "(content truncated to 1 MiB)"
+stored_checksum_mismatch = "Stored bytes are corrupted — preview blocked"
+stored_checksum_hint = "Run 'dari verify -f <archive>' to inspect integrity"
 
 [tui.inspect.preview.tags]
 imk = "Camera Make"
@@ -226,6 +304,7 @@ create_dir_failed = "Failed to create directory %{path}"
 write_failed = "Failed to write extracted file %{path}"
 data_too_short = "Encrypted data is too short to contain a valid authentication tag"
 decrypt_invalid = "Decryption failed: passphrase is incorrect or data is corrupted"
+chunked_segments_missing = "Chunked encrypted entry is missing its segment count metadata"
 
 
 
@@ -248,6 +327,28 @@ header = "Contents of %{file}:"
 
 [cli.list.errors]
 list_failed = "Failed to list archive"
+archive_missing = "Archive file %{file} does not exist"
+open_failed = "Failed to open archive %{file}"
+
+[cli.verify]
+about = "Verifies archive volumes and entry integrity"
+
+[cli.verify.args]
+file = "The path to the archive file or first split volume"
+encrypt_passphrase = "Passphrase for decrypting encrypted entries during --full verification"
+full = "Verify original file content checksums after decrypting and decompressing"
+json = "Output verification results as JSON"
+
+[cli.verify.messages]
+layer1_ok = "volume %{v}: OK (%{bytes} bytes)"
+layer1_fail = "volume %{v}: BLAKE3 MISMATCH"
+layer2_ok = "entry %{path}: stored bytes OK"
+layer2_fail = "entry %{path}: stored bytes CORRUPTED (volume %{v} offset %{off})"
+layer3_ok = "entry %{path}: content OK"
+layer3_fail = "entry %{path}: content CORRUPTED (decompressed hash mismatch)"
+
+[cli.verify.errors]
+verify_failed = "Archive verification failed"
 open_failed = "Failed to open archive %{file}"
 archive_missing = "Archive file %{file} does not exist"
 
@@ -280,3 +381,44 @@ shell = "Shell to generate completions for (bash, elvish, fish, powershell, zsh)
 
 [cli.completions.errors]
 completions_failed = "Failed to generate shell completions"
+
+[cli.reindex]
+about = "Rebuild the external index (.dari) for a v6 archive"
+
+[cli.reindex.args]
+file = "The path to the archive file"
+encrypt_passphrase = "Passphrase for decrypting entries in an encrypted archive"
+
+[cli.reindex.messages]
+reindex_done = "Index written to %{path}"
+
+[cli.reindex.errors]
+reindex_failed = "Failed to rebuild index for %{file}"
+open_failed = "Failed to open archive %{file}"
+archive_missing = "Archive file %{file} does not exist"
+v5_unsupported = "Archive %{file} is format v5; reindex only works with v6 archives"
+
+[cli.migrate]
+about = "Migrates a v5 archive to v6 without recompressing or re-encrypting data"
+
+[cli.migrate.args]
+file = "The path to the source v5 archive file"
+output = "Write the migrated v6 archive to this path (defaults to in-place replacement)"
+split_size = "Split migrated v6 output into numbered volumes once a volume exceeds this size"
+preserve_xattrs = "Accepted for roadmap compatibility; migrated v5 entries do not contain xattrs"
+
+[cli.migrate.messages]
+migrating = "Migrating %{file} to format v%{version}"
+migrate_done = "Migration complete: %{entries} entries written to %{out}"
+
+[cli.migrate.errors]
+migrate_failed = "Migration failed for %{file}"
+archive_missing = "Archive file %{file} does not exist"
+open_failed = "Failed to open archive %{file}"
+already_v6 = "%{file} is already format v6; nothing to do"
+output_exists = "Output file %{file} already exists"
+create_failed = "Failed to create migration output %{file}"
+read_entry_failed = "Failed to read stored bytes for %{path} from %{file}"
+rename_failed = "Failed to rename %{from} to %{to} during migration"
+cleanup_failed = "Failed to remove temporary backup %{file} after migration"
+split_in_place_unsupported = "In-place migration does not support --split-size; provide --output"

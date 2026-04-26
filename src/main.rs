@@ -37,6 +37,15 @@ fn main() -> Result<()> {
                 .to_string(),
             )?;
         }
+        Some(("incremental", sub_matches)) => {
+            commands::incremental::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.incremental.errors.incremental_failed",
+                    locale = locale.as_str()
+                )
+                .to_string(),
+            )?;
+        }
         Some(("extract", sub_matches)) => {
             commands::extract::call(sub_matches, &locale).wrap_err(
                 rust_i18n::t!(
@@ -67,6 +76,38 @@ fn main() -> Result<()> {
                     locale = locale.as_str()
                 )
                 .to_string(),
+            )?;
+        }
+        Some(("reindex", sub_matches)) => {
+            commands::reindex::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.reindex.errors.reindex_failed",
+                    locale = locale.as_str(),
+                    file = sub_matches
+                        .get_one::<String>("file")
+                        .map(String::as_str)
+                        .unwrap_or("")
+                )
+                .to_string(),
+            )?;
+        }
+        Some(("migrate", sub_matches)) => {
+            commands::migrate::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!(
+                    "cli.migrate.errors.migrate_failed",
+                    locale = locale.as_str(),
+                    file = sub_matches
+                        .get_one::<String>("file")
+                        .map(String::as_str)
+                        .unwrap_or("")
+                )
+                .to_string(),
+            )?;
+        }
+        Some(("verify", sub_matches)) => {
+            commands::verify::call(sub_matches, &locale).wrap_err(
+                rust_i18n::t!("cli.verify.errors.verify_failed", locale = locale.as_str())
+                    .to_string(),
             )?;
         }
         _ => unreachable!(),

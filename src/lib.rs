@@ -17,14 +17,18 @@ pub mod errors;
 pub mod extra;
 pub mod extractor;
 pub mod file_reader;
+pub mod format_version;
 pub mod i18n;
+pub mod index_writer;
 pub mod models;
 pub mod pipeline;
 pub mod reader;
+pub mod sidecar;
 pub mod traits;
 pub mod tui;
 pub mod utils;
 pub mod walker;
+pub mod xattrs;
 
 #[cfg(test)]
 pub mod integration_tests;

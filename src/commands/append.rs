@@ -4,11 +4,13 @@ use super::shared::{
 use crate::archive_builder::{ArchiveBuilder, ConflictMode, make_renamed_path};
 use crate::encryption::resolve_encryption_passphrase;
 use crate::extractor::try_decrypt_bytes;
+use crate::format_version::FormatVersion;
 use crate::i18n::Locale;
 use crate::pipeline::PipelineConfig;
 use crate::reader::{ArchiveState, EncryptedEntryProbe, load_archive};
 use crate::walker::scan_files;
 use clap::ArgMatches;
+use clap::parser::ValueSource;
 use eyre::{Context, Result, eyre};
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -37,6 +39,25 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let dry_run = matches.get_flag("dry-run");
     let compress_images = matches.get_flag("compress-images");
     let encryption_passphrase = resolve_encryption_passphrase(matches, locale)?;
+    let chunked_encryption = matches.get_flag("chunked-encryption");
+    let preserve_xattrs = matches.get_flag("preserve-xattrs");
+    if chunked_encryption && encryption_passphrase.is_none() {
+        return Err(eyre!(t!(
+            "cli.common.errors.chunked_encryption_requires_encrypt",
+            locale = locale.as_str()
+        )));
+    }
+
+    // Parse the CLI `--format-version` flag and remember if it was explicitly set.
+    let cli_format_version = match matches
+        .get_one::<String>("format-version")
+        .map(String::as_str)
+    {
+        Some("5") => FormatVersion::V5,
+        _ => FormatVersion::V6,
+    };
+    let version_explicitly_set =
+        matches.value_source("format-version") == Some(ValueSource::CommandLine);
     let content = matches.get_many::<String>("content").ok_or_else(|| {
         eyre!(t!(
             "cli.common.errors.content_required",
@@ -55,6 +76,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
     let config = PipelineConfig {
         compress_images,
         encryption_passphrase,
+        chunked_encryption,
+        preserve_xattrs,
     };
 
     // Collect all files first so we can process them in parallel.
@@ -78,6 +101,37 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         )?;
 
     let existing_archive = load_archive(&mut file_handle, file, locale)?;
+
+    // Determine the format version of the existing archive.
+    let archive_format_version =
+        FormatVersion::try_from(existing_archive.header.version).map_err(eyre::Report::new)?;
+
+    // If the user explicitly passed `--format-version` with a value that differs from
+    // the archive's own format, reject the request — mixing versions is not supported.
+    if version_explicitly_set && cli_format_version != archive_format_version {
+        return Err(eyre!(t!(
+            "cli.append.errors.version_mismatch",
+            locale = locale.as_str(),
+            found = existing_archive.header.version as u32,
+            requested = u8::from(cli_format_version) as u32
+        )));
+    }
+
+    if chunked_encryption && archive_format_version != FormatVersion::V6 {
+        return Err(eyre!(t!(
+            "cli.append.errors.append_chunked_requires_v6",
+            locale = locale.as_str()
+        )));
+    }
+    if preserve_xattrs && archive_format_version != FormatVersion::V6 {
+        return Err(eyre!(t!(
+            "cli.append.errors.append_preserve_xattrs_requires_v6",
+            locale = locale.as_str()
+        )));
+    }
+
+    // Always write using the archive's existing format version.
+    let format_version = archive_format_version;
 
     ensure_encryption_mode(
         existing_archive.encryption_mode,
@@ -103,9 +157,11 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
 
     let ArchiveState {
         entries,
+        header,
         index_offset,
         ..
     } = existing_archive;
+    let archive_timestamp = header.timestamp;
 
     // ── Dry-run short-circuit ────────────────────────────────────────────────
     if dry_run {
@@ -124,6 +180,8 @@ pub fn call(matches: &ArgMatches, locale: &Locale) -> Result<()> {
         config,
         conflict_mode,
         verbose,
+        format_version,
+        archive_timestamp,
         locale,
     )
 }
@@ -249,6 +307,8 @@ fn execute_append_write(
     config: crate::pipeline::PipelineConfig,
     conflict_mode: ConflictMode,
     verbose: bool,
+    format_version: FormatVersion,
+    archive_timestamp: u64,
     locale: &Locale,
 ) -> Result<()> {
     println!(
@@ -277,9 +337,27 @@ fn execute_append_write(
         .to_string(),
     )?;
 
-    let mut builder = ArchiveBuilder::with_config(BufWriter::new(file_handle), config);
+    let mut builder =
+        ArchiveBuilder::with_version(BufWriter::new(file_handle), config, format_version);
+    builder.set_archive_output_path(file);
     builder.set_conflict_mode(conflict_mode);
     builder.import_existing_entries(entries);
+
+    // For v6 archives, attach an external index writer so the `.dari` file is
+    // regenerated when `build()` is called.  Use the existing archive's timestamp
+    // so the index and archive stay in sync.
+    if format_version == FormatVersion::V6 {
+        let idx_path = crate::index_writer::index_path_for_archive(std::path::Path::new(file));
+        let iw = crate::index_writer::IndexWriter::new(&idx_path, archive_timestamp, 1)
+            .wrap_err_with(|| {
+                t!(
+                    "cli.create.errors.index_write_failed",
+                    locale = locale.as_str()
+                )
+                .to_string()
+            })?;
+        builder.set_index_writer(iw);
+    }
 
     let start = Instant::now();
     let mut count = 0usize;
@@ -369,7 +447,14 @@ fn verify_passphrase_matches(
         .to_string(),
     )?;
 
-    try_decrypt_bytes(&data, &probe.checksum, passphrase).ok_or_else(|| {
+    try_decrypt_bytes(
+        &data,
+        &probe.checksum,
+        probe.bitflags,
+        &probe.extra,
+        passphrase,
+    )
+    .ok_or_else(|| {
         eyre!(t!(
             "cli.append.errors.append_passphrase_invalid",
             locale = locale.as_str()
@@ -384,7 +469,7 @@ mod tests {
     use super::{ensure_encryption_mode, parse_conflict_mode, verify_passphrase_matches};
     use crate::i18n::Locale;
     use crate::reader::load_archive;
-    use crate::test_utils::build_archive;
+    use crate::test_utils::{build_archive, build_v5_archive};
     use clap::{Arg, ArgAction, Command};
     use std::fs::OpenOptions;
     use tempfile::tempdir;
@@ -415,6 +500,16 @@ mod tests {
                         .action(ArgAction::Set),
                 )
                 .arg(
+                    Arg::new("chunked-encryption")
+                        .long("chunked-encryption")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("preserve-xattrs")
+                        .long("preserve-xattrs")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("verbose")
                         .short('v')
                         .long("verbose")
@@ -424,6 +519,12 @@ mod tests {
                     Arg::new("dry-run")
                         .long("dry-run")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("format-version")
+                        .long("format-version")
+                        .action(ArgAction::Set)
+                        .default_value("6"),
                 )
                 .arg(
                     Arg::new("on-conflict")
@@ -666,5 +767,66 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // ── Phase 1 — version consistency tests ──────────────────────────────────
+
+    #[test]
+    fn test_version_mismatch_explicit_v6_on_v5_archive_returns_error() {
+        let dir = tempdir().unwrap();
+        let archive = build_v5_archive(&dir, "v5.dar", &[("file.txt", b"data")], None);
+
+        let new_file = dir.path().join("new.txt");
+        std::fs::write(&new_file, b"new data").unwrap();
+
+        // Explicitly request format-version 6 on a v5 archive — must be rejected.
+        let sub_matches = make_matches(&[
+            "-f",
+            archive.to_str().unwrap(),
+            "--format-version",
+            "6",
+            new_file.to_str().unwrap(),
+        ]);
+
+        let locale = Locale::new("en");
+        let result = super::call(&sub_matches, &locale);
+        assert!(
+            result.is_err(),
+            "explicitly requesting v6 on a v5 archive must fail"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("v5") || msg.contains("v6") || msg.contains("version"),
+            "error message should mention version: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_append_to_v5_without_explicit_version_uses_archive_version() {
+        let dir = tempdir().unwrap();
+        let archive = build_v5_archive(&dir, "v5_default.dar", &[("file.txt", b"original")], None);
+
+        let new_file = dir.path().join("new.txt");
+        std::fs::write(&new_file, b"appended content").unwrap();
+
+        // Do not specify --format-version → the archive's version (v5) is used.
+        let sub_matches =
+            make_matches(&["-f", archive.to_str().unwrap(), new_file.to_str().unwrap()]);
+
+        let locale = Locale::new("en");
+        // Should succeed and still be readable as a v5 archive.
+        super::call(&sub_matches, &locale).unwrap();
+
+        let mut fh = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&archive)
+            .unwrap();
+        let state = load_archive(&mut fh, archive.to_str().unwrap(), &locale).unwrap();
+        assert_eq!(
+            state.header.version, 5,
+            "archive should remain v5 after append"
+        );
+        assert_eq!(state.entries.len(), 2);
     }
 }

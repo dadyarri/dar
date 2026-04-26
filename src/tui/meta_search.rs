@@ -227,6 +227,7 @@ fn collect_meta_filtered(
                     display_name: child.full_path.clone(),
                     full_path: child.full_path.clone(),
                     entry_idx: child.entry_idx,
+                    incremental: child.incremental,
                     match_indices: Vec::new(),
                 });
             }
@@ -332,7 +333,7 @@ mod tests {
             make_entry_with_extra("song2.mp3", &[("aar", "Led Zeppelin")]),
             make_entry_with_extra("photo.jpg", &[("imk", "Canon")]),
         ];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
@@ -346,7 +347,7 @@ mod tests {
             make_entry_with_extra("b.mp3", &[("aar", "Beatles"), ("aal", "Help")]),
             make_entry_with_extra("c.mp3", &[("aar", "Zeppelin"), ("aal", "Abbey Road")]),
         ];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let preds = parse_meta_query("artist:beatles album:abbey", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
@@ -356,7 +357,7 @@ mod tests {
     #[test]
     fn filter_case_insensitive() {
         let entries = vec![make_entry_with_extra("x.mp3", &[("aar", "The BEATLES")])];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert_eq!(results.len(), 1);
@@ -365,7 +366,7 @@ mod tests {
     #[test]
     fn filter_no_match_returns_empty() {
         let entries = vec![make_entry_with_extra("x.mp3", &[("aar", "Zeppelin")])];
-        let root = build_tree(&entries);
+        let root = build_tree(&entries, 0);
         let preds = parse_meta_query("artist:beatles", "en").unwrap();
         let results = apply_meta_filter(&preds, &entries, &root);
         assert!(results.is_empty());

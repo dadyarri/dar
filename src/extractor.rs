@@ -1,16 +1,20 @@
 use crate::constants::crypto;
+use crate::constants::extra_keys;
 use crate::constants::flags;
+use crate::encryption::nonce_for_segment;
 use crate::encryption::nonce_from_checksum;
+use crate::extra::parse_extra_pairs;
 use crate::models::archive::ArchiveIndexEntryWrapper;
 use crate::traits::decompress_bytes;
 use crate::utils::sanitize_path;
+use crate::xattrs::{hardlink_target, restore_xattrs};
 use chacha20poly1305::aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use eyre::{Result, eyre};
 use rust_i18n::t;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Extract a single entry from an archive on disk.
 ///
@@ -27,13 +31,7 @@ pub fn extract_entry(
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
-    let mut file = File::open(archive_path).map_err(|_| {
-        eyre!(t!(
-            "cli.extractor.errors.open_failed",
-            file = archive_path.display()
-        ))
-    })?;
-    extract_one(&mut file, entry, all_entries, dest_dir, passphrase)
+    extract_one(archive_path, entry, all_entries, dest_dir, passphrase)
 }
 
 /// Extract multiple entries from an archive on disk.
@@ -54,14 +52,15 @@ pub fn extract_entries(
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
-    let mut file = File::open(archive_path).map_err(|_| {
-        eyre!(t!(
-            "cli.extractor.errors.open_failed",
-            file = archive_path.display()
-        ))
-    })?;
     for entry in entries_to_extract {
-        extract_one(&mut file, entry, all_entries, dest_dir, passphrase)?;
+        if hardlink_target(&entry.xattrs).is_none() {
+            extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
+        }
+    }
+    for entry in entries_to_extract {
+        if hardlink_target(&entry.xattrs).is_some() {
+            extract_one(archive_path, entry, all_entries, dest_dir, passphrase)?;
+        }
     }
     Ok(())
 }
@@ -71,12 +70,35 @@ pub fn extract_entries(
 // ---------------------------------------------------------------------------
 
 fn extract_one(
-    file: &mut File,
+    archive_path: &Path,
     entry: &ArchiveIndexEntryWrapper,
     all_entries: &[ArchiveIndexEntryWrapper],
     dest_dir: &Path,
     passphrase: Option<&str>,
 ) -> Result<()> {
+    let safe_path = sanitize_path(&entry.path);
+    let dest_path = dest_dir.join(&safe_path);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            eyre!(t!(
+                "cli.extractor.errors.create_dir_failed",
+                path = parent.display()
+            ))
+        })?;
+    }
+
+    if let Some(target) = hardlink_target(&entry.xattrs) {
+        let target_path = dest_dir.join(sanitize_path(target));
+        fs::hard_link(&target_path, &dest_path).map_err(|_| {
+            eyre!(t!(
+                "cli.extractor.errors.write_failed",
+                path = dest_path.display()
+            ))
+        })?;
+        restore_xattrs(&dest_path, &entry.xattrs)?;
+        return Ok(());
+    }
+
     // Copy packed fields to local variables before using them.
     let bitflags = entry.entry.bitflags;
     let checksum = entry.entry.checksum;
@@ -84,16 +106,24 @@ fn extract_one(
     let compressed_size = entry.entry.compressed_size;
 
     // Resolve the real data offset: linked entries share the primary's offset.
-    let data_offset = if bitflags & flags::LINKED_DATA != 0 {
-        resolve_primary_offset(&checksum, all_entries).ok_or_else(|| {
+    let (data_volume, data_offset) = if bitflags & flags::LINKED_DATA != 0 {
+        resolve_primary_location(&checksum, all_entries).ok_or_else(|| {
             eyre!(t!(
                 "cli.extractor.errors.no_primary_for_linked",
                 path = entry.path.as_str()
             ))
         })?
     } else {
-        entry.entry.offset
+        (entry.volume_number, entry.entry.offset)
     };
+
+    let volume_path = resolve_volume_path(archive_path, data_volume);
+    let mut file = std::fs::File::open(&volume_path).map_err(|_| {
+        eyre!(t!(
+            "cli.extractor.errors.open_failed",
+            file = volume_path.display()
+        ))
+    })?;
 
     // Seek to the data block and read all compressed bytes.
     file.seek(SeekFrom::Start(data_offset))
@@ -110,7 +140,7 @@ fn extract_one(
                 path = entry.path.as_str()
             ))
         })?;
-        decrypt_data(&raw, &checksum, pass).map_err(|e| {
+        decrypt_data(&raw, &checksum, bitflags, &entry.extra, pass).map_err(|e| {
             eyre!(t!(
                 "cli.extractor.errors.decrypt_failed",
                 path = entry.path.as_str(),
@@ -132,22 +162,13 @@ fn extract_one(
 
     // Write the recovered bytes to dest_dir / entry.path, creating dirs as needed.
     // Sanitize the stored path to prevent path traversal (strips `..`, `/`, Windows prefixes).
-    let safe_path = sanitize_path(&entry.path);
-    let dest_path = dest_dir.join(&safe_path);
-    if let Some(parent) = dest_path.parent() {
-        fs::create_dir_all(parent).map_err(|_| {
-            eyre!(t!(
-                "cli.extractor.errors.create_dir_failed",
-                path = parent.display()
-            ))
-        })?;
-    }
     fs::write(&dest_path, &plain).map_err(|_| {
         eyre!(t!(
             "cli.extractor.errors.write_failed",
             path = dest_path.display()
         ))
     })?;
+    restore_xattrs(&dest_path, &entry.xattrs)?;
 
     Ok(())
 }
@@ -157,10 +178,35 @@ pub fn resolve_primary_offset(
     checksum: &[u8; 32],
     all_entries: &[ArchiveIndexEntryWrapper],
 ) -> Option<u64> {
+    resolve_primary_location(checksum, all_entries).map(|(_, offset)| offset)
+}
+
+pub fn resolve_primary_location(
+    checksum: &[u8; 32],
+    all_entries: &[ArchiveIndexEntryWrapper],
+) -> Option<(u16, u64)> {
     all_entries
         .iter()
         .find(|e| e.entry.checksum == *checksum && (e.entry.bitflags & flags::LINKED_DATA) == 0)
-        .map(|e| e.entry.offset)
+        .map(|e| (e.volume_number, e.entry.offset))
+}
+
+pub fn resolve_volume_path(base: &Path, volume: u16) -> PathBuf {
+    let has_numeric_suffix = base
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.len() == 3 && ext.chars().all(|c| c.is_ascii_digit()));
+
+    if volume == 0 && !has_numeric_suffix {
+        return base.to_path_buf();
+    }
+
+    let root = if has_numeric_suffix {
+        base.with_extension("")
+    } else {
+        base.to_path_buf()
+    };
+    PathBuf::from(format!("{}.{:03}", root.display(), u32::from(volume) + 1))
 }
 
 /// Read the raw (compressed / possibly encrypted) bytes for `entry` from the archive on disk.
@@ -185,8 +231,8 @@ pub fn read_raw_entry_bytes(
 ) -> Option<Vec<u8>> {
     let debug = std::env::var("DARI_DEBUG").is_ok();
 
-    let offset = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
-        let primary = resolve_primary_offset(&entry.entry.checksum, all_entries);
+    let (volume, offset) = if entry.entry.bitflags & flags::LINKED_DATA != 0 {
+        let primary = resolve_primary_location(&entry.entry.checksum, all_entries);
         if primary.is_none() && debug {
             eprintln!(
                 "[dari debug] read_raw_entry_bytes: no primary entry found for linked entry '{}'",
@@ -195,16 +241,17 @@ pub fn read_raw_entry_bytes(
         }
         primary?
     } else {
-        entry.entry.offset
+        (entry.volume_number, entry.entry.offset)
     };
 
-    let mut file = match File::open(archive_path) {
+    let volume_path = resolve_volume_path(archive_path, volume);
+    let mut file = match std::fs::File::open(&volume_path) {
         Ok(f) => f,
         Err(e) => {
             if debug {
                 eprintln!(
                     "[dari debug] read_raw_entry_bytes: failed to open '{}': {e}",
-                    archive_path.display()
+                    volume_path.display()
                 );
             }
             return None;
@@ -241,15 +288,66 @@ pub fn read_raw_entry_bytes(
 /// passphrase).  Use this when only a success/failure answer is needed; `decrypt_data`
 /// wraps this for the extractor where a proper `Result` with a user-facing message
 /// is expected.
-pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Option<Vec<u8>> {
+pub fn try_decrypt_bytes(
+    data: &[u8],
+    checksum: &[u8; 32],
+    bitflags: u16,
+    extra: &str,
+    passphrase: &str,
+) -> Option<Vec<u8>> {
+    let nonce = nonce_from_checksum(checksum);
+    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
+    let cipher = ChaCha20Poly1305::new((&key).into());
+
+    if bitflags & flags::CHUNKED_ENCRYPTION != 0 {
+        let segments = parse_chunked_segment_count(extra)?;
+        let total_tag_bytes = segments.checked_mul(crypto::TAG_LEN)?;
+        if data.len() < total_tag_bytes {
+            return None;
+        }
+        let total_plain_len = data.len() - total_tag_bytes;
+        let mut remaining_plain = total_plain_len;
+        let mut cursor = 0usize;
+        let mut plaintext = Vec::with_capacity(total_plain_len);
+
+        for segment_idx in 0..segments {
+            let segment_plain_len = if segment_idx + 1 == segments {
+                remaining_plain
+            } else {
+                remaining_plain.min(crypto::SEGMENT_SIZE)
+            };
+            let next = cursor.checked_add(segment_plain_len + crypto::TAG_LEN)?;
+            if next > data.len() {
+                return None;
+            }
+
+            let mut ciphertext = data[cursor..cursor + segment_plain_len].to_vec();
+            let tag_bytes = &data[cursor + segment_plain_len..next];
+            cipher
+                .decrypt_in_place_detached(
+                    Nonce::from_slice(&nonce_for_segment(&nonce, segment_idx as u64)),
+                    b"",
+                    &mut ciphertext,
+                    Tag::from_slice(tag_bytes),
+                )
+                .ok()?;
+            plaintext.extend_from_slice(&ciphertext);
+            cursor = next;
+            remaining_plain = remaining_plain.saturating_sub(segment_plain_len);
+        }
+
+        if cursor != data.len() || remaining_plain != 0 {
+            return None;
+        }
+
+        return Some(plaintext);
+    }
+
     if data.len() < crypto::TAG_LEN {
         return None;
     }
     let tag_bytes = &data[data.len() - crypto::TAG_LEN..];
     let mut ciphertext = data[..data.len() - crypto::TAG_LEN].to_vec();
-    let nonce = nonce_from_checksum(checksum);
-    let key = blake3::derive_key("dari.v1.chacha20poly1305.key", passphrase.as_bytes());
-    let cipher = ChaCha20Poly1305::new((&key).into());
     cipher
         .decrypt_in_place_detached(
             Nonce::from_slice(&nonce),
@@ -266,12 +364,29 @@ pub fn try_decrypt_bytes(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> 
 /// The nonce is the first `crypto::NONCE_LEN` bytes of `checksum` (matching the
 /// encoding in `pipeline.rs`).  The authentication tag occupies the last
 /// `crypto::TAG_LEN` bytes of `data`; the rest is the actual ciphertext.
-fn decrypt_data(data: &[u8], checksum: &[u8; 32], passphrase: &str) -> Result<Vec<u8>> {
-    if data.len() < crypto::TAG_LEN {
+fn decrypt_data(
+    data: &[u8],
+    checksum: &[u8; 32],
+    bitflags: u16,
+    extra: &str,
+    passphrase: &str,
+) -> Result<Vec<u8>> {
+    if bitflags & flags::CHUNKED_ENCRYPTION == 0 && data.len() < crypto::TAG_LEN {
         return Err(eyre!(t!("cli.extractor.errors.data_too_short")));
     }
-    try_decrypt_bytes(data, checksum, passphrase)
+    if bitflags & flags::CHUNKED_ENCRYPTION != 0 && parse_chunked_segment_count(extra).is_none() {
+        return Err(eyre!(t!("cli.extractor.errors.chunked_segments_missing")));
+    }
+    try_decrypt_bytes(data, checksum, bitflags, extra, passphrase)
         .ok_or_else(|| eyre!(t!("cli.extractor.errors.decrypt_invalid")))
+}
+
+fn parse_chunked_segment_count(extra: &str) -> Option<usize> {
+    parse_extra_pairs(extra)
+        .into_iter()
+        .find(|(key, _)| key == extra_keys::ENC_SEGMENTS)
+        .and_then(|(_, value)| value.parse::<usize>().ok())
+        .filter(|count| *count > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +442,8 @@ mod tests {
                 PipelineConfig {
                     compress_images: false,
                     encryption_passphrase: None,
+                    chunked_encryption: false,
+                    preserve_xattrs: false,
                 },
             );
             builder.write_header().unwrap();
@@ -416,6 +533,40 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_extract_chunked_encrypted_v6_file_with_correct_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("chunked.dar");
+        let source = dir.path().join("chunked.txt");
+        let content = b"chunked payload ".repeat(100_000);
+        std::fs::write(&source, &content).unwrap();
+
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig {
+                    compress_images: false,
+                    encryption_passphrase: Some("secret".to_string()),
+                    chunked_encryption: true,
+                    preserve_xattrs: false,
+                },
+                crate::format_version::FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&source, "chunked.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let entries = load(&archive_path);
+        let dest = dir.path().join("out_chunked");
+
+        extract_entry(&archive_path, &entries[0], &entries, &dest, Some("secret")).unwrap();
+
+        let result = std::fs::read(dest.join("chunked.txt")).unwrap();
+        assert_eq!(result, content);
+    }
+
     // --- deduplication / linked data ---
 
     #[test]
@@ -458,11 +609,23 @@ mod tests {
         assert!(resolve_primary_offset(&[0u8; 32], &[]).is_none());
     }
 
+    #[test]
+    fn test_resolve_volume_path_single_file_returns_base() {
+        let path = resolve_volume_path(Path::new("/tmp/archive.dar"), 0);
+        assert_eq!(path, Path::new("/tmp/archive.dar"));
+    }
+
+    #[test]
+    fn test_resolve_volume_path_split_volume_advances_suffix() {
+        let path = resolve_volume_path(Path::new("/tmp/archive.dar.001"), 1);
+        assert_eq!(path, Path::new("/tmp/archive.dar.002"));
+    }
+
     // --- decrypt_data unit tests ---
 
     #[test]
     fn test_decrypt_data_rejects_too_short_input() {
-        let result = decrypt_data(&[0u8; 10], &[0u8; 32], "pass");
+        let result = decrypt_data(&[0u8; 10], &[0u8; 32], 0, "", "pass");
         assert!(result.is_err());
     }
 
@@ -485,6 +648,8 @@ mod tests {
             PipelineConfig {
                 compress_images: false,
                 encryption_passphrase: None,
+                chunked_encryption: false,
+                preserve_xattrs: false,
             },
         );
         builder.write_header().unwrap();
@@ -558,6 +723,83 @@ mod tests {
         assert!(
             any_file_under(&dest),
             "extracted file should land somewhere inside dest"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_extract_preserves_hardlinks_and_xattrs_for_v6() {
+        use crate::format_version::FormatVersion;
+        use crate::xattrs::hardlink_target;
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("preserve.dar");
+        let source_a = dir.path().join("source-a.txt");
+        let source_b = dir.path().join("source-b.txt");
+        std::fs::write(&source_a, b"preserved payload").unwrap();
+        std::fs::hard_link(&source_a, &source_b).unwrap();
+        xattr::set(&source_a, "user.dari.test", b"roundtrip").unwrap();
+
+        {
+            let file_handle = File::create(&archive_path).unwrap();
+            let mut builder = ArchiveBuilder::with_version(
+                file_handle,
+                PipelineConfig {
+                    compress_images: false,
+                    encryption_passphrase: None,
+                    chunked_encryption: false,
+                    preserve_xattrs: true,
+                },
+                FormatVersion::V6,
+            );
+            builder.write_header().unwrap();
+            builder.add_file(&source_a, "a.txt").unwrap();
+            builder.add_file(&source_b, "b.txt").unwrap();
+            builder.build().unwrap();
+        }
+
+        let entries = load(&archive_path);
+        assert_eq!(
+            xattr::get(dir.path().join("source-a.txt"), "user.dari.test").unwrap(),
+            Some(b"roundtrip".to_vec())
+        );
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.path == "a.txt")
+                .is_some_and(|entry| !entry.xattrs.is_empty())
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry.path == "b.txt")
+                .and_then(|entry| hardlink_target(&entry.xattrs)),
+            Some("a.txt")
+        );
+
+        let dest = dir.path().join("out_preserve");
+        let refs: Vec<&ArchiveIndexEntryWrapper> = entries.iter().collect();
+        extract_entries(&archive_path, &refs, &entries, &dest, None).unwrap();
+
+        assert_eq!(
+            std::fs::read(dest.join("a.txt")).unwrap(),
+            b"preserved payload"
+        );
+        assert_eq!(
+            std::fs::read(dest.join("b.txt")).unwrap(),
+            b"preserved payload"
+        );
+        assert_eq!(
+            xattr::get(dest.join("a.txt"), "user.dari.test").unwrap(),
+            Some(b"roundtrip".to_vec())
+        );
+        let a_meta = std::fs::metadata(dest.join("a.txt")).unwrap();
+        let b_meta = std::fs::metadata(dest.join("b.txt")).unwrap();
+        assert_eq!(
+            a_meta.ino(),
+            b_meta.ino(),
+            "extracted files should be hard-linked"
         );
     }
 }

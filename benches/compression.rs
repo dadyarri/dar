@@ -23,6 +23,8 @@ fn config() -> PipelineConfig {
     PipelineConfig {
         compress_images: false,
         encryption_passphrase: None,
+        chunked_encryption: false,
+        preserve_xattrs: false,
     }
 }
 
